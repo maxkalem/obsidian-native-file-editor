@@ -1,5 +1,5 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { bracketMatching, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
+import { bracketMatching, codeFolding, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { EditorState, type Extension } from "@codemirror/state";
 import {
@@ -13,14 +13,36 @@ import {
   lineNumbers,
   rectangularSelection,
 } from "@codemirror/view";
-import { nfeHighlighter } from "../highlight/highlighter";
+import { OBSIDIAN_SCHEME_CLASS, nfeHighlighter } from "../highlight/highlighter";
 import type { EditorFactory, EditorHandle, EditorOptions } from "./editor";
+
+/** The gutter marker: a triangle pointing down when open, right when folded. */
+function foldMarker(open: boolean): HTMLElement {
+  const span = activeDocument.createElement("span");
+  span.className = open ? "nfe-fold-marker nfe-fold-open" : "nfe-fold-marker nfe-fold-closed";
+  span.textContent = open ? "\u25BE" : "\u25B8";
+  span.title = open ? "Fold" : "Unfold";
+  return span;
+}
+
+/** What a folded range collapses to: a distinct symbol, not an ellipsis that reads as text. */
+function foldPlaceholder(view: EditorView, onclick: (event: Event) => void): HTMLElement {
+  const span = view.dom.ownerDocument.createElement("span");
+  span.className = "nfe-fold-placeholder";
+  span.textContent = "\u2194";
+  span.title = "Unfold";
+  span.setAttribute("aria-label", "folded code");
+  span.onclick = onclick;
+  return span;
+}
 
 /**
  * The plugin's own extension set on the CodeMirror core Obsidian provides.
  * Obsidian's Markdown-specific extensions are not attached, and no theme object
- * is used anywhere: the look comes from styles.css through Obsidian's
- * variables, which is what keeps every palette a plain CSS file.
+ * is used anywhere: the editor root carries Obsidian's own `cm-s-obsidian`
+ * class, so Obsidian's stylesheet and the active theme colour the tokens the
+ * way they colour a code block in a note, and styles.css adds only what
+ * Obsidian has no rule for.
  */
 export function buildExtensions(options: EditorOptions): Extension[] {
   const ext: Extension[] = [
@@ -36,6 +58,8 @@ export function buildExtensions(options: EditorOptions): Extension[] {
     highlightSelectionMatches(),
     search({ top: true }),
     syntaxHighlighting(nfeHighlighter),
+    codeFolding({ placeholderDOM: foldPlaceholder }),
+    EditorView.editorAttributes.of({ class: OBSIDIAN_SCHEME_CLASS }),
     EditorState.tabSize.of(options.tabSize),
     indentUnit.of(options.tabInsertsSpaces ? " ".repeat(options.tabSize) : "\t"),
     keymap.of([...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
@@ -44,7 +68,7 @@ export function buildExtensions(options: EditorOptions): Extension[] {
     }),
   ];
   if (options.language !== null) ext.push(options.language);
-  if (options.lineNumbers) ext.push(lineNumbers(), highlightActiveLineGutter(), foldGutter());
+  if (options.lineNumbers) ext.push(lineNumbers(), highlightActiveLineGutter(), foldGutter({ markerDOM: foldMarker }));
   if (options.wordWrap) ext.push(EditorView.lineWrapping);
   if (options.readOnly) ext.push(EditorState.readOnly.of(true), EditorView.editable.of(false));
   return ext;

@@ -13,10 +13,11 @@ import {
   mockView,
 } from "./mocks/obsidian";
 import type { Timers } from "../src/core/autosave";
+import { Logger } from "../src/core/log";
 import type { Transport } from "../src/platform/transport";
 import { DeviceLocalStore } from "../src/settings/DeviceLocalStore";
 import { DEFAULT_SETTINGS, type SharedSettings } from "../src/settings/settings";
-import { TextView } from "../src/ui/TextView";
+import { TextView, longestLineLength } from "../src/ui/TextView";
 import type { EditorFactory, EditorHandle, EditorOptions } from "../src/ui/editor";
 
 /**
@@ -112,6 +113,7 @@ function harness(overrides: Partial<SharedSettings> = {}) {
   };
   let now = 100_000;
   let settings: SharedSettings = { ...DEFAULT_SETTINGS, ...overrides };
+  const log = new Logger({ sink: null, timers, now: () => now });
   const view = mockView(
     new TextView(leaf as never, {
       settings: () => settings,
@@ -120,10 +122,13 @@ function harness(overrides: Partial<SharedSettings> = {}) {
       editorFactory: factory,
       timers,
       now: () => now,
+      log,
     })
   );
   return {
     view,
+    log,
+    factory,
     vault,
     transport,
     timers,
@@ -327,13 +332,81 @@ describe("TextView", () => {
     expect(h.lastEditor().options.language).toBeNull();
   });
 
+  it("a minified single-line file previews as plain text whatever its size, and the preview carries Obsidian's scheme class", async () => {
+    const h = harness();
+    h.transport.files.set("min.js", utf8(`var a=1;`.repeat(2000)));
+    h.transport.files.set("ok.js", utf8("var a = 1;\n".repeat(20)));
+    await h.view.__load(new TFile("min.js"));
+    let pre = __findByClass(h.body(), "nfe-preview");
+    expect(pre.children).toHaveLength(0);
+    expect(pre.hasClass("cm-s-obsidian")).toBe(true);
+    expect(h.log.recent().some((l) => l.includes("over the 10000 limit"))).toBe(true);
+    await h.view.__unload();
+    await h.view.__load(new TFile("ok.js"));
+    pre = __findByClass(h.body(), "nfe-preview");
+    expect(pre.children.length).toBeGreaterThan(0);
+  });
+
+  it("longestLineLength", () => {
+    expect(longestLineLength("")).toBe(0);
+    expect(longestLineLength("abc")).toBe(3);
+    expect(longestLineLength("a\nabcd\nab")).toBe(4);
+    expect(longestLineLength("\n\n")).toBe(0);
+  });
+
   it("a code file above the preview-highlight cap previews as plain text", async () => {
     const h = harness();
+    h.device.update({ previewHighlightBytes: 1000 });
     h.transport.files.set("big.py", utf8(`x = 1\n`.repeat(200_000)));
     await h.view.__load(new TFile("big.py"));
     const pre = __findByClass(h.body(), "nfe-preview");
     expect(pre.children).toHaveLength(0);
     expect(pre.textContent.length).toBe(6 * 200_000);
+  });
+
+  it("logs every open with size, encoding, language and mode", async () => {
+    const h = harness();
+    h.transport.files.set("a.py", utf8("x = 1"));
+    await h.view.__load(new TFile("a.py"));
+    const line = h.log.recent().find((l) => l.includes("open a.py"));
+    expect(line).toContain("Python/lezer");
+    expect(line).toContain("UTF-8");
+    expect(line).toContain("mode preview");
+  });
+
+  it("an editor that fails with the language is rebuilt as plain text, with a notice and a log line, never an exception", async () => {
+    const h = harness();
+    let calls = 0;
+    h.factory.create = (_parent, options) => {
+      calls++;
+      if (options.language !== null) throw new Error("bad grammar");
+      const e = new FakeEditor(options);
+      h.editors.push(e);
+      return e;
+    };
+    h.transport.files.set("a.py", utf8("x = 1"));
+    await h.view.__load(new TFile("a.py"));
+    await h.view.setMode("edit");
+    expect(calls).toBe(2);
+    expect(h.view.mode).toBe("edit");
+    expect(h.lastEditor().options.language).toBeNull();
+    expect(__notices.some((n) => n.includes("plain text"))).toBe(true);
+    expect(h.log.recent().some((l) => l.includes("ERROR [editor]") && l.includes("bad grammar"))).toBe(true);
+  });
+
+  it("a deleted file empties the pane, says so, and is not written back", async () => {
+    const h = harness();
+    h.transport.files.set("a.txt", utf8("a"));
+    const file = new TFile("a.txt");
+    await h.view.__load(file);
+    await h.view.setMode("edit");
+    h.lastEditor().type("ab");
+    h.vault.trigger("delete", file);
+    await tick();
+    expect(__textOf(h.body())).toContain("was deleted");
+    h.timers.fireAll();
+    await tick();
+    expect(h.transport.writes).toHaveLength(0);
   });
 
   it("accepts only registered extensions", () => {

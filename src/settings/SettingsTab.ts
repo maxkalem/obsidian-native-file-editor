@@ -75,6 +75,11 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
           desc: "Files above this size open in preview only, with a button to edit anyway. Per device.",
           control: { type: "number", key: "device.largeFileMb", min: 0, step: 1 },
         },
+        {
+          name: "Highlight preview up to (MB)",
+          desc: "Above this size the preview is plain text, so it still renders at once. Per device.",
+          control: { type: "number", key: "device.previewHighlightMb", min: 0, step: 1 },
+        },
       ],
     },
     {
@@ -116,15 +121,18 @@ export function readSettingValue(key: string, deps: SettingsTabDeps): unknown {
       return s.tabInsertsSpaces;
     case "device.largeFileMb":
       return Math.round(deps.device.get().largeFileBytes / MB);
+    case "device.previewHighlightMb":
+      return Math.round(deps.device.get().previewHighlightBytes / MB);
     default:
       return undefined;
   }
 }
 
 export async function writeSettingValue(key: string, value: unknown, deps: SettingsTabDeps): Promise<void> {
-  if (key === "device.largeFileMb") {
+  if (key === "device.largeFileMb" || key === "device.previewHighlightMb") {
     if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-      deps.device.update({ largeFileBytes: Math.round(value * MB) });
+      const bytes = Math.round(value * MB);
+      deps.device.update(key === "device.largeFileMb" ? { largeFileBytes: bytes } : { previewHighlightBytes: bytes });
     }
     return;
   }

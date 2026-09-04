@@ -1,12 +1,20 @@
-import { type App, Notice, Plugin, type WorkspaceLeaf } from "obsidian";
-import { COMMAND_TOGGLE_MODE, VIEW_TYPE_TEXT } from "./constants";
+import { type App, type Menu, Notice, Platform, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
+import { StreamLanguage } from "@codemirror/language";
+import { COMMAND_NEW_FILE, COMMAND_TOGGLE_MODE, LOG_FILE_NAME, PLUGIN_ID, VIEW_TYPE_TEXT } from "./constants";
 import { decideClaims, describeYielded } from "./core/claims";
+import { Logger, describeError } from "./core/log";
+import type { Timers } from "./core/autosave";
+import { tokenizeForPreview } from "./highlight/highlighter";
+import { shell } from "@codemirror/legacy-modes/mode/shell";
+import { logMode } from "./highlight/logMode";
 import { registeredExtensions } from "./highlight/registry";
+import { AdapterLogSink } from "./platform/logSink";
 import { createTransport } from "./platform/select";
 import type { Transport } from "./platform/transport";
 import { DeviceLocalStore } from "./settings/DeviceLocalStore";
 import { NfeSettingsTab } from "./settings/SettingsTab";
 import { DEFAULT_SETTINGS, type SharedSettings, normalizeSettings } from "./settings/settings";
+import { NewFileModal } from "./ui/NewFileModal";
 import { TextView } from "./ui/TextView";
 import { codeMirrorFactory } from "./ui/codemirror";
 
@@ -34,15 +42,66 @@ export function vaultId(app: App): string {
   return app.vault.getName();
 }
 
+/** Where the log lives: inside the plugin folder, whatever the config dir is called. */
+export function logFilePath(configDir: string): string {
+  return `${configDir}/plugins/${PLUGIN_ID}/${LOG_FILE_NAME}`;
+}
+
+/**
+ * Runs the stream-mode machinery once, at load, against the CodeMirror
+ * packages Obsidian actually provides, and returns what happened. The bundle
+ * was built and tested against npm's versions; this is the one place the two
+ * are compared on the device, and the log line it produces is what a "Failed
+ * to open" report needs.
+ */
+export function selfTestStreamLanguage(): string {
+  if (typeof (StreamLanguage as unknown) !== "function" || typeof (StreamLanguage as unknown as { define?: unknown }).define !== "function") {
+    return `FAILED: @codemirror/language as provided by Obsidian has no StreamLanguage.define (StreamLanguage is ${typeof StreamLanguage})`;
+  }
+  const one = (name: string, parser: Parameters<typeof StreamLanguage.define>[0], text: string): string => {
+    try {
+      const lang = StreamLanguage.define(parser);
+      const tokens = tokenizeForPreview(text, lang);
+      if (tokens === null) return `${name}: parse timed out`;
+      const classes = tokens.filter((t) => t.classes !== null).length;
+      return `${name}: ${classes > 0 ? "ok" : "no token classes"} (${tokens.length} tokens, ${classes} classed)`;
+    } catch (e) {
+      return `${name}: FAILED: ${describeError(e)}`;
+    }
+  };
+  return [one("builtin log", logMode, "2026-09-04 12:00:00 ERROR failed\n"), one("legacy shell", shell, "echo hi # c\n")].join("; ");
+}
+
 export default class NativeFileEditorPlugin extends Plugin {
   private nfeSettings: SharedSettings = DEFAULT_SETTINGS;
   private nfeDevice!: DeviceLocalStore;
   private nfeTransport!: Transport;
+  private nfeLog!: Logger;
 
   override async onload(): Promise<void> {
+    const timers: Timers = {
+      setTimeout: (fn, ms) => activeWindow.setTimeout(fn, ms),
+      clearTimeout: (id) => activeWindow.clearTimeout(id),
+    };
+    this.nfeLog = new Logger({
+      sink: new AdapterLogSink(this.app.vault.adapter, logFilePath(this.app.vault.configDir)),
+      timers,
+      now: () => Date.now(),
+    });
+    const log = this.nfeLog;
+    log.info("plugin", `load ${this.manifest.version} on ${Platform.isDesktopApp ? "desktop" : "mobile"}${Platform.isAndroidApp ? "/android" : Platform.isIosApp ? "/ios" : ""}`);
+
     this.nfeSettings = normalizeSettings(await this.loadData());
     this.nfeDevice = new DeviceLocalStore(vaultId(this.app), safeLocalStorage());
-    this.nfeTransport = createTransport(this.app);
+    try {
+      this.nfeTransport = createTransport(this.app);
+      log.info("plugin", `transport ${this.nfeTransport.kind}`);
+    } catch (e) {
+      log.error("plugin", "transport unavailable", e);
+      new Notice(`Native File Editor cannot start: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    log.info("plugin", `stream-language self-test: ${selfTestStreamLanguage()}`);
 
     this.registerView(VIEW_TYPE_TEXT, (leaf: WorkspaceLeaf) =>
       new TextView(leaf, {
@@ -50,11 +109,9 @@ export default class NativeFileEditorPlugin extends Plugin {
         device: this.nfeDevice,
         transport: this.nfeTransport,
         editorFactory: codeMirrorFactory,
-        timers: {
-          setTimeout: (fn, ms) => activeWindow.setTimeout(fn, ms),
-          clearTimeout: (id) => activeWindow.clearTimeout(id),
-        },
+        timers,
         now: () => Date.now(),
+        log,
       })
     );
 
@@ -68,6 +125,10 @@ export default class NativeFileEditorPlugin extends Plugin {
       toggles: this.nfeSettings.extensions,
     });
     if (decision.take.length > 0) this.registerExtensions(decision.take, VIEW_TYPE_TEXT);
+    log.info(
+      "claims",
+      `took ${decision.take.length} extensions; yielded ${decision.yielded.map((y) => `.${y.ext}->${y.viewType}`).join(", ") || "none"}; disabled ${decision.disabled.map((d) => `.${d}`).join(", ") || "none"}`
+    );
     if (decision.yielded.length > 0) {
       const key = decision.yielded.map((y) => `${y.ext}:${y.viewType}`).join(",");
       if (this.nfeDevice.get().yieldNoticeKey !== key) {
@@ -89,6 +150,29 @@ export default class NativeFileEditorPlugin extends Plugin {
       },
     });
 
+    this.addCommand({
+      id: COMMAND_NEW_FILE,
+      name: "New file",
+      callback: () => {
+        const active = this.app.workspace.getActiveFile();
+        this.openNewFileModal(active?.parent?.path ?? "");
+      },
+    });
+
+    // A folder gets "New file" inside it; a file gets "New file" beside it.
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu: Menu, file) => {
+        const folder = file instanceof TFolder ? file.path : file instanceof TFile ? (file.parent?.path ?? "") : null;
+        if (folder === null) return;
+        menu.addItem((item) =>
+          item
+            .setTitle(file instanceof TFolder ? "New file (Native File Editor)" : "New file here (Native File Editor)")
+            .setIcon("file-plus")
+            .onClick(() => this.openNewFileModal(folder))
+        );
+      })
+    );
+
     this.addSettingTab(
       new NfeSettingsTab(this.app, this, {
         settings: () => this.nfeSettings,
@@ -109,7 +193,34 @@ export default class NativeFileEditorPlugin extends Plugin {
 
   override onunload(): void {
     // Obsidian restores the previous owner of every extension this plugin
-    // registered and detaches its views; nothing else was started.
+    // registered and detaches its views; the log is the only thing to finish.
+    this.nfeLog?.info("plugin", "unload");
+    void this.nfeLog?.flush();
+  }
+
+  /** The dialog, then the file, then the pane: an empty file in the editor. */
+  openNewFileModal(folder: string): void {
+    new NewFileModal(this.app, {
+      folder,
+      initialExtension: this.nfeDevice.get().lastNewFileExtension,
+      exists: (path) => this.app.vault.getAbstractFileByPath(path) !== null,
+      onCreate: (choice) => void this.createAndOpen(choice.path, choice.extension),
+    }).open();
+  }
+
+  async createAndOpen(path: string, extension: string): Promise<void> {
+    try {
+      const file = await this.app.vault.create(path, "");
+      this.nfeDevice.update({ lastNewFileExtension: extension });
+      this.nfeLog.info("new-file", path);
+      const leaf = this.app.workspace.getLeaf(false);
+      await leaf.openFile(file);
+      const view = leaf.view;
+      if (view instanceof TextView) await view.setMode("edit");
+    } catch (e) {
+      this.nfeLog.error("new-file", `${path} failed`, e);
+      new Notice(`Native File Editor could not create ${path}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 }
 

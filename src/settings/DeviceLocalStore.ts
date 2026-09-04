@@ -1,4 +1,4 @@
-import { DEFAULT_LARGE_FILE_BYTES, PLUGIN_ID } from "../constants";
+import { DEFAULT_LARGE_FILE_BYTES, DEFAULT_PREVIEW_HIGHLIGHT_BYTES, PLUGIN_ID } from "../constants";
 import type { ViewMode } from "../core/openMode";
 
 /**
@@ -11,6 +11,10 @@ export interface DeviceLocalState {
   lastMode: Record<string, ViewMode>;
   /** Files above this size open in preview only unless the user insists. */
   largeFileBytes: number;
+  /** Files above this size preview as plain text instead of highlighted spans. */
+  previewHighlightBytes: number;
+  /** The extension the "New file" dialog offers first: the one used last on this device. */
+  lastNewFileExtension: string;
   /** The last set of yielded extensions the notice was shown for, so it is shown once per change, not per start. */
   yieldNoticeKey: string;
 }
@@ -18,6 +22,8 @@ export interface DeviceLocalState {
 export const DEFAULT_DEVICE_STATE: DeviceLocalState = {
   lastMode: {},
   largeFileBytes: DEFAULT_LARGE_FILE_BYTES,
+  previewHighlightBytes: DEFAULT_PREVIEW_HIGHLIGHT_BYTES,
+  lastNewFileExtension: "txt",
   yieldNoticeKey: "",
 };
 
@@ -44,6 +50,12 @@ export function normalizeDeviceState(raw: unknown): DeviceLocalState {
   }
   if (typeof raw.largeFileBytes === "number" && Number.isFinite(raw.largeFileBytes) && raw.largeFileBytes >= 0) {
     out.largeFileBytes = Math.floor(raw.largeFileBytes);
+  }
+  if (typeof raw.previewHighlightBytes === "number" && Number.isFinite(raw.previewHighlightBytes) && raw.previewHighlightBytes >= 0) {
+    out.previewHighlightBytes = Math.floor(raw.previewHighlightBytes);
+  }
+  if (typeof raw.lastNewFileExtension === "string" && /^[a-z0-9_+-]+$/.test(raw.lastNewFileExtension)) {
+    out.lastNewFileExtension = raw.lastNewFileExtension;
   }
   if (typeof raw.yieldNoticeKey === "string") out.yieldNoticeKey = raw.yieldNoticeKey;
   return out;

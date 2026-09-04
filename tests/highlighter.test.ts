@@ -7,7 +7,7 @@ function tokens(ext: string, text: string) {
   if (!entry) throw new Error(`no entry for .${ext}`);
   const resolved = resolveLanguage(entry);
   if (!resolved) throw new Error(`no language for .${ext}`);
-  return tokenizeForPreview(text, resolved.language);
+  return tokenizeForPreview(text, resolved.language) ?? [];
 }
 
 function classesOf(ext: string, text: string, snippet: string): string | null {
@@ -17,6 +17,42 @@ function classesOf(ext: string, text: string, snippet: string): string | null {
 }
 
 describe("nfe highlighter", () => {
+  it("parses through a parse context, never through parser.parse(): Obsidian's stream parser has no null check for the context", () => {
+    const entry = languageFor("sh");
+    const resolved = entry ? resolveLanguage(entry) : null;
+    if (!resolved) throw new Error("no shell");
+    const parser = resolved.language.parser as unknown as { parse: unknown };
+    const original = parser.parse;
+    parser.parse = () => {
+      throw new Error("direct parser.parse() call");
+    };
+    try {
+      const out = tokenizeForPreview("echo hi # c\n", resolved.language);
+      expect(out).not.toBeNull();
+      expect(out!.some((t) => (t.classes ?? "").includes("nfe-tok-comment"))).toBe(true);
+    } finally {
+      parser.parse = original;
+    }
+  });
+
+  it("returns null instead of hanging when the parse does not finish in the time given", () => {
+    const entry = languageFor("py");
+    const resolved = entry ? resolveLanguage(entry) : null;
+    if (!resolved) throw new Error("no python");
+    const big = "x = 1\n".repeat(300_000);
+    expect(tokenizeForPreview(big, resolved.language, 0)).toBeNull();
+    expect(tokenizeForPreview("x = 1\n", resolved.language, 1000)).not.toBeNull();
+  });
+
+  it("emits Obsidian's cm-* class beside every nfe-tok-* class", () => {
+    for (const t of tokens("ts", "const x = 1; // c")) {
+      if (t.classes === null) continue;
+      const parts = t.classes.split(" ");
+      expect(parts.some((c) => c.startsWith("cm-")), t.classes).toBe(true);
+      expect(parts.some((c) => c.startsWith("nfe-tok-")), t.classes).toBe(true);
+    }
+  });
+
   it("emits only nfe-tok-* classes", () => {
     for (const c of tokenClassNames()) expect(c).toMatch(/^nfe-tok-[a-z-]+$/);
   });

@@ -34,11 +34,19 @@ The text view reads and writes through the transport rather than through `Vault.
 
 ## The text view
 
-`ui/TextView.ts` is a `FileView` with two modes. Preview is a `pre` with the text and nothing else, so a large file renders in under a frame. Edit builds a CodeMirror 6 `EditorView` from the core packages Obsidian provides (`@codemirror/state`, `view`, `language`, `commands`, `search`), with the plugin's own extension set and none of Obsidian's Markdown extensions. The editor sits behind `ui/editor.ts`, a four-method interface, so the view's behaviour is tested against a fake and CodeMirror is only ever touched by `ui/codemirror.ts`.
+`ui/TextView.ts` is a `FileView` with two modes. Preview is a `pre` with the text, highlighted by one parse when the file is small enough (size, longest line and token count all under their caps), so a large file still renders in under a frame. The parse goes through `EditorState` and `ensureSyntaxTree`, never `parser.parse()` directly: Obsidian's stream parser needs a parse context. Edit builds a CodeMirror 6 `EditorView` from the core packages Obsidian provides (`@codemirror/state`, `view`, `language`, `commands`, `search`), with the plugin's own extension set and none of Obsidian's Markdown extensions. The editor sits behind `ui/editor.ts`, a four-method interface, so the view's behaviour is tested against a fake and CodeMirror is only ever touched by `ui/codemirror.ts`.
 
 Autosave is a debounce (`core/autosave.ts`) with one write in flight at a time; leaving edit mode or the file flushes it. An external change reloads the pane unless it has unsaved typing, in which case the pane's text wins and the next autosave writes it. A file whose bytes are not valid UTF-8 and carry no BOM is decoded by a single-byte guess and shown read-only, because writing the guess back would rewrite bytes the user never touched.
 
 Files above a per-device size threshold open in preview whatever the initial-mode setting says; the Edit button then opens a modal that explains why and offers to edit anyway.
+
+## Nothing escapes onLoadFile
+
+An exception out of a view's `onLoadFile` is what Obsidian shows as "Failed to open", with no reason attached. So the view catches at every step that can fail (read, language resolution, editor construction, preview highlighting), logs the stack, and degrades: no language, an editor without the language extension, a plain preview, or an error panel. The plugin also runs a self-test of the stream-mode machinery at load and logs the result, because the CodeMirror packages Obsidian provides are not the ones the bundle was built against.
+
+## The log
+
+`core/log.ts` is a ring buffer plus a debounced file sink; `platform/logSink.ts` writes through the vault adapter to `<config>/plugins/native-file-editor/nfe.log`, rotating at 1 MB. Every open, save, external change and error goes there. It is the first thing to read for a device report.
 
 ## Coexistence: cover everything, yield by default
 
@@ -47,6 +55,10 @@ Files above a per-device size threshold open in preview whatever the initial-mod
 ## Two kinds of state
 
 `data.json` travels with the vault through any sync, so it holds only preferences every device should share: the per-extension toggles, the initial mode, the editor's cosmetic options. Everything that decides how much work a particular device does, or what it last showed, lives in `localStorage` scoped by the vault id: the last mode per file, the large-file threshold, the last yield notice shown.
+
+## Tokens look like Obsidian's own code blocks
+
+Every token span carries two classes: Obsidian's `cm-*` name (the CodeMirror 5 vocabulary Obsidian uses in Live Preview code blocks) and the plugin's stable `nfe-tok-*` name. The preview and the editor root carry `cm-s-obsidian`, so Obsidian's stylesheet and the active theme colour a `.ts` file exactly as they colour a ```ts block in a note. The plugin's own `nfe-tok-*` rules in `styles.css` are the fallback for tokens Obsidian has no rule for, and the vocabulary a palette overrides.
 
 ## Two licences, one import direction
 

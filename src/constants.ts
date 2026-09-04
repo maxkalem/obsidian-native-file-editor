@@ -23,10 +23,24 @@ export const DEFAULT_LARGE_FILE_BYTES = 5 * 1024 * 1024;
 /**
  * Above this size the preview is plain text: highlighting a preview means one
  * full parse and one span per token, which is what the preview exists to avoid
- * on a large file. A device measurement decides the number (verification
- * ledger); until then it is a guess.
+ * on a large file. Per device, so a phone can set it lower; the default is a
+ * guess until a device measurement replaces it (verification ledger).
  */
-export const PREVIEW_HIGHLIGHT_MAX_BYTES = 1024 * 1024;
+export const DEFAULT_PREVIEW_HIGHLIGHT_BYTES = 2 * 1024 * 1024;
+
+/**
+ * The preview stays plain when a line is longer than this or the file has more
+ * tokens than this, whatever the size cap says: one span per token on a
+ * single minified line is what froze the pane on a 1.1 MB HTML export.
+ */
+export const PREVIEW_MAX_LINE_LENGTH = 10_000;
+export const PREVIEW_MAX_TOKENS = 250_000;
+
+/** Second command id; frozen like the first. */
+export const COMMAND_NEW_FILE = "new-file";
+
+/** The log, inside the plugin folder so both platforms can write it through the adapter. */
+export const LOG_FILE_NAME = "nfe.log";
 
 /**
  * Extensions Obsidian itself owns. They never enter the registry, whatever the

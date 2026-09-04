@@ -71,7 +71,8 @@
   flex-direction: column;
 }
 
-/* Preview: the file as text, in the editor's monospace font, no editor built. */
+/* Preview: the file as text, in the editor's monospace font, no editor built.
+   Always selectable and copyable, whatever the surrounding view sets. */
 .nfe-text-content .nfe-preview {
   flex: 1 1 auto;
   margin: 0;
@@ -84,6 +85,18 @@
   white-space: pre;
   overflow: auto;
   tab-size: 4;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+/* Selection in the preview and in the editor: Obsidian's own selection colour,
+   which is a translucent accent, so token colours stay readable through it.
+   The browser default would paint an opaque light block under light text. */
+.nfe-text-content .nfe-preview ::selection,
+.nfe-text-content .nfe-preview::selection {
+  background-color: var(--text-selection);
+  color: inherit;
 }
 
 .nfe-text-content .nfe-preview.nfe-wrap {
@@ -138,6 +151,37 @@
 .nfe-text-content .nfe-editor .cm-focused .cm-selectionBackground,
 .nfe-text-content .nfe-editor .cm-content ::selection {
   background-color: var(--text-selection);
+  color: inherit;
+}
+
+/* Folding: a triangle in the gutter, a distinct symbol where a range is folded. */
+.nfe-text-content .nfe-editor .nfe-fold-marker {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  cursor: pointer;
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.nfe-text-content .nfe-editor .cm-gutterElement:hover .nfe-fold-marker,
+.nfe-text-content .nfe-editor .nfe-fold-closed {
+  color: var(--text-accent);
+}
+
+.nfe-text-content .nfe-editor .nfe-fold-open {
+  opacity: 0.6;
+}
+
+.nfe-text-content .nfe-editor .nfe-fold-placeholder {
+  display: inline-block;
+  padding: 0 var(--size-4-1);
+  margin: 0 var(--size-2-1);
+  border-radius: var(--radius-s);
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+  cursor: pointer;
+  line-height: 1;
 }
 
 .nfe-text-content .nfe-editor .cm-matchingBracket {
@@ -155,11 +199,15 @@
   border-bottom: var(--border-width) solid var(--background-modifier-border);
 }
 
-/* Syntax tokens. The highlighter emits stable nfe-tok-* classes; this is the
-   only place they meet colours, and every colour is one of Obsidian's eleven
-   --code-* variables, so the active theme (light or dark) already styles the
-   editor and a palette is a CSS file that overrides these rules. The same
-   classes appear in the preview and in the editor. */
+/* Syntax tokens. Every token span carries two classes: Obsidian's own cm-*
+   name (cm-keyword, cm-string, ...) and this plugin's stable nfe-tok-* name.
+   The preview and the editor root carry cm-s-obsidian, so Obsidian's own
+   stylesheet and the active theme colour the tokens exactly as they colour a
+   code block in a note; those rules (`.cm-s-obsidian span.cm-keyword`) are
+   more specific than the ones below and win wherever Obsidian has one.
+
+   The rules below are the fallback for tokens Obsidian has no rule for, bound
+   to the --code-* variables, and the vocabulary a palette overrides. */
 .nfe-text-content .nfe-tok-comment {
   color: var(--code-comment);
 }
@@ -213,7 +261,7 @@
 }
 
 .nfe-text-content .nfe-tok-tag {
-  color: var(--code-tag);
+  color: var(--code-keyword);
 }
 
 .nfe-text-content .nfe-tok-operator {
@@ -233,11 +281,10 @@
 
 .nfe-text-content .nfe-tok-invalid {
   color: var(--text-error);
-  text-decoration: underline wavy;
 }
 
 .nfe-text-content .nfe-tok-heading {
-  color: var(--code-tag);
+  color: var(--code-keyword);
   font-weight: var(--bold-weight);
 }
 
@@ -289,4 +336,21 @@
   display: flex;
   justify-content: flex-end;
   margin-top: var(--size-4-4);
+}
+
+/* New-file modal: name and extension side by side, stacked on a narrow screen. */
+.nfe-modal .nfe-newfile-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}
+
+.nfe-modal .nfe-newfile-name {
+  flex: 1 1 12em;
+  min-width: 0;
+}
+
+.nfe-modal .nfe-newfile-ext {
+  flex: 0 1 16em;
+  min-width: 0;
 }

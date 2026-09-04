@@ -20,6 +20,14 @@ Shared across devices: initial mode (preview first, always editing, or remember 
 
 This device only: the large-file limit. A file above it opens in preview with an Edit button that asks before building the editor.
 
+## The log
+
+The plugin writes what it does to `<vault>/.obsidian/plugins/native-file-editor/nfe.log`: load, which extensions it took, every file opened (size, encoding, language, mode), saves, external changes, and every error with its stack. It rotates to `nfe.log.1` past 1 MB. When something fails to open or highlight, this file says why; attach it to a report. Because it sits in the vault, a vault under Git or Sync carries it; add `.obsidian/plugins/native-file-editor/nfe.log*` to the ignore list if that is unwanted.
+
+## Creating files
+
+Right-click a folder, "New file (Native File Editor)", type a name and pick an extension from every type the plugin edits; the file opens in the editor. The command "Native File Editor: New file" does the same in the active file's folder.
+
 ## Building from source
 
 ```

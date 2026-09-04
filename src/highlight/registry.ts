@@ -102,6 +102,7 @@ import { webIDL } from "@codemirror/legacy-modes/mode/webidl";
 import { xQuery } from "@codemirror/legacy-modes/mode/xquery";
 import { yacas } from "@codemirror/legacy-modes/mode/yacas";
 import { z80 } from "@codemirror/legacy-modes/mode/z80";
+import { logMode } from "./logMode";
 
 /**
  * The language registry: extension -> language entry. This module is the only
@@ -120,7 +121,8 @@ import { z80 } from "@codemirror/legacy-modes/mode/z80";
  * that type is actually opened.
  */
 
-export type LanguageSource = "lezer" | "legacy" | null;
+/** `builtin` is a stream mode of this plugin's own; `legacy` comes from `@codemirror/legacy-modes`. */
+export type LanguageSource = "lezer" | "legacy" | "builtin" | null;
 
 export interface LanguageEntry {
   /** Human-readable name shown in the head bar. */
@@ -147,6 +149,10 @@ function legacy(name: string, extensions: string[], parser: StreamParser<unknown
   return { name, extensions, source: "legacy", load: () => StreamLanguage.define(parser) };
 }
 
+function builtin(name: string, extensions: string[], parser: StreamParser<unknown>): LanguageEntry {
+  return { name, extensions, source: "builtin", load: () => StreamLanguage.define(parser) };
+}
+
 function plain(name: string, extensions: string[]): LanguageEntry {
   return { name, extensions, source: null, load: null };
 }
@@ -154,7 +160,7 @@ function plain(name: string, extensions: string[]): LanguageEntry {
 const ENTRIES: readonly LanguageEntry[] = [
   // Plain text.
   plain("Plain text", ["txt", "text"]),
-  plain("Log", ["log"]),
+  builtin("Log", ["log", "out", "err"], logMode as StreamParser<unknown>),
 
   // Tier 1: official lezer packages.
   lezer("JavaScript", ["js", "mjs", "cjs", "jsx", "es6"], () => javascript({ jsx: true })),

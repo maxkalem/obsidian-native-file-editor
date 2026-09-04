@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { Events, __notices, __resetObsidianMock, mockPlugin } from "./mocks/obsidian";
+import { Events, Menu, TFile, TFolder, __modalInstances, __notices, __openedModals, __resetObsidianMock, mockPlugin } from "./mocks/obsidian";
 import { VIEW_TYPE_TEXT } from "../src/constants";
-import NativeFileEditorPlugin, { readOwnedExtensions, vaultId } from "../src/main";
+import NativeFileEditorPlugin, { logFilePath, readOwnedExtensions, selfTestStreamLanguage, vaultId } from "../src/main";
 
 /**
  * Load-time orchestration: which extensions are registered, when the yield
@@ -11,13 +11,34 @@ import NativeFileEditorPlugin, { readOwnedExtensions, vaultId } from "../src/mai
  * provides the CompressionStream it needs.
  */
 
+/** An adapter that records log appends; everything else the sink needs is a no-op. */
+function makeAdapter() {
+  const appended: string[] = [];
+  return {
+    appended,
+    exists: async () => true,
+    stat: async () => ({ size: 0 }),
+    append: async (_p: string, text: string) => void appended.push(text),
+    rename: async () => undefined,
+    remove: async () => undefined,
+    mkdir: async () => undefined,
+  };
+}
+
 function makeApp(owned: Record<string, string>) {
   const vault = new Events() as unknown as Record<string, unknown>;
-  vault.adapter = {};
+  const adapter = makeAdapter();
+  vault.adapter = adapter;
   vault.getName = () => "TestVault";
+  vault.configDir = ".obsidian";
+  vault.getAbstractFileByPath = () => null;
+  const workspace = new Events() as unknown as Record<string, unknown>;
+  workspace.getActiveViewOfType = () => null;
+  workspace.getActiveFile = () => null;
   return {
     vault,
-    workspace: { getActiveViewOfType: () => null },
+    workspace,
+    adapter,
     viewRegistry: { typeByExtension: owned },
   };
 }
@@ -46,8 +67,51 @@ describe("plugin load", () => {
     expect(taken.extensions).not.toContain("log");
     expect(taken.extensions).not.toContain("md");
     expect(__notices).toEqual(["Native File Editor left .log to cm-code-editor. Take them over per extension in its settings."]);
-    expect(plugin.commands.map((c) => c.id)).toEqual(["toggle-mode"]);
+    expect(plugin.commands.map((c) => c.id)).toEqual(["toggle-mode", "new-file"]);
     expect(plugin.settingTabs).toHaveLength(1);
+  });
+
+  it("writes load, transport, self-test and claims lines to the log file after the flush delay", async () => {
+    const app = makeApp({});
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, { version: "0.1.0" } as never));
+    await plugin.onload();
+    await new Promise((r) => setTimeout(r, 1100));
+    const text = app.adapter.appended.join("");
+    expect(text).toContain("[plugin] load 0.1.0");
+    expect(text).toContain("[plugin] transport mobile");
+    expect(text).toContain("self-test: builtin log: ok");
+    expect(text).toContain("legacy shell: ok");
+    expect(text).toMatch(/\[claims\] took \d+ extensions/);
+    expect(text.endsWith("\n")).toBe(true);
+  });
+
+  it("adds New file to a folder's context menu and opens the dialog with the extensions", async () => {
+    const app = makeApp({});
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, {} as never));
+    await plugin.onload();
+    const menu = new Menu();
+    (app.workspace as unknown as Events).trigger("file-menu", menu, new TFolder("notes"));
+    expect(menu.items.map((i) => i.title)).toEqual(["New file (Native File Editor)"]);
+    menu.items[0]?.click();
+    expect(__openedModals).toEqual(["NewFileModal"]);
+    const modal = __modalInstances[0];
+    modal.onOpen();
+    expect(modal.contentEl.children.length).toBeGreaterThan(0);
+    // A file gets "New file here", creating beside it.
+    __openedModals.length = 0;
+    __modalInstances.length = 0;
+    const fileMenu = new Menu();
+    const file = new TFile("notes/sub/a.txt");
+    (file as unknown as { parent: TFolder }).parent = new TFolder("notes/sub");
+    (app.workspace as unknown as Events).trigger("file-menu", fileMenu, file);
+    expect(fileMenu.items.map((i) => i.title)).toEqual(["New file here (Native File Editor)"]);
+    fileMenu.items[0]?.click();
+    expect(__openedModals).toEqual(["NewFileModal"]);
+    expect((__modalInstances[0] as { folder: string }).folder).toBe("notes/sub");
+    // Something that is neither gets nothing.
+    const otherMenu = new Menu();
+    (app.workspace as unknown as Events).trigger("file-menu", otherMenu, { path: "x" });
+    expect(otherMenu.items).toHaveLength(0);
   });
 
   it("does not repeat the notice at the next start for the same yielded set, and repeats it when the set changes", async () => {
@@ -92,5 +156,14 @@ describe("readOwnedExtensions and vaultId", () => {
   it("prefers appId and falls back to the vault name", () => {
     expect(vaultId({ appId: "abc", vault: { getName: () => "V" } } as never)).toBe("abc");
     expect(vaultId({ vault: { getName: () => "V" } } as never)).toBe("V");
+  });
+
+  it("the log lives in the plugin folder under the config dir", () => {
+    expect(logFilePath(".obsidian")).toBe(".obsidian/plugins/native-file-editor/nfe.log");
+    expect(logFilePath(".obsidian-work")).toBe(".obsidian-work/plugins/native-file-editor/nfe.log");
+  });
+
+  it("the stream-language self-test passes against npm's CodeMirror", () => {
+    expect(selfTestStreamLanguage()).toMatch(/^builtin log: ok .*; legacy shell: ok/);
   });
 });

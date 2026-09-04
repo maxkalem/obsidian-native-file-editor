@@ -14,6 +14,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Any = any;
 
+// Obsidian installs `activeWindow` and `activeDocument` as globals so pop-out
+// windows work; the plugin reads its timers from the first.
+const g = globalThis as Any;
+if (g.activeWindow === undefined) g.activeWindow = globalThis;
+
 export const __notices: string[] = [];
 export const __openedModals: string[] = [];
 export const __modalTitles: string[] = [];
@@ -188,7 +193,12 @@ export class TFile {
     this.extension = dot > 0 ? this.name.slice(dot + 1) : "";
   }
 }
-export class TFolder {}
+export class TFolder {
+  path: string;
+  constructor(path = "") {
+    this.path = path;
+  }
+}
 
 /** Event hub the way `vault.on` returns refs and `trigger` fires them. */
 export class Events {
@@ -212,6 +222,27 @@ export class FileSystemAdapter {
   getBasePath(): string {
     return this.basePath;
   }
+}
+
+/** Menu items are recorded so a test can read titles and click them. */
+export class Menu {
+  items: Array<{ title: string; icon: string; click: () => void }> = [];
+  addItem(cb: (item: Any) => void): Menu {
+    const rec: { title: string; icon: string; click: () => void } = { title: "", icon: "", click: () => undefined };
+    const item: Any = {
+      setTitle: (t: string) => ((rec.title = t), item),
+      setIcon: (i: string) => ((rec.icon = i), item),
+      onClick: (fn: () => void) => ((rec.click = fn), item),
+    };
+    cb(item);
+    this.items.push(rec);
+    return this;
+  }
+  addSeparator(): Menu {
+    return this;
+  }
+  showAtMouseEvent(): void {}
+  showAtPosition(): void {}
 }
 
 export function setIcon(): void {}

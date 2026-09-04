@@ -14,6 +14,10 @@ The plugin makes no network requests, ever. It has no updater for languages, the
 
 The plugin reads and writes the files the user opens in it, and nothing else. On desktop it writes through Node's filesystem to a dot-prefixed temp file beside the target and renames it over the target, so a failed write leaves the original in place. On mobile it writes through the vault adapter with the same temp-file scheme. Deletions of the plugin's own files, when backups arrive, go through Obsidian's trash.
 
+## Log file
+
+The plugin keeps a diagnostic log at `<config>/plugins/native-file-editor/nfe.log` (rotated at 1 MB), written through the vault adapter. It records file paths, sizes, encodings and error stacks, and nothing from file contents.
+
 ## Generated code and HTML
 
 Nothing executes generated code. No `innerHTML` is used with document content; DOM is built with `createEl`, `createDiv` and `setText`.

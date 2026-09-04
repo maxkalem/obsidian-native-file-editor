@@ -53,10 +53,12 @@ describe("code samples", () => {
       }
       if (!resolved) throw new Error(`unresolved ${entry.name}`);
       const tokens = tokenizeForPreview(text, resolved.language);
+      if (tokens === null) throw new Error(`${entry.name}: parse timed out`);
       expect(tokens.map((t) => t.text).join("")).toBe(text);
       const classes = new Set(tokens.flatMap((t) => (t.classes ?? "").split(" ").filter(Boolean)));
       expect(classes.size, `${entry.name} produced no token classes`).toBeGreaterThan(0);
-      for (const c of classes) expect(c).toMatch(/^nfe-tok-/);
+      for (const c of classes) expect(c).toMatch(/^(nfe-tok-|cm-)/);
+      expect([...classes].some((c) => c.startsWith("cm-")), `${entry.name} produced no Obsidian cm-* class`).toBe(true);
     });
   });
 });
