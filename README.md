@@ -1,0 +1,1 @@
+# obsidian-native-file-editor
