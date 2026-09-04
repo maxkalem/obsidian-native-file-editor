@@ -1,0 +1,9 @@
+node_modules/
+.vitest/
+*.log
+.DS_Store
+Thumbs.db
+# Scratch output of the e2e runner; fixtures themselves are committed.
+tests/e2e/out/
+# The vault path copy.bat and clean.cmd install into on this machine.
+local.cmd

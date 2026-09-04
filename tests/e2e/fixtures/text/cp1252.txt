@@ -1,0 +1,1 @@
+“Smart quotes” and € in windows-1252

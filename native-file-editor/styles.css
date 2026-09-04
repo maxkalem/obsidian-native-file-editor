@@ -1,0 +1,292 @@
+/*
+ * Native File Editor. Every class carries the nfe- prefix, nothing uses
+ * !important, and every colour, font and spacing comes from Obsidian's own
+ * variables so a community theme restyles these panes the way it restyles the
+ * Markdown editor.
+ */
+
+/* The text pane: head, body; only the body scrolls. Two classes, because a
+   single class loses to Obsidian's own .view-content rule. */
+.view-content.nfe-text-content {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.nfe-text-content .nfe-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  flex: 0 0 auto;
+  padding: var(--size-4-1) var(--size-4-3);
+  border-bottom: var(--border-width) solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.nfe-text-content .nfe-head-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-1);
+  min-width: 0;
+}
+
+.nfe-text-content .nfe-badge {
+  padding: 0 var(--size-4-1);
+  border-radius: var(--radius-s);
+  background-color: var(--background-modifier-hover);
+  white-space: nowrap;
+}
+
+.nfe-text-content .nfe-badge-warn {
+  background-color: var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+.nfe-text-content .nfe-mode-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  flex: 0 0 auto;
+}
+
+.nfe-text-content .nfe-mode-icon {
+  display: inline-flex;
+}
+
+.nfe-text-content .nfe-mode-icon svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+
+.nfe-text-content .nfe-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Preview: the file as text, in the editor's monospace font, no editor built. */
+.nfe-text-content .nfe-preview {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: var(--size-4-2) var(--size-4-3);
+  font-family: var(--font-monospace);
+  font-size: var(--font-text-size);
+  line-height: var(--line-height-normal);
+  color: var(--text-normal);
+  background-color: var(--background-primary);
+  white-space: pre;
+  overflow: auto;
+  tab-size: 4;
+}
+
+.nfe-text-content .nfe-preview.nfe-wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Editor: the CodeMirror view fills the body. */
+.nfe-text-content .nfe-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.nfe-text-content .nfe-editor .cm-editor {
+  flex: 1 1 auto;
+  height: 100%;
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.nfe-text-content .nfe-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.nfe-text-content .nfe-editor .cm-scroller {
+  font-family: var(--font-monospace);
+  font-size: var(--font-text-size);
+  line-height: var(--line-height-normal);
+}
+
+.nfe-text-content .nfe-editor .cm-gutters {
+  background-color: var(--background-primary);
+  color: var(--text-faint);
+  border-right: var(--border-width) solid var(--background-modifier-border);
+}
+
+.nfe-text-content .nfe-editor .cm-activeLineGutter {
+  background-color: var(--background-modifier-hover);
+}
+
+.nfe-text-content .nfe-editor .cm-activeLine {
+  background-color: var(--background-modifier-hover);
+}
+
+.nfe-text-content .nfe-editor .cm-cursor {
+  border-left-color: var(--text-normal);
+}
+
+.nfe-text-content .nfe-editor .cm-selectionBackground,
+.nfe-text-content .nfe-editor .cm-focused .cm-selectionBackground,
+.nfe-text-content .nfe-editor .cm-content ::selection {
+  background-color: var(--text-selection);
+}
+
+.nfe-text-content .nfe-editor .cm-matchingBracket {
+  background-color: var(--background-modifier-hover);
+  outline: var(--border-width) solid var(--text-faint);
+}
+
+.nfe-text-content .nfe-editor .cm-selectionMatch {
+  background-color: var(--text-highlight-bg);
+}
+
+.nfe-text-content .nfe-editor .cm-panels {
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  border-bottom: var(--border-width) solid var(--background-modifier-border);
+}
+
+/* Syntax tokens. The highlighter emits stable nfe-tok-* classes; this is the
+   only place they meet colours, and every colour is one of Obsidian's eleven
+   --code-* variables, so the active theme (light or dark) already styles the
+   editor and a palette is a CSS file that overrides these rules. The same
+   classes appear in the preview and in the editor. */
+.nfe-text-content .nfe-tok-comment {
+  color: var(--code-comment);
+}
+
+.nfe-text-content .nfe-tok-doc {
+  font-style: italic;
+}
+
+.nfe-text-content .nfe-tok-keyword,
+.nfe-text-content .nfe-tok-control,
+.nfe-text-content .nfe-tok-modifier {
+  color: var(--code-keyword);
+}
+
+.nfe-text-content .nfe-tok-constant,
+.nfe-text-content .nfe-tok-bool,
+.nfe-text-content .nfe-tok-null,
+.nfe-text-content .nfe-tok-number,
+.nfe-text-content .nfe-tok-value,
+.nfe-text-content .nfe-tok-escape {
+  color: var(--code-value);
+}
+
+.nfe-text-content .nfe-tok-string,
+.nfe-text-content .nfe-tok-regexp,
+.nfe-text-content .nfe-tok-special {
+  color: var(--code-string);
+}
+
+.nfe-text-content .nfe-tok-link {
+  color: var(--code-string);
+  text-decoration: underline;
+}
+
+.nfe-text-content .nfe-tok-variable,
+.nfe-text-content .nfe-tok-definition {
+  color: var(--code-normal);
+}
+
+.nfe-text-content .nfe-tok-function,
+.nfe-text-content .nfe-tok-builtin,
+.nfe-text-content .nfe-tok-type,
+.nfe-text-content .nfe-tok-namespace {
+  color: var(--code-function);
+}
+
+.nfe-text-content .nfe-tok-property,
+.nfe-text-content .nfe-tok-attribute,
+.nfe-text-content .nfe-tok-label {
+  color: var(--code-property);
+}
+
+.nfe-text-content .nfe-tok-tag {
+  color: var(--code-tag);
+}
+
+.nfe-text-content .nfe-tok-operator {
+  color: var(--code-operator);
+}
+
+.nfe-text-content .nfe-tok-punctuation,
+.nfe-text-content .nfe-tok-bracket,
+.nfe-text-content .nfe-tok-separator {
+  color: var(--code-punctuation);
+}
+
+.nfe-text-content .nfe-tok-meta,
+.nfe-text-content .nfe-tok-preproc {
+  color: var(--code-important);
+}
+
+.nfe-text-content .nfe-tok-invalid {
+  color: var(--text-error);
+  text-decoration: underline wavy;
+}
+
+.nfe-text-content .nfe-tok-heading {
+  color: var(--code-tag);
+  font-weight: var(--bold-weight);
+}
+
+.nfe-text-content .nfe-tok-list,
+.nfe-text-content .nfe-tok-quote {
+  color: var(--code-keyword);
+}
+
+.nfe-text-content .nfe-tok-emphasis {
+  font-style: italic;
+}
+
+.nfe-text-content .nfe-tok-strong {
+  font-weight: var(--bold-weight);
+}
+
+.nfe-text-content .nfe-tok-strikethrough {
+  text-decoration: line-through;
+}
+
+.nfe-text-content .nfe-tok-monospace {
+  color: var(--code-normal);
+}
+
+.nfe-text-content .nfe-tok-inserted {
+  color: var(--color-green);
+}
+
+.nfe-text-content .nfe-tok-deleted {
+  color: var(--color-red);
+}
+
+.nfe-text-content .nfe-tok-changed {
+  color: var(--color-orange);
+}
+
+.nfe-text-content .nfe-error {
+  padding: var(--size-4-4);
+  color: var(--text-error);
+}
+
+/* Large-file modal. */
+.nfe-modal .nfe-modal-note {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.nfe-modal .nfe-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--size-4-4);
+}

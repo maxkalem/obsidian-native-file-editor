@@ -1,0 +1,33 @@
+# Line endings.
+#
+# Every text file is LF in the repository and LF in every checkout. Without this
+# a Windows checkout converts on the way out, each file then shows up as a
+# whole-file diff (LICENSE was "modified" before a single line of code existed),
+# and a shell script committed from that checkout dies in CI with
+# `$'\r': command not found`.
+#
+# `text=auto eol=lf`: decide text vs binary by content, check text out with LF.
+* text=auto eol=lf
+*.sh text eol=lf
+
+# Windows batch files are the one exception: cmd.exe misparses labels and
+# multi-line blocks in an LF-only script.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Fixture corpus for the readers and writers: real files whose bytes are
+# compared exactly, so nothing may touch them. This includes the text fixtures
+# with CRLF, UTF-16 and single-byte encodings, which the LF rule above would
+# otherwise rewrite on checkout.
+tests/e2e/fixtures/** binary
+*.docx binary
+*.xlsx binary
+*.pptx binary
+*.ppsx binary
+*.doc binary
+*.xls binary
+*.ppt binary
+*.pps binary
+*.zip binary
+*.png binary
+*.jpg binary

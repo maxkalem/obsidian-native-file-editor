@@ -1,0 +1,62 @@
+name: Build plugin
+
+# Deliberately no `push` trigger: nothing builds automatically except a release
+# (release.yml, on a version tag). A pull request or a manual run is how the
+# suites are exercised before that.
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies (locked)
+        run: npm ci
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+      - name: End-to-end checks (real fixture files through readers and writers)
+        run: npm run test:e2e
+
+      - name: Type-check and bundle (strict tsc + esbuild)
+        run: npm run build
+
+      # main.js is committed at the root, the Obsidian convention, and the build
+      # copies the three files into native-file-editor/ for manual installs. If
+      # a fresh build differs from what is committed, src/ changed without a
+      # rebuild or a copy was edited by hand, and a release or a manual install
+      # would ship bytes nobody reviewed. Fail loudly.
+      - name: Committed artifacts must match the build exactly
+        run: |
+          git diff --exit-code -- main.js manifest.json styles.css versions.json \
+            native-file-editor/main.js native-file-editor/manifest.json native-file-editor/styles.css \
+          || { echo "::error::Committed build artifacts are stale. Run 'npm run build' and commit the result."; exit 1; }
+
+      - name: Version consistency (manifest vs package vs versions.json)
+        run: |
+          MV=$(jq -r .version manifest.json)
+          PV=$(jq -r .version package.json)
+          [ "$MV" = "$PV" ] || { echo "manifest.json ($MV) != package.json ($PV)"; exit 1; }
+          jq -e --arg v "$MV" 'has($v)' versions.json >/dev/null \
+            || { echo "versions.json has no entry for $MV"; exit 1; }
+
+      - name: Bundle size report
+        run: npm run size
+
+      - name: Upload plugin bundle
+        uses: actions/upload-artifact@v5
+        with:
+          name: native-file-editor-plugin
+          path: |
+            main.js
+            manifest.json
+            styles.css

@@ -1,0 +1,2 @@
+﻿BOM utf-8 Привіт
+line two
