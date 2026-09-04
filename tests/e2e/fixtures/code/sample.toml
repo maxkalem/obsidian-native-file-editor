@@ -1,0 +1,15 @@
+# TOML (legacy stream mode)
+[package]
+name = "native-file-editor"
+version = "0.1.0"
+edition = "2021"
+
+[limits]
+large_file_mb = 5
+preview_highlight_mb = 1
+enabled = true
+
+[[devices]]
+name = "desktop"
+[[devices]]
+name = "samsung"

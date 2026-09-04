@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <title>Native File Editor</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    .badge { padding: 0 .4em; border-radius: 4px; background: #eee; }
+  </style>
+</head>
+<body>
+  <!-- HTML with embedded CSS and JavaScript -->
+  <h1 class="title">Привіт, <span class="badge">світ</span></h1>
+  <button id="go" disabled>Edit</button>
+  <script>
+    document.getElementById("go").addEventListener("click", () => alert(`clicked at ${Date.now()}`));
+  </script>
+</body>
+</html>

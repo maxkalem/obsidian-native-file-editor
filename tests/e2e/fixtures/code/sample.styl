@@ -1,0 +1,21 @@
+// Stylus: variables, mixins, nesting, operators, conditionals.
+nfe-gap = 0.5rem
+nfe-accent = #7c3aed
+
+badge(radius = 4px)
+  padding 0 (nfe-gap / 2)
+  border-radius radius
+
+.nfe-head
+  display flex
+  gap nfe-gap
+
+  .nfe-badge
+    badge()
+    background rgba(nfe-accent, 0.15)
+    &.nfe-badge-warn
+      background #e03131 if lightness(nfe-accent) > 50%
+
+@media (max-width: 600px)
+  .nfe-head
+    flex-wrap wrap

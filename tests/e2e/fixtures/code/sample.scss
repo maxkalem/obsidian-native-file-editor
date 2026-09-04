@@ -1,0 +1,24 @@
+// SCSS: variables, nesting, mixins, functions, maps.
+@use "sass:math";
+
+$nfe-gap: 0.5rem;
+$nfe-accent: #7c3aed;
+$breakpoints: (phone: 600px, tablet: 900px);
+
+@mixin badge($radius: 4px) {
+  padding: 0 math.div($nfe-gap, 2);
+  border-radius: $radius;
+}
+
+.nfe-head {
+  display: flex;
+  gap: $nfe-gap;
+
+  .nfe-badge {
+    @include badge;
+    background: rgba($nfe-accent, 0.15);
+    &.nfe-badge-warn { background: darken(#e03131, 10%); }
+  }
+
+  @media (max-width: map-get($breakpoints, phone)) { flex-wrap: wrap; }
+}

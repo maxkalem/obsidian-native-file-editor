@@ -1,0 +1,12 @@
+<!-- DTD: elements, attributes, entities. -->
+<!ENTITY % text "(#PCDATA)">
+<!ELEMENT plugin (name, extensions, description?)>
+<!ATTLIST plugin
+  id ID #REQUIRED
+  version CDATA #IMPLIED
+  desktopOnly (true | false) "false">
+<!ELEMENT name %text;>
+<!ELEMENT extensions (ext+)>
+<!ELEMENT ext EMPTY>
+<!ATTLIST ext name NMTOKEN #REQUIRED enabled (true|false) "true">
+<!ELEMENT description %text;>

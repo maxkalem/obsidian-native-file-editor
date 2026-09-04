@@ -1,0 +1,11 @@
+-- SQLite dialect: WITHOUT ROWID, json_extract, upsert.
+CREATE TABLE notes (
+  path TEXT PRIMARY KEY,
+  meta TEXT,
+  size INTEGER DEFAULT 0
+) WITHOUT ROWID;
+
+INSERT INTO notes (path, meta) VALUES ('a.md', '{"title":"A"}')
+ON CONFLICT(path) DO UPDATE SET meta = excluded.meta;
+
+SELECT path, json_extract(meta, '$.title') AS title FROM notes WHERE size < 5 * 1024 * 1024;

@@ -1,0 +1,17 @@
+## Velocity: directives, references, macros, loops.
+#set($limit = 5 * 1024 * 1024)
+#macro(badge $text $warn)
+  <span class="nfe-badge#if($warn) nfe-badge-warn#end">$text</span>
+#end
+
+<h1>$plugin.name $plugin.version</h1>
+<ul>
+#foreach($ext in $extensions)
+  <li>.$ext.name #if($ext.owner)#badge($ext.owner, true)#end</li>
+#end
+</ul>
+#if($note.size > $limit)
+  <p>$!note.path opens as a preview.</p>
+#else
+  <p>$note.path opens in the editor.</p>
+#end

@@ -1,0 +1,2 @@
+Plain text sample.
+No highlighting is expected here: this entry has no language.

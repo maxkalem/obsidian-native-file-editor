@@ -1,0 +1,16 @@
+From maxkalem@example.com Thu Sep  4 12:00:00 2026
+From: Max Kalem <maxkalem@example.com>
+To: Native File Editor <nfe@example.com>
+Subject: Device check 0.1.0
+Date: Thu, 04 Sep 2026 12:00:00 +0300
+Message-ID: <20260904120000.1@example.com>
+Content-Type: text/plain; charset=utf-8
+
+Head bar, badges and the read-only case render on desktop.
+Highlighting checked on 22 samples; see the ledger.
+
+From nfe@example.com Thu Sep  4 12:05:00 2026
+From: Native File Editor <nfe@example.com>
+Subject: Re: Device check 0.1.0
+
+Thanks, recorded.

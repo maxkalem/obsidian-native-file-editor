@@ -1,0 +1,17 @@
+/* GSS (Closure Stylesheets): variables, mixins, conditionals. */
+@def NFE_GAP 8px;
+@def NFE_ACCENT #7c3aed;
+
+@defmixin badge(RADIUS) {
+  border-radius: RADIUS;
+  padding: 0 NFE_GAP;
+}
+
+.nfe-badge {
+  @mixin badge(4px);
+  background: NFE_ACCENT;
+}
+
+@if (NFE_GAP > 4px) {
+  .nfe-head { gap: NFE_GAP; }
+}

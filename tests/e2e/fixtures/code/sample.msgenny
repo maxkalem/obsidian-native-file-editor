@@ -1,0 +1,11 @@
+# MsGenny: a compact sequence chart.
+User, View, Autosave, Transport;
+
+User => View : type;
+View => Autosave : schedule();
+Autosave -> Autosave : 1000 ms;
+Autosave => View : save();
+View => Transport : writeBinaryAtomic(path, bytes);
+Transport >> View : ok;
+--- : external change;
+Transport -> View : modify event;

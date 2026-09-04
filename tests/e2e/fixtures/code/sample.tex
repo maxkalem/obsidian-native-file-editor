@@ -1,0 +1,23 @@
+% LaTeX: preamble, sections, math, environments, commands.
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\newcommand{\limit}{5\,\mathrm{MB}}
+
+\title{Native File Editor}
+\author{maxkalem}
+
+\begin{document}
+\maketitle
+
+\section{Preview first}
+A file above \limit{} opens as a preview. The cost of a parse is
+\begin{equation}
+  T(n) = \alpha n + \beta, \qquad n = \text{bytes}.
+\end{equation}
+
+\begin{itemize}
+  \item \textbf{Edit} builds the editor on demand.
+  \item Palettes are \emph{plain CSS}.
+\end{itemize}
+\end{document}

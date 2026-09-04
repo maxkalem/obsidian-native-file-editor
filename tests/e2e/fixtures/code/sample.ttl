@@ -1,0 +1,14 @@
+# Turtle: prefixes, typed literals, blank nodes, lists.
+@prefix nfe: <http://example.com/nfe#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+nfe:Note a rdfs:Class ; rdfs:label "Note"@en .
+
+<http://example.com/note/a.md>
+    a nfe:Note ;
+    nfe:path "a.md" ;
+    nfe:size "12"^^xsd:integer ;
+    nfe:tag "x", "y" ;
+    nfe:mode [ a nfe:Preview ; nfe:large false ] ;
+    nfe:history ( "v1" "v2" ) .

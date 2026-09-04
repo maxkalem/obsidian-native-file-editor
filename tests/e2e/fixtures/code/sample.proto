@@ -1,0 +1,27 @@
+// Protocol Buffers: messages, enums, services, options.
+syntax = "proto3";
+
+package nfe.v1;
+
+option java_package = "com.example.nfe";
+
+enum Mode {
+  MODE_UNSPECIFIED = 0;
+  MODE_PREVIEW = 1;
+  MODE_EDIT = 2;
+}
+
+message Note {
+  string path = 1;
+  repeated string tags = 2;
+  uint64 size = 3;
+  Mode mode = 4;
+  map<string, string> meta = 5;
+  reserved 6, 7;
+}
+
+service Scanner {
+  rpc Group(GroupRequest) returns (stream Note);
+}
+
+message GroupRequest { uint64 limit = 1; }

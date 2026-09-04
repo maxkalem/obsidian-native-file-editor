@@ -1,0 +1,20 @@
+/* CSS: variables, nesting-free selectors, media query. */
+:root {
+  --nfe-gap: 0.5rem;
+  --nfe-accent: #7c3aed;
+}
+
+.nfe-head {
+  display: flex;
+  gap: var(--nfe-gap);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.nfe-head > .nfe-badge:not(:last-child)::after {
+  content: "·";
+  margin-left: 4px;
+}
+
+@media (max-width: 600px) {
+  .nfe-head { flex-wrap: wrap; font-size: 90%; }
+}

@@ -1,0 +1,13 @@
+-- MySQL dialect: backticks, AUTO_INCREMENT, ON DUPLICATE KEY.
+CREATE TABLE `notes` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `path` VARCHAR(255) NOT NULL,
+  `size` BIGINT DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `path` (`path`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO `notes` (`path`, `size`) VALUES ('a.md', 12)
+ON DUPLICATE KEY UPDATE `size` = VALUES(`size`);
+
+SELECT `path`, IFNULL(`size`, 0) AS bytes FROM `notes` WHERE `size` > 1024 * 1024 LIMIT 5;

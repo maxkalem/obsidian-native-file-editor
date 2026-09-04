@@ -1,0 +1,12 @@
+diff --git a/src/constants.ts b/src/constants.ts
+index 3f2a1c9..8b7d0e4 100644
+--- a/src/constants.ts
++++ b/src/constants.ts
+@@ -12,6 +12,9 @@ export const AUTOSAVE_DELAY_MS = 1000;
+ /** Above this size a text file opens in preview only unless the user insists. */
+ export const DEFAULT_LARGE_FILE_BYTES = 5 * 1024 * 1024;
+ 
++/** Above this size the preview is plain text. */
++export const PREVIEW_HIGHLIGHT_MAX_BYTES = 1024 * 1024;
++
+-export const OLD_CONSTANT = 1;

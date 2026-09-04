@@ -1,0 +1,17 @@
+title: Native File Editor
+tags: plugin obsidian
+type: text/vnd.tiddlywiki
+
+! Native File Editor
+
+TiddlyWiki markup: ''bold'', //italic//, `code`, [[links]] and <<macros>>.
+
+* Preview first
+* Edit on demand
+** Autosave after 1000 ms
+
+<<list-links "[tag[plugin]]">>
+
+|!extension |!source |
+|.ts |lezer |
+|.cs |legacy |

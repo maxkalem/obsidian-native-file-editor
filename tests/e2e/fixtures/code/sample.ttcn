@@ -1,0 +1,23 @@
+// TTCN-3: module, types, templates, test case, verdicts.
+module NoteTest {
+  type record Note {
+    charstring path,
+    integer size,
+    set of charstring tags optional
+  }
+
+  const integer c_limit := 5242880;
+
+  template Note t_small := { path := ?, size := (0 .. c_limit), tags := * };
+
+  type port NotePort message { inout Note }
+  type component Scanner { port NotePort p; timer t_guard := 2.0; }
+
+  testcase tc_preview() runs on Scanner {
+    var Note v_note := { "a.md", 12, { "x" } };
+    if (match(v_note, t_small)) { setverdict(pass); }
+    else { setverdict(fail, "large file"); }
+  }
+
+  control { execute(tc_preview()); }
+}

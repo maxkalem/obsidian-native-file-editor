@@ -1,0 +1,17 @@
+# SPARQL: prefixes, SELECT, OPTIONAL, FILTER, aggregation.
+PREFIX nfe: <http://example.com/nfe#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT ?tag (COUNT(?note) AS ?notes) (MAX(?size) AS ?biggest)
+WHERE {
+  ?note a nfe:Note ;
+        nfe:tag ?tag ;
+        nfe:size ?size .
+  OPTIONAL { ?note nfe:owner ?owner }
+  FILTER (?size <= 5242880 && !BOUND(?owner))
+  FILTER regex(str(?tag), "^[a-z]", "i")
+}
+GROUP BY ?tag
+HAVING (COUNT(?note) > 0)
+ORDER BY DESC(?notes)
+LIMIT 10

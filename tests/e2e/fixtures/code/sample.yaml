@@ -1,0 +1,17 @@
+# YAML: mappings, sequences, anchors, block scalars.
+name: native-file-editor
+version: 0.1.0
+defaults: &defaults
+  initialMode: preview
+  lineNumbers: true
+devices:
+  - name: desktop
+    <<: *defaults
+    largeFileMb: 5
+  - name: samsung
+    <<: *defaults
+    largeFileMb: 2
+notes: |
+  Multi-line text
+  keeps its line breaks.
+enabled: yes

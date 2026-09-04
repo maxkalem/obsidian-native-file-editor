@@ -1,0 +1,14 @@
+-- T-SQL dialect: TOP, brackets, variables, IDENTITY.
+DECLARE @limit BIGINT = 5 * 1024 * 1024;
+
+CREATE TABLE [dbo].[Notes] (
+  [Id] INT IDENTITY(1,1) PRIMARY KEY,
+  [Path] NVARCHAR(400) NOT NULL,
+  [Size] BIGINT NULL
+);
+
+SELECT TOP 10 [Path], ISNULL([Size], 0) AS Bytes
+FROM [dbo].[Notes] WITH (NOLOCK)
+WHERE [Size] > @limit
+ORDER BY [Size] DESC;
+GO

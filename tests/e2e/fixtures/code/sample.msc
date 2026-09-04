@@ -1,0 +1,16 @@
+# MscGen: entities and messages for the autosave flow.
+msc {
+  hscale = "1.4";
+
+  user [label="User"], view [label="TextView"], auto [label="Autosave"], fs [label="Transport"];
+
+  user => view [label="type"];
+  view => auto [label="schedule()"];
+  auto -> auto [label="1000 ms"];
+  auto => view [label="save()"];
+  view => fs [label="writeBinaryAtomic(path, bytes)"];
+  fs >> view [label="ok"];
+  --- [label="external change"];
+  fs -> view [label="modify event"];
+  view abox view [label="ignore: within 1.5 s of own write"];
+}

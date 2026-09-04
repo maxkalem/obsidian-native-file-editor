@@ -1,0 +1,25 @@
+# Puppet: classes, resources, variables, conditionals.
+class nfe::plugin (
+  String  $vault   = '/srv/vault',
+  Integer $limit   = 5242880,
+  Boolean $enabled = true,
+) {
+  $dst = "${vault}/.obsidian/plugins/native-file-editor"
+
+  file { $dst:
+    ensure => directory,
+    mode   => '0755',
+  }
+
+  ['main.js', 'manifest.json', 'styles.css'].each |String $f| {
+    file { "${dst}/${f}":
+      ensure => file,
+      source => "puppet:///modules/nfe/${f}",
+      require => File[$dst],
+    }
+  }
+
+  if $enabled and $limit > 1048576 {
+    notify { "nfe: limit ${limit} bytes": }
+  }
+}

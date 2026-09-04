@@ -1,0 +1,14 @@
+# Xù: MscGen with extra arrow types and boxes.
+xu {
+  hscale = "1.2", watermark = "draft";
+
+  user, view, auto;
+
+  user => view [label="Edit anyway"];
+  view :> auto [label="start"];
+  view alt auto [label="large file"] {
+    view note view [label="preview only"];
+    --- [label="else"];
+    view => auto [label="schedule()"];
+  };
+}

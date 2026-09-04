@@ -1,0 +1,16 @@
+{# Jinja2: variables, filters, blocks, loops, tests. #}
+{% extends "base.html" %}
+
+{% block title %}{{ plugin.name | upper }} {{ plugin.version }}{% endblock %}
+
+{% block content %}
+<ul class="nfe-list">
+{% for ext in extensions if ext.enabled %}
+  <li class="{{ loop.cycle('odd', 'even') }}">.{{ ext.name }}{% if ext.owner is defined %} ({{ ext.owner }}){% endif %}</li>
+{% else %}
+  <li>No extensions registered.</li>
+{% endfor %}
+</ul>
+{% set limit = 5 * 1024 * 1024 %}
+<p>Large above {{ (limit / 1048576) | round | int }} MB.</p>
+{% endblock %}

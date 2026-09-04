@@ -1,0 +1,9 @@
+{
+  "id": "native-file-editor",
+  "version": "0.1.0",
+  "minAppVersion": "1.13.0",
+  "isDesktopOnly": false,
+  "limits": { "largeFileMb": 5, "previewHighlightMb": 1 },
+  "extensions": ["txt", "log", "py", "ts"],
+  "nothing": null
+}

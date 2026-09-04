@@ -1,0 +1,15 @@
+% Octave: functions, matrices, logical indexing, printf.
+1;  % script file marker
+
+function out = count_large(sizes, limit)
+  % Count entries above the limit.
+  if nargin < 2
+    limit = 5 * 1024 * 1024;
+  end
+  out = sum(sizes > limit);
+end
+
+sizes = [12, 7, 6291456, 1048576];
+mask = sizes > 1e6;            # comment in the other style
+printf("%d large of %d\n", count_large(sizes), numel(sizes));
+disp(sizes(mask));

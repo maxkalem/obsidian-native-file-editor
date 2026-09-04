@@ -1,0 +1,18 @@
+.\" troff/man: a manual page for the install script.
+.TH COPY 1 "September 2026" "native-file-editor 0.1.0" "User Commands"
+.SH NAME
+copy.bat \- install the built plugin into a vault
+.SH SYNOPSIS
+.B copy.bat
+.RI [ vault-path ]
+.SH DESCRIPTION
+Copies
+.BR main.js ", " manifest.json " and " styles.css
+into the vault's plugin folder, keeping
+.IR data.json .
+.SH ENVIRONMENT
+.TP
+.B NFE_VAULT
+The vault used when no argument is given.
+.SH SEE ALSO
+.BR clean.cmd (1)

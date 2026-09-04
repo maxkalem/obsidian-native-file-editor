@@ -1,0 +1,7 @@
+# N-Triples: subjects, predicates, objects, literals with types.
+<http://example.com/note/a.md> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.com/Note> .
+<http://example.com/note/a.md> <http://example.com/path> "a.md" .
+<http://example.com/note/a.md> <http://example.com/size> "12"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://example.com/note/a.md> <http://example.com/tag> "x"@en .
+<http://example.com/note/a.md> <http://example.com/tag> "y"@en .
+<http://example.com/note/b.md> <http://example.com/size> "6291456"^^<http://www.w3.org/2001/XMLSchema#integer> .

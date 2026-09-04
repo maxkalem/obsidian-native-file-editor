@@ -1,0 +1,11 @@
+# HXML: Haxe build file.
+-cp src
+-main nfe.Scanner
+-D analyzer-optimize
+--dce full
+-js bin/scanner.js
+
+--next
+-cp src
+-main nfe.Scanner
+-neko bin/scanner.n

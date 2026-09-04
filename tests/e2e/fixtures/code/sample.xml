@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- XML: namespaces, attributes, CDATA -->
+<plugin xmlns:nfe="urn:native-file-editor" id="native-file-editor" version="0.1.0">
+  <nfe:extensions>
+    <ext name="txt" enabled="true"/>
+    <ext name="log" enabled="true"/>
+  </nfe:extensions>
+  <description><![CDATA[Opens <every> text file & Office documents.]]></description>
+</plugin>

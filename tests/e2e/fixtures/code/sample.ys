@@ -1,0 +1,12 @@
+/* Yacas: rules, functions, symbolic algebra. */
+Limit := 5 * 1024 * 1024;
+
+IsLarge(size_IsNumber) <-- size > Limit;
+
+10 # Describe(0) <-- "no tags";
+20 # Describe(n_IsInteger)_(n > 100) <-- "many tags: " : ToString(n);
+30 # Describe(n_IsInteger) <-- ToString(n) : " tags";
+
+Cost(n) := a * n + b;
+Solve(Cost(n) == 0, n);
+Echo(Describe(2), " ", Simplify(D(n) Cost(n)));

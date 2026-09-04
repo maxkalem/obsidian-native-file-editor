@@ -1,0 +1,25 @@
+// FCL: a fuzzy controller for editor mode selection.
+FUNCTION_BLOCK mode_select
+  VAR_INPUT
+    size : REAL;
+  END_VAR
+  VAR_OUTPUT
+    preview : REAL;
+  END_VAR
+
+  FUZZIFY size
+    TERM small := (0, 1) (1048576, 1) (5242880, 0);
+    TERM large := (1048576, 0) (5242880, 1);
+  END_FUZZIFY
+
+  DEFUZZIFY preview
+    TERM no := 0; TERM yes := 1;
+    METHOD : COG; DEFAULT := 0;
+  END_DEFUZZIFY
+
+  RULEBLOCK rules
+    AND : MIN; ACT : MIN; ACCU : MAX;
+    RULE 1 : IF size IS large THEN preview IS yes;
+    RULE 2 : IF size IS small THEN preview IS no;
+  END_RULEBLOCK
+END_FUNCTION_BLOCK

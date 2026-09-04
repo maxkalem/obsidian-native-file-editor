@@ -1,0 +1,18 @@
+//- Pug: tags, attributes, mixins, iteration, interpolation.
+doctype html
+html(lang="uk")
+  head
+    meta(charset="utf-8")
+    title= plugin.name
+  body.nfe
+    mixin badge(text, warn)
+      span.nfe-badge(class=warn ? "nfe-badge-warn" : "")= text
+    h1 #{plugin.name} #{plugin.version}
+    ul
+      each ext in extensions
+        li.
+          .#{ext.name}
+          - if (ext.owner)
+            +badge(ext.owner, true)
+    script.
+      console.log("ready", #{extensions.length});

@@ -1,0 +1,17 @@
+h1. Native File Editor
+
+Textile markup: *strong*, _emphasis_, @code@, "links":https://example.com and lists.
+
+h2. Modes
+
+* Preview first
+* Edit on demand
+** Autosave after 1000 ms
+
+bq. Files above 5 MB open as a preview.
+
+|_. extension |_. source |
+| .ts | lezer |
+| .cs | legacy |
+
+p(note). The limit is a per-device setting.

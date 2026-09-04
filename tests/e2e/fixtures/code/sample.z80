@@ -1,0 +1,22 @@
+; Z80 assembly: equates, org, labels, loops.
+LIMIT   EQU     $4FF0
+        ORG     $8000
+
+start:  LD      HL, sizes       ; pointer to the size table
+        LD      B, 3            ; three entries
+        LD      C, 0            ; count of large entries
+loop:   LD      E, (HL)
+        INC     HL
+        LD      D, (HL)
+        INC     HL
+        EX      DE, HL
+        OR      A
+        SBC     HL, LIMIT       ; HL - LIMIT (carry if smaller)
+        EX      DE, HL
+        JR      C, next
+        INC     C
+next:   DJNZ    loop
+        LD      A, C
+        RET
+
+sizes:  DEFW    12, $6000, 7
