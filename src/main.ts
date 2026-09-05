@@ -4,7 +4,10 @@ import { COMMAND_NEW_FILE, COMMAND_TOGGLE_MODE, LOG_FILE_NAME, PLUGIN_ID, VIEW_T
 import { decideClaims, describeYielded } from "./core/claims";
 import { Logger, describeError } from "./core/log";
 import type { Timers } from "./core/autosave";
-import { tokenizeForPreview } from "./highlight/highlighter";
+import { ruleOf, tokenize } from "./highlight/highlighter";
+import { getStyleTags } from "@lezer/highlight";
+import { EditorState } from "@codemirror/state";
+import { ensureSyntaxTree } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { logMode } from "./highlight/logMode";
 import { registeredExtensions } from "./highlight/registry";
@@ -61,15 +64,39 @@ export function selfTestStreamLanguage(): string {
   const one = (name: string, parser: Parameters<typeof StreamLanguage.define>[0], text: string): string => {
     try {
       const lang = StreamLanguage.define(parser);
-      const tokens = tokenizeForPreview(text, lang);
+      const tokens = tokenize(text, lang);
       if (tokens === null) return `${name}: parse timed out`;
       const classes = tokens.filter((t) => t.classes !== null).length;
-      return `${name}: ${classes > 0 ? "ok" : "no token classes"} (${tokens.length} tokens, ${classes} classed)`;
+      // Which copy of @lezer/highlight tagged the tree: the plugin's getStyleTags
+      // sees a rule only when it is the same copy; ruleOf sees it by shape.
+      const state = EditorState.create({ doc: text, extensions: [lang] });
+      const tree = ensureSyntaxTree(state, text.length, 1000);
+      let first = tree?.topNode.firstChild ?? null;
+      while (first && !ruleOf(first.type)) first = first.nextSibling;
+      const copies = !first ? "no tagged node" : getStyleTags(first) ? "one @lezer/highlight copy" : "TWO @lezer/highlight copies (rule by shape only)";
+      // When nothing is recognised, say what the first token's node type
+      // carries, so the shape can be read from the log.
+      const probe = tree?.topNode.firstChild ?? null;
+      const shape = probe ? describeNodeType(probe.type) : "no first child";
+      return `${name}: ${classes > 0 ? "ok" : "no token classes"} (${tokens.length} tokens, ${classes} classed; tree ${tree ? tree.toString().slice(0, 80) : "null"}; ${copies}; first ${shape})`;
     } catch (e) {
       return `${name}: FAILED: ${describeError(e)}`;
     }
   };
   return [one("builtin log", logMode, "2026-09-04 12:00:00 ERROR failed\n"), one("legacy shell", shell, "echo hi # c\n")].join("; ");
+}
+
+/** A node type's name and its props, shallowly: keys, constructor names, and the keys of each value. */
+export function describeNodeType(type: { name: string }): string {
+  const props = (type as unknown as { props?: Record<string, unknown> }).props;
+  if (!props) return `${type.name}: no props field`;
+  const entries = Object.entries(props).map(([k, v]) => {
+    if (v === null || typeof v !== "object") return `${k}=${typeof v}`;
+    const ctor = (v as { constructor?: { name?: string } }).constructor?.name ?? "?";
+    return `${k}=${ctor}{${Object.keys(v as object).join("|")}}`;
+  });
+  const own = Object.getOwnPropertyNames(type).join("|");
+  return `${type.name} props[${entries.join(", ")}] fields[${own}]`;
 }
 
 export default class NativeFileEditorPlugin extends Plugin {

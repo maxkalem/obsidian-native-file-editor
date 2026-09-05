@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tokenizeForPreview } from "../src/highlight/highlighter";
+import { tokenize } from "../src/highlight/highlighter";
 import { languageFor, resolveLanguage } from "../src/highlight/registry";
 
 function classesByText(text: string): Map<string, string | null> {
@@ -7,7 +7,7 @@ function classesByText(text: string): Map<string, string | null> {
   const resolved = entry ? resolveLanguage(entry) : null;
   if (!resolved) throw new Error("log entry missing");
   const out = new Map<string, string | null>();
-  for (const t of tokenizeForPreview(text, resolved.language) ?? []) if (t.text.trim()) out.set(t.text.trim(), t.classes);
+  for (const t of tokenize(text, resolved.language) ?? []) if (t.text.trim()) out.set(t.text.trim(), t.classes);
   return out;
 }
 
@@ -42,6 +42,6 @@ describe("log mode", () => {
     const entry = languageFor("log");
     const resolved = entry ? resolveLanguage(entry) : null;
     const text = "a b\n\nERROR c\n";
-    expect((tokenizeForPreview(text, resolved!.language) ?? []).map((t) => t.text).join("")).toBe(text);
+    expect((tokenize(text, resolved!.language) ?? []).map((t) => t.text).join("")).toBe(text);
   });
 });

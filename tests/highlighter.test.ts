@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { tokenClassNames, tokenizeForPreview } from "../src/highlight/highlighter";
+import { ensureSyntaxTree } from "@codemirror/language";
+import { EditorState } from "@codemirror/state";
+import { classesForTags, paintByName, ruleOf, tokenClassNames, tokenize, treeHasRules } from "../src/highlight/highlighter";
 import { languageFor, resolveLanguage } from "../src/highlight/registry";
 
 function tokens(ext: string, text: string) {
@@ -7,7 +9,7 @@ function tokens(ext: string, text: string) {
   if (!entry) throw new Error(`no entry for .${ext}`);
   const resolved = resolveLanguage(entry);
   if (!resolved) throw new Error(`no language for .${ext}`);
-  return tokenizeForPreview(text, resolved.language) ?? [];
+  return tokenize(text, resolved.language) ?? [];
 }
 
 function classesOf(ext: string, text: string, snippet: string): string | null {
@@ -27,7 +29,7 @@ describe("nfe highlighter", () => {
       throw new Error("direct parser.parse() call");
     };
     try {
-      const out = tokenizeForPreview("echo hi # c\n", resolved.language);
+      const out = tokenize("echo hi # c\n", resolved.language);
       expect(out).not.toBeNull();
       expect(out!.some((t) => (t.classes ?? "").includes("nfe-tok-comment"))).toBe(true);
     } finally {
@@ -40,8 +42,8 @@ describe("nfe highlighter", () => {
     const resolved = entry ? resolveLanguage(entry) : null;
     if (!resolved) throw new Error("no python");
     const big = "x = 1\n".repeat(300_000);
-    expect(tokenizeForPreview(big, resolved.language, 0)).toBeNull();
-    expect(tokenizeForPreview("x = 1\n", resolved.language, 1000)).not.toBeNull();
+    expect(tokenize(big, resolved.language, 0)).toBeNull();
+    expect(tokenize("x = 1\n", resolved.language, 1000)).not.toBeNull();
   });
 
   it("emits Obsidian's cm-* class beside every nfe-tok-* class", () => {
@@ -51,6 +53,47 @@ describe("nfe highlighter", () => {
       expect(parts.some((c) => c.startsWith("cm-")), t.classes).toBe(true);
       expect(parts.some((c) => c.startsWith("nfe-tok-")), t.classes).toBe(true);
     }
+  });
+
+  it("the by-name walk produces the same tokens as highlightCode, for a lezer grammar and a stream mode", () => {
+    for (const [ext, text] of [
+      ["ts", 'const x: number = 42; // note\nfunction f(s: string) { return s + "a"; }\n'],
+      ["sh", '#!/bin/sh\nif [ -f "$1" ]; then echo ok; fi # done\n'],
+      ["log", "2026-09-04 12:00:00 ERROR [main] user=\"x\" failed\n"],
+    ] as const) {
+      const entry = languageFor(ext);
+      const resolved = entry ? resolveLanguage(entry) : null;
+      if (!resolved) throw new Error(ext);
+      const state = EditorState.create({ doc: text, extensions: [resolved.language] });
+      const tree = ensureSyntaxTree(state, text.length, 1000);
+      if (!tree) throw new Error("no tree");
+      expect(treeHasRules(tree)).toBe(true);
+      const viaCode = tokenize(text, resolved.language);
+      const viaName = paintByName(text, tree);
+      expect(viaName.map((t) => t.text).join("")).toBe(text);
+      // Same styled runs, whatever the module copy: compare the (text, classes) pairs of styled tokens.
+      const styled = (toks: { text: string; classes: string | null }[]) => toks.filter((t) => t.classes !== null).map((t) => `${t.text}|${t.classes}`);
+      expect(styled(viaName)).toEqual(styled(viaCode ?? []));
+    }
+  });
+
+  it("ruleOf finds a style rule by shape and classesForTags maps tag names", () => {
+    const entry = languageFor("log");
+    const resolved = entry ? resolveLanguage(entry) : null;
+    if (!resolved) throw new Error("no log");
+    const state = EditorState.create({ doc: "ERROR x\n", extensions: [resolved.language] });
+    const tree = ensureSyntaxTree(state, 8, 1000)!;
+    const node = tree.topNode.firstChild!;
+    const rule = ruleOf(node.type);
+    expect(rule).not.toBeNull();
+    expect(classesForTags(rule!.tags)).toContain("nfe-tok-invalid");
+    // A tag object from "another copy": only name and set matter.
+    const fake = { set: [] as unknown[], toString: () => "keyword" };
+    (fake.set as unknown[]).push(fake);
+    expect(classesForTags([fake as never])).toBe("cm-keyword nfe-tok-keyword");
+    const unknown = { set: [] as unknown[], toString: () => "nope" };
+    (unknown.set as unknown[]).push(unknown);
+    expect(classesForTags([unknown as never])).toBeNull();
   });
 
   it("emits only nfe-tok-* classes", () => {

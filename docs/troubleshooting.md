@@ -16,6 +16,4 @@
 
 **Colours look wrong for a language.** Tokens carry Obsidian's own `cm-*` classes under `cm-s-obsidian`, so a file is coloured exactly like a fenced code block in a note: compare with a block of the same language in a note; if they match, it is the theme. Palettes as CSS files (overriding the `nfe-tok-*` classes) are the next milestone.
 
-**A large file previews without colours.** The preview stays plain above the per-device "Highlight preview up to" limit, when any line is longer than 10 000 characters (minified files), or when the file has more than 250 000 tokens. The log says which one fired.
-
 **A notice about left-alone extensions appears again.** It reappears only when the set of yielded extensions changes, for example after installing or removing another plugin that opens text files.

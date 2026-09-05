@@ -1,9 +1,9 @@
 import { FileView, Notice, type TFile, type WorkspaceLeaf, setIcon } from "obsidian";
-import { AUTOSAVE_DELAY_MS, PREVIEW_MAX_LINE_LENGTH, PREVIEW_MAX_TOKENS, VIEW_TYPE_TEXT } from "../constants";
+import { AUTOSAVE_DELAY_MS, VIEW_TYPE_TEXT } from "../constants";
 import { Autosave, type Timers } from "../core/autosave";
 import type { Logger } from "../core/log";
 import { type ViewMode, decideOpenMode } from "../core/openMode";
-import { OBSIDIAN_SCHEME_CLASS, tokenizeForPreview } from "../highlight/highlighter";
+import { OBSIDIAN_SCHEME_CLASS } from "../highlight/highlighter";
 import { type ResolvedLanguage, languageFor, resolveLanguage } from "../highlight/registry";
 import {
   type DecodedText,
@@ -26,19 +26,6 @@ export interface TextViewDeps {
   readonly timers: Timers;
   readonly now: () => number;
   readonly log: Logger;
-}
-
-/** Length of the longest line, counting `\n` as the only line break (the text is normalised). */
-export function longestLineLength(text: string): number {
-  let longest = 0;
-  let start = 0;
-  for (;;) {
-    const nl = text.indexOf("\n", start);
-    const end = nl === -1 ? text.length : nl;
-    if (end - start > longest) longest = end - start;
-    if (nl === -1) return longest;
-    start = nl + 1;
-  }
 }
 
 /**
@@ -227,93 +214,48 @@ export class TextView extends FileView {
     }
   }
 
+  /**
+   * Both modes are the same CodeMirror view; preview is the read-only one.
+   * CodeMirror renders only the visible lines and parses incrementally, so a
+   * large file previews in a frame either way; what the editing mode adds is
+   * the undo history and the write path, which is why a large file asks first.
+   */
   private nfeShow(mode: ViewMode): void {
     this.nfeMode = mode;
     this.nfeDestroyEditor();
     this.nfeBodyEl.empty();
     if (!this.nfeDoc) return;
-    if (mode === "edit") {
-      const s = this.nfeDeps.settings();
-      const host = this.nfeBodyEl.createDiv({ cls: "nfe-editor" });
-      const options = {
-        text: this.nfeDoc.text,
-        readOnly: this.nfeDoc.info.lossy,
-        lineNumbers: s.lineNumbers,
-        wordWrap: s.wordWrap,
-        tabSize: s.tabSize,
-        tabInsertsSpaces: s.tabInsertsSpaces,
-        onChange: () => {
-          if (!this.nfeDoc?.info.lossy) this.nfeAutosave?.schedule();
-        },
-      };
-      try {
-        this.nfeEditor = this.nfeDeps.editorFactory.create(host, { ...options, language: this.nfeLanguage?.support ?? null });
-      } catch (e) {
-        // The language extension is the only part that varies per file; try
-        // once more without it before giving up on the editor.
-        this.nfeDeps.log.error("editor", `building the editor with ${this.nfeLanguage?.entry.name ?? "no language"} failed; retrying as plain text`, e);
-        host.empty();
-        this.nfeLanguage = null;
-        this.nfeEditor = this.nfeDeps.editorFactory.create(host, { ...options, language: null });
-        new Notice("Native File Editor: highlighting failed for this file; editing as plain text. Details are in the plugin log.");
-      }
-      this.nfeEditor.focus();
-      this.nfeDeps.log.debug("view", `edit ${this.nfeLoadedPath ?? "?"}`);
-    } else {
-      const pre = this.nfeBodyEl.createEl("pre", { cls: "nfe-preview" });
-      pre.addClass(OBSIDIAN_SCHEME_CLASS);
-      if (this.nfeDeps.settings().wordWrap) pre.addClass("nfe-wrap");
-      this.nfeRenderPreview(pre, this.nfeDoc.text);
-    }
-    this.nfeRenderHead();
-  }
-
-  /**
-   * Highlighted when there is a language and the file is small enough for one
-   * parse to be cheap; otherwise the text as one node. Either way no editor is
-   * built, which is what makes the preview the fast path.
-   */
-  private nfeRenderPreview(pre: HTMLElement, text: string): void {
-    const cap = this.nfeDeps.device.get().previewHighlightBytes;
-    const path = this.nfeLoadedPath ?? "?";
-    if (!this.nfeLanguage || this.nfeSizeBytes > cap) {
-      if (this.nfeLanguage) this.nfeDeps.log.debug("view", `preview ${path} plain: ${this.nfeSizeBytes} B over the ${cap} B highlight cap`);
-      pre.setText(text);
-      return;
-    }
-    // A minified file is one line of a megabyte: a span per token there is
-    // tens of thousands of nodes on one line, which is what froze the pane on
-    // a 1.1 MB HTML export. Size alone does not catch it; line length does.
-    const longest = longestLineLength(text);
-    if (longest > PREVIEW_MAX_LINE_LENGTH) {
-      this.nfeDeps.log.info("view", `preview ${path} plain: a line of ${longest} characters is over the ${PREVIEW_MAX_LINE_LENGTH} limit`);
-      pre.setText(text);
-      return;
-    }
-    let tokens;
+    const s = this.nfeDeps.settings();
+    const readOnly = mode === "preview" || this.nfeDoc.info.lossy;
+    const host = this.nfeBodyEl.createDiv({ cls: "nfe-editor" });
+    host.addClass(OBSIDIAN_SCHEME_CLASS);
+    if (readOnly) host.addClass("nfe-readonly");
+    const options = {
+      text: this.nfeDoc.text,
+      readOnly,
+      lineNumbers: s.lineNumbers,
+      wordWrap: s.wordWrap,
+      tabSize: s.tabSize,
+      tabInsertsSpaces: s.tabInsertsSpaces,
+      onChange: () => {
+        if (!readOnly) this.nfeAutosave?.schedule();
+      },
+    };
     const started = this.nfeDeps.now();
     try {
-      tokens = tokenizeForPreview(text, this.nfeLanguage.language);
+      this.nfeEditor = this.nfeDeps.editorFactory.create(host, { ...options, language: this.nfeLanguage?.support ?? null });
     } catch (e) {
-      this.nfeDeps.log.error("preview", `highlighting ${path} with ${this.nfeLanguage.entry.name} failed; plain preview`, e);
-      pre.setText(text);
-      return;
+      // The language extension is the only part that varies per file; try
+      // once more without it before giving up on the view.
+      this.nfeDeps.log.error("editor", `building the ${mode} view with ${this.nfeLanguage?.entry.name ?? "no language"} failed; retrying as plain text`, e);
+      host.empty();
+      this.nfeLanguage = null;
+      this.nfeEditor = this.nfeDeps.editorFactory.create(host, { ...options, language: null });
+      new Notice("Native File Editor: highlighting failed for this file; shown as plain text. Details are in the plugin log.");
     }
-    if (tokens === null) {
-      this.nfeDeps.log.info("view", `preview ${path} plain: the parse did not finish in time`);
-      pre.setText(text);
-      return;
-    }
-    if (tokens.length > PREVIEW_MAX_TOKENS) {
-      this.nfeDeps.log.info("view", `preview ${path} plain: ${tokens.length} tokens is over the ${PREVIEW_MAX_TOKENS} limit`);
-      pre.setText(text);
-      return;
-    }
-    for (const token of tokens) {
-      if (token.classes === null) pre.appendText(token.text);
-      else pre.createSpan({ cls: token.classes, text: token.text });
-    }
-    this.nfeDeps.log.debug("view", `preview ${this.nfeLoadedPath ?? "?"}: ${tokens.length} tokens in ${this.nfeDeps.now() - started} ms`);
+    if (!readOnly) this.nfeEditor.focus();
+    this.nfeDeps.log.debug("view", `${mode} ${this.nfeLoadedPath ?? "?"}: view built in ${this.nfeDeps.now() - started} ms`);
+    this.nfeRenderHead();
   }
 
   private nfeRenderHead(): void {
@@ -395,11 +337,11 @@ export class TextView extends FileView {
     this.nfeDeps.log.info("view", `${this.file.path} changed externally; reloaded (${bytes.byteLength} B)`);
     this.nfeSizeBytes = bytes.byteLength;
     this.nfeDoc = decoded;
-    if (this.nfeMode === "edit" && this.nfeEditor) {
+    if (this.nfeEditor) {
       this.nfeEditor.setText(decoded.text);
       this.nfeRenderHead();
     } else {
-      this.nfeShow("preview");
+      this.nfeShow(this.nfeMode);
     }
   }
 

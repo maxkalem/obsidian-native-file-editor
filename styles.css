@@ -71,40 +71,8 @@
   flex-direction: column;
 }
 
-/* Preview: the file as text, in the editor's monospace font, no editor built.
-   Always selectable and copyable, whatever the surrounding view sets. */
-.nfe-text-content .nfe-preview {
-  flex: 1 1 auto;
-  margin: 0;
-  padding: var(--size-4-2) var(--size-4-3);
-  font-family: var(--font-monospace);
-  font-size: var(--font-text-size);
-  line-height: var(--line-height-normal);
-  color: var(--text-normal);
-  background-color: var(--background-primary);
-  white-space: pre;
-  overflow: auto;
-  tab-size: 4;
-  user-select: text;
-  -webkit-user-select: text;
-  cursor: text;
-}
-
-/* Selection in the preview and in the editor: Obsidian's own selection colour,
-   which is a translucent accent, so token colours stay readable through it.
-   The browser default would paint an opaque light block under light text. */
-.nfe-text-content .nfe-preview ::selection,
-.nfe-text-content .nfe-preview::selection {
-  background-color: var(--text-selection);
-  color: inherit;
-}
-
-.nfe-text-content .nfe-preview.nfe-wrap {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* Editor: the CodeMirror view fills the body. */
+/* Both modes are one CodeMirror view filling the body; preview is the
+   read-only one. Text is always selectable and copyable. */
 .nfe-text-content .nfe-editor {
   flex: 1 1 auto;
   min-height: 0;
@@ -123,10 +91,28 @@
   outline: none;
 }
 
+/* The font of a code block in a note: the same variables Obsidian uses for
+   ```fences, so a file and a block of the same language look alike. */
 .nfe-text-content .nfe-editor .cm-scroller {
   font-family: var(--font-monospace);
-  font-size: var(--font-text-size);
+  font-size: var(--code-size);
+  font-weight: normal;
   line-height: var(--line-height-normal);
+}
+
+.nfe-text-content .nfe-editor .cm-content {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.nfe-text-content .nfe-readonly .cm-content {
+  cursor: text;
+}
+
+/* No caret in the read-only view. (`.cm-activeLine` is the line element itself;
+   hiding it hid the first line of every file, and a one-line file entirely.) */
+.nfe-text-content .nfe-readonly .cm-cursor {
+  display: none;
 }
 
 .nfe-text-content .nfe-editor .cm-gutters {
@@ -212,6 +198,9 @@
   color: var(--code-comment);
 }
 
+/* Comments in italics is this plugin's choice; Obsidian's own blocks do not.
+   A palette can undo it. */
+.nfe-text-content .nfe-tok-comment,
 .nfe-text-content .nfe-tok-doc {
   font-style: italic;
 }

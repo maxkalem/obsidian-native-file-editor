@@ -2,7 +2,7 @@
 
 An Obsidian plugin that makes every text-like file in the vault, and Office documents, first-class: they open in a tab, look like the rest of Obsidian, and can be edited in place.
 
-**Status: in development, not released.** Nothing is published to the community directory until the whole plan below is built and judged on a device. The current build opens text and code files (over 200 extensions: the fourteen official CodeMirror grammars plus the legacy stream modes) in a CodeMirror 6 editor with syntax highlighting bound to the active theme, a highlighted preview, and autosave. Everything else is still to come.
+**Status: in development, not released.** Nothing is published to the community directory until the whole plan below is built and judged on a device. The current build opens text and code files (over 200 extensions: the fourteen official CodeMirror grammars plus the legacy stream modes) in a CodeMirror 6 view (read-only preview or editor) with the highlighting of Obsidian's own code blocks, folding, and autosave. Everything else is still to come.
 
 ## What "native" means here
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_LARGE_FILE_BYTES, DEFAULT_PREVIEW_HIGHLIGHT_BYTES } from "../src/constants";
+import { DEFAULT_LARGE_FILE_BYTES } from "../src/constants";
 import { DeviceLocalStore, type StorageLike, normalizeDeviceState } from "../src/settings/DeviceLocalStore";
 import { buildDefinitions, readSettingValue, writeSettingValue } from "../src/settings/SettingsTab";
 import { DEFAULT_SETTINGS, type SharedSettings, normalizeSettings } from "../src/settings/settings";
@@ -61,7 +61,6 @@ describe("DeviceLocalStore", () => {
     expect(normalizeDeviceState({ lastMode: { a: "nope", b: "edit" }, largeFileBytes: -1, lastNewFileExtension: "../x" })).toEqual({
       lastMode: { b: "edit" },
       largeFileBytes: DEFAULT_LARGE_FILE_BYTES,
-      previewHighlightBytes: DEFAULT_PREVIEW_HIGHLIGHT_BYTES,
       lastNewFileExtension: "txt",
       yieldNoticeKey: "",
     });

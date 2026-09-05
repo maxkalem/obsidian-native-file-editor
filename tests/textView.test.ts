@@ -17,7 +17,7 @@ import { Logger } from "../src/core/log";
 import type { Transport } from "../src/platform/transport";
 import { DeviceLocalStore } from "../src/settings/DeviceLocalStore";
 import { DEFAULT_SETTINGS, type SharedSettings } from "../src/settings/settings";
-import { TextView, longestLineLength } from "../src/ui/TextView";
+import { TextView } from "../src/ui/TextView";
 import type { EditorFactory, EditorHandle, EditorOptions } from "../src/ui/editor";
 
 /**
@@ -154,10 +154,12 @@ describe("TextView", () => {
     expect(h.head()).not.toBeNull();
     expect(h.body()).not.toBeNull();
     expect(h.view.mode).toBe("preview");
-    const pre = __findByClass(h.body(), "nfe-preview");
-    expect(pre.tagName).toBe("PRE");
-    expect(pre.textContent).toBe("hello\nworld");
-    expect(h.editors).toHaveLength(0);
+    expect(h.editors).toHaveLength(1);
+    expect(h.lastEditor().options).toMatchObject({ text: "hello\nworld", readOnly: true, language: null });
+    expect(h.lastEditor().focused).toBe(false);
+    const host = __findByClass(h.body(), "nfe-editor");
+    expect(host.hasClass("nfe-readonly")).toBe(true);
+    expect(host.hasClass("cm-s-obsidian")).toBe(true);
     expect(__textOf(h.head())).toContain("UTF-8");
     expect(__textOf(h.head())).toContain("LF");
     expect(h.modeButton().textContent).toBe("Edit");
@@ -167,20 +169,21 @@ describe("TextView", () => {
     const h = harness({ lineNumbers: false, wordWrap: true, tabSize: 2, tabInsertsSpaces: true });
     h.transport.files.set("a.txt", utf8("x"));
     await h.view.__load(new TFile("a.txt"));
+    const previewEditor = h.lastEditor();
     __fire(h.modeButton(), "click");
     await tick();
     expect(h.view.mode).toBe("edit");
-    expect(h.editors).toHaveLength(1);
+    expect(previewEditor.destroyed).toBe(true);
+    expect(h.editors).toHaveLength(2);
     expect(h.lastEditor().options).toMatchObject({ text: "x", readOnly: false, lineNumbers: false, wordWrap: true, tabSize: 2, tabInsertsSpaces: true });
     expect(h.lastEditor().focused).toBe(true);
-    expect(__findByClass(h.body(), "nfe-editor")).not.toBeNull();
-    expect(__findByClass(h.body(), "nfe-preview")).toBeNull();
+    expect(__findByClass(h.body(), "nfe-editor").hasClass("nfe-readonly")).toBe(false);
     expect(h.modeButton().textContent).toBe("Preview");
     __fire(h.modeButton(), "click");
     await tick();
     expect(h.view.mode).toBe("preview");
-    expect(h.lastEditor().destroyed).toBe(true);
-    expect(__findByClass(h.body(), "nfe-preview")).not.toBeNull();
+    expect(h.editors).toHaveLength(3);
+    expect(h.lastEditor().options.readOnly).toBe(true);
   });
 
   it("the header action toggles too", async () => {
@@ -215,7 +218,7 @@ describe("TextView", () => {
     h.lastEditor().type("ab");
     await h.view.setMode("preview");
     expect(h.transport.writes).toHaveLength(1);
-    expect(__findByClass(h.body(), "nfe-preview").textContent).toBe("ab");
+    expect(h.lastEditor().options.text).toBe("ab");
     await h.view.setMode("edit");
     h.lastEditor().type("abc");
     await h.view.__unload();
@@ -233,6 +236,16 @@ describe("TextView", () => {
     expect(__findByClass(h.head(), "nfe-badge-warn")).not.toBeNull();
     expect(__textOf(h.head())).toContain("windows-1251 (guess)");
     h.lastEditor().type("changed");
+    h.timers.fireAll();
+    await tick();
+    expect(h.transport.writes).toHaveLength(0);
+  });
+
+  it("a read-only preview never schedules a save even if the editor reports a change", async () => {
+    const h = harness();
+    h.transport.files.set("a.txt", utf8("a"));
+    await h.view.__load(new TFile("a.txt"));
+    h.lastEditor().type("ab");
     h.timers.fireAll();
     await tick();
     expect(h.transport.writes).toHaveLength(0);
@@ -279,7 +292,7 @@ describe("TextView", () => {
     h.transport.files.set("a.txt", utf8("v2"));
     h.vault.trigger("modify", file);
     await tick();
-    expect(__findByClass(h.body(), "nfe-preview").textContent).toBe("v2");
+    expect(h.lastEditor().text).toBe("v2");
 
     await h.view.setMode("edit");
     h.lastEditor().type("v3");
@@ -312,56 +325,21 @@ describe("TextView", () => {
     expect(h.head().children).toHaveLength(0);
   });
 
-  it("a code file previews with token spans and edits with its language; a plain file has neither", async () => {
+  it("a code file gets its language in both modes; a plain file gets none", async () => {
     const h = harness();
     h.transport.files.set("a.py", utf8("x = 1 # c"));
     h.transport.files.set("a.txt", utf8("x = 1 # c"));
     await h.view.__load(new TFile("a.py"));
-    const pre = __findByClass(h.body(), "nfe-preview");
-    expect(__findAllByClass(pre, "nfe-tok-comment").map((e: { textContent: string }) => e.textContent)).toEqual(["# c"]);
-    expect(__findAllByClass(pre, "nfe-tok-number").map((e: { textContent: string }) => e.textContent)).toEqual(["1"]);
+    expect(h.lastEditor().options.language).not.toBeNull();
+    expect(h.lastEditor().options.readOnly).toBe(true);
     expect(__textOf(h.head())).toContain("Python");
     await h.view.setMode("edit");
     expect(h.lastEditor().options.language).not.toBeNull();
     await h.view.__unload();
     await h.view.__load(new TFile("a.txt"));
-    const plain = __findByClass(h.body(), "nfe-preview");
-    expect(plain.children).toHaveLength(0);
-    expect(plain.textContent).toBe("x = 1 # c");
+    expect(h.lastEditor().options.language).toBeNull();
     await h.view.setMode("edit");
     expect(h.lastEditor().options.language).toBeNull();
-  });
-
-  it("a minified single-line file previews as plain text whatever its size, and the preview carries Obsidian's scheme class", async () => {
-    const h = harness();
-    h.transport.files.set("min.js", utf8(`var a=1;`.repeat(2000)));
-    h.transport.files.set("ok.js", utf8("var a = 1;\n".repeat(20)));
-    await h.view.__load(new TFile("min.js"));
-    let pre = __findByClass(h.body(), "nfe-preview");
-    expect(pre.children).toHaveLength(0);
-    expect(pre.hasClass("cm-s-obsidian")).toBe(true);
-    expect(h.log.recent().some((l) => l.includes("over the 10000 limit"))).toBe(true);
-    await h.view.__unload();
-    await h.view.__load(new TFile("ok.js"));
-    pre = __findByClass(h.body(), "nfe-preview");
-    expect(pre.children.length).toBeGreaterThan(0);
-  });
-
-  it("longestLineLength", () => {
-    expect(longestLineLength("")).toBe(0);
-    expect(longestLineLength("abc")).toBe(3);
-    expect(longestLineLength("a\nabcd\nab")).toBe(4);
-    expect(longestLineLength("\n\n")).toBe(0);
-  });
-
-  it("a code file above the preview-highlight cap previews as plain text", async () => {
-    const h = harness();
-    h.device.update({ previewHighlightBytes: 1000 });
-    h.transport.files.set("big.py", utf8(`x = 1\n`.repeat(200_000)));
-    await h.view.__load(new TFile("big.py"));
-    const pre = __findByClass(h.body(), "nfe-preview");
-    expect(pre.children).toHaveLength(0);
-    expect(pre.textContent.length).toBe(6 * 200_000);
   });
 
   it("logs every open with size, encoding, language and mode", async () => {
@@ -386,8 +364,11 @@ describe("TextView", () => {
     };
     h.transport.files.set("a.py", utf8("x = 1"));
     await h.view.__load(new TFile("a.py"));
-    await h.view.setMode("edit");
+    // The preview already failed once and fell back, dropping the language;
+    // edit mode then builds without it on the first try.
     expect(calls).toBe(2);
+    await h.view.setMode("edit");
+    expect(calls).toBe(3);
     expect(h.view.mode).toBe("edit");
     expect(h.lastEditor().options.language).toBeNull();
     expect(__notices.some((n) => n.includes("plain text"))).toBe(true);

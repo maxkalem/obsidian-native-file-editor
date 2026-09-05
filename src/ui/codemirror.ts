@@ -54,7 +54,6 @@ export function buildExtensions(options: EditorOptions): Extension[] {
     indentOnInput(),
     bracketMatching(),
     rectangularSelection(),
-    highlightActiveLine(),
     highlightSelectionMatches(),
     search({ top: true }),
     syntaxHighlighting(nfeHighlighter),
@@ -68,7 +67,10 @@ export function buildExtensions(options: EditorOptions): Extension[] {
     }),
   ];
   if (options.language !== null) ext.push(options.language);
-  if (options.lineNumbers) ext.push(lineNumbers(), highlightActiveLineGutter(), foldGutter({ markerDOM: foldMarker }));
+  // The active-line highlight follows the caret; a read-only view has none.
+  if (!options.readOnly) ext.push(highlightActiveLine());
+  if (options.lineNumbers) ext.push(lineNumbers(), foldGutter({ markerDOM: foldMarker }));
+  if (options.lineNumbers && !options.readOnly) ext.push(highlightActiveLineGutter());
   if (options.wordWrap) ext.push(EditorView.lineWrapping);
   if (options.readOnly) ext.push(EditorState.readOnly.of(true), EditorView.editable.of(false));
   return ext;

@@ -34,7 +34,7 @@ The text view reads and writes through the transport rather than through `Vault.
 
 ## The text view
 
-`ui/TextView.ts` is a `FileView` with two modes. Preview is a `pre` with the text, highlighted by one parse when the file is small enough (size, longest line and token count all under their caps), so a large file still renders in under a frame. The parse goes through `EditorState` and `ensureSyntaxTree`, never `parser.parse()` directly: Obsidian's stream parser needs a parse context. Edit builds a CodeMirror 6 `EditorView` from the core packages Obsidian provides (`@codemirror/state`, `view`, `language`, `commands`, `search`), with the plugin's own extension set and none of Obsidian's Markdown extensions. The editor sits behind `ui/editor.ts`, a four-method interface, so the view's behaviour is tested against a fake and CodeMirror is only ever touched by `ui/codemirror.ts`.
+`ui/TextView.ts` is a `FileView` with two modes, and both are the same CodeMirror 6 `EditorView` built from the core packages Obsidian provides (`@codemirror/state`, `view`, `language`, `commands`, `search`): preview is the read-only instance, edit the editable one with its undo history and the write path. CodeMirror renders only the visible lines and parses incrementally, so a large file previews in a frame whatever its size; the large-file gate is about the editing mode. An earlier preview built as a `pre` of highlighted spans froze on a 1.1 MB single-line file and was replaced. The editor sits behind `ui/editor.ts`, a four-method interface, so the view's behaviour is tested against a fake and CodeMirror is only ever touched by `ui/codemirror.ts`.
 
 Autosave is a debounce (`core/autosave.ts`) with one write in flight at a time; leaving edit mode or the file flushes it. An external change reloads the pane unless it has unsaved typing, in which case the pane's text wins and the next autosave writes it. A file whose bytes are not valid UTF-8 and carry no BOM is decoded by a single-byte guess and shown read-only, because writing the guess back would rewrite bytes the user never touched.
 
@@ -58,7 +58,9 @@ An exception out of a view's `onLoadFile` is what Obsidian shows as "Failed to o
 
 ## Tokens look like Obsidian's own code blocks
 
-Every token span carries two classes: Obsidian's `cm-*` name (the CodeMirror 5 vocabulary Obsidian uses in Live Preview code blocks) and the plugin's stable `nfe-tok-*` name. The preview and the editor root carry `cm-s-obsidian`, so Obsidian's stylesheet and the active theme colour a `.ts` file exactly as they colour a ```ts block in a note. The plugin's own `nfe-tok-*` rules in `styles.css` are the fallback for tokens Obsidian has no rule for, and the vocabulary a palette overrides.
+Every token span carries two classes: Obsidian's `cm-*` name (the CodeMirror 5 vocabulary Obsidian uses in Live Preview code blocks) and the plugin's stable `nfe-tok-*` name. The editor root carries `cm-s-obsidian` and uses the code-block font variables, so a `.ts` file looks exactly like a ```ts block in a note. The plugin's own `nfe-tok-*` rules in `styles.css` are the fallback for tokens Obsidian has no rule for, and the vocabulary a palette overrides.
+
+The highlighter matches tags by name (`"keyword"`, `"definition(variableName)"`), never by tag identity or id. Obsidian's build carries more than one copy of `@lezer/highlight`; a highlighter keyed on ids sees nothing on tokens tagged by the other copy. `highlight/highlighter.ts` also carries `tokenize`, a standalone parse plus highlight used by the load-time self-test and the test suites, with a by-shape walk of the tree as its fallback for the same reason.
 
 ## Two licences, one import direction
 

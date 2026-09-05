@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { tokenizeForPreview } from "../../src/highlight/highlighter";
+import { tokenize } from "../../src/highlight/highlighter";
 import { __allEntries, languageFor, resolveLanguage } from "../../src/highlight/registry";
 import { decodeText } from "../../src/model/text/encoding";
 
@@ -52,7 +52,7 @@ describe("code samples", () => {
         return;
       }
       if (!resolved) throw new Error(`unresolved ${entry.name}`);
-      const tokens = tokenizeForPreview(text, resolved.language);
+      const tokens = tokenize(text, resolved.language);
       if (tokens === null) throw new Error(`${entry.name}: parse timed out`);
       expect(tokens.map((t) => t.text).join("")).toBe(text);
       const classes = new Set(tokens.flatMap((t) => (t.classes ?? "").split(" ").filter(Boolean)));
