@@ -187,127 +187,84 @@
 
 /* Syntax tokens. Every token span carries two classes: Obsidian's own cm-*
    name (cm-keyword, cm-string, ...) and this plugin's stable nfe-tok-* name.
-   The preview and the editor root carry cm-s-obsidian, so Obsidian's own
-   stylesheet and the active theme colour the tokens exactly as they colour a
-   code block in a note; those rules (`.cm-s-obsidian span.cm-keyword`) are
-   more specific than the ones below and win wherever Obsidian has one.
+   Obsidian's stylesheet colours the cm-* classes globally (read from app.css:
+   keyword, string/string-2/qualifier, comment/meta, number, tag, operator,
+   punctuation/bracket/hr, variable/variable-2/variable-3/link, builtin/
+   property/attribute/type), so a file here is coloured exactly like a code
+   block in a note, in any theme. Nothing below repeats those: a rule here
+   would outrank Obsidian's and break the parity.
 
-   The rules below are the fallback for tokens Obsidian has no rule for, bound
-   to the --code-* variables, and the vocabulary a palette overrides. */
-.nfe-text-content .nfe-tok-comment {
-  color: var(--code-comment);
-}
-
-/* Comments in italics is this plugin's choice; Obsidian's own blocks do not.
-   A palette can undo it. */
-.nfe-text-content .nfe-tok-comment,
-.nfe-text-content .nfe-tok-doc {
-  font-style: italic;
-}
-
-.nfe-text-content .nfe-tok-keyword,
-.nfe-text-content .nfe-tok-control,
-.nfe-text-content .nfe-tok-modifier {
-  color: var(--code-keyword);
-}
-
+   What follows covers only what Obsidian leaves unstyled (atom, def, error,
+   positive/negative, markup), in both vocabularies, plus the plugin's own
+   choices. Palettes override the nfe-tok-* names. */
 .nfe-text-content .nfe-tok-constant,
-.nfe-text-content .nfe-tok-bool,
-.nfe-text-content .nfe-tok-null,
-.nfe-text-content .nfe-tok-number,
 .nfe-text-content .nfe-tok-value,
-.nfe-text-content .nfe-tok-escape {
+.nfe-text-content .cm-atom {
   color: var(--code-value);
 }
 
-.nfe-text-content .nfe-tok-string,
-.nfe-text-content .nfe-tok-regexp,
-.nfe-text-content .nfe-tok-special {
-  color: var(--code-string);
-}
-
-.nfe-text-content .nfe-tok-link {
-  color: var(--code-string);
-  text-decoration: underline;
-}
-
-.nfe-text-content .nfe-tok-variable,
-.nfe-text-content .nfe-tok-definition {
-  color: var(--code-normal);
-}
-
 .nfe-text-content .nfe-tok-function,
-.nfe-text-content .nfe-tok-builtin,
 .nfe-text-content .nfe-tok-type,
 .nfe-text-content .nfe-tok-namespace {
   color: var(--code-function);
 }
 
-.nfe-text-content .nfe-tok-property,
-.nfe-text-content .nfe-tok-attribute,
-.nfe-text-content .nfe-tok-label {
-  color: var(--code-property);
-}
-
-.nfe-text-content .nfe-tok-tag {
-  color: var(--code-keyword);
-}
-
-.nfe-text-content .nfe-tok-operator {
-  color: var(--code-operator);
-}
-
-.nfe-text-content .nfe-tok-punctuation,
-.nfe-text-content .nfe-tok-bracket,
-.nfe-text-content .nfe-tok-separator {
-  color: var(--code-punctuation);
-}
-
-.nfe-text-content .nfe-tok-meta,
-.nfe-text-content .nfe-tok-preproc {
-  color: var(--code-important);
-}
-
-.nfe-text-content .nfe-tok-invalid {
+.nfe-text-content .nfe-tok-invalid,
+.nfe-text-content .cm-error {
   color: var(--text-error);
 }
 
-.nfe-text-content .nfe-tok-heading {
-  color: var(--code-keyword);
+.nfe-text-content .nfe-tok-heading,
+.nfe-text-content .cm-header {
   font-weight: var(--bold-weight);
 }
 
 .nfe-text-content .nfe-tok-list,
-.nfe-text-content .nfe-tok-quote {
+.nfe-text-content .nfe-tok-quote,
+.nfe-text-content .nfe-tok-separator,
+.nfe-text-content .cm-quote {
   color: var(--code-keyword);
 }
 
-.nfe-text-content .nfe-tok-emphasis {
+.nfe-text-content .nfe-tok-emphasis,
+.nfe-text-content .cm-em {
   font-style: italic;
 }
 
-.nfe-text-content .nfe-tok-strong {
+.nfe-text-content .nfe-tok-strong,
+.nfe-text-content .cm-strong {
   font-weight: var(--bold-weight);
 }
 
-.nfe-text-content .nfe-tok-strikethrough {
+.nfe-text-content .nfe-tok-strikethrough,
+.nfe-text-content .cm-strikethrough {
   text-decoration: line-through;
 }
 
-.nfe-text-content .nfe-tok-monospace {
-  color: var(--code-normal);
-}
-
-.nfe-text-content .nfe-tok-inserted {
+.nfe-text-content .nfe-tok-inserted,
+.nfe-text-content .cm-positive {
   color: var(--color-green);
 }
 
-.nfe-text-content .nfe-tok-deleted {
+.nfe-text-content .nfe-tok-deleted,
+.nfe-text-content .cm-negative {
   color: var(--color-red);
 }
 
 .nfe-text-content .nfe-tok-changed {
   color: var(--color-orange);
+}
+
+.nfe-text-content .nfe-tok-link {
+  text-decoration: underline;
+}
+
+/* Comments in italics is this plugin's choice; Obsidian's own blocks do not.
+   A palette can undo it. */
+.nfe-text-content .nfe-tok-comment,
+.nfe-text-content .nfe-tok-doc,
+.nfe-text-content .cm-comment {
+  font-style: italic;
 }
 
 .nfe-text-content .nfe-error {

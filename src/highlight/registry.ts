@@ -103,6 +103,7 @@ import { xQuery } from "@codemirror/legacy-modes/mode/xquery";
 import { yacas } from "@codemirror/legacy-modes/mode/yacas";
 import { z80 } from "@codemirror/legacy-modes/mode/z80";
 import { logMode } from "./logMode";
+import { adaptStreamParser } from "./obsidianFork";
 
 /**
  * The language registry: extension -> language entry. This module is the only
@@ -145,12 +146,15 @@ function lezer(name: string, extensions: string[], load: () => LanguageSupport):
   return { name, extensions, source: "lezer", load };
 }
 
+// Stream parsers go through `adaptStreamParser`: on Obsidian's fork of
+// @codemirror/language the mode's token strings become the CM5 class names its
+// decorator and stylesheet know; elsewhere the parser is returned unchanged.
 function legacy(name: string, extensions: string[], parser: StreamParser<unknown>): LanguageEntry {
-  return { name, extensions, source: "legacy", load: () => StreamLanguage.define(parser) };
+  return { name, extensions, source: "legacy", load: () => StreamLanguage.define(adaptStreamParser(parser)) };
 }
 
 function builtin(name: string, extensions: string[], parser: StreamParser<unknown>): LanguageEntry {
-  return { name, extensions, source: "builtin", load: () => StreamLanguage.define(parser) };
+  return { name, extensions, source: "builtin", load: () => StreamLanguage.define(adaptStreamParser(parser)) };
 }
 
 function plain(name: string, extensions: string[]): LanguageEntry {

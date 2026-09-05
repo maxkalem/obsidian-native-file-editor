@@ -4,8 +4,8 @@ import { COMMAND_NEW_FILE, COMMAND_TOGGLE_MODE, LOG_FILE_NAME, PLUGIN_ID, VIEW_T
 import { decideClaims, describeYielded } from "./core/claims";
 import { Logger, describeError } from "./core/log";
 import type { Timers } from "./core/autosave";
-import { ruleOf, tokenize } from "./highlight/highlighter";
-import { getStyleTags } from "@lezer/highlight";
+import { forkTokenOf, ruleOf, tokenize } from "./highlight/highlighter";
+import { isObsidianStreamFork, toCm5Token } from "./highlight/obsidianFork";
 import { EditorState } from "@codemirror/state";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
@@ -63,22 +63,18 @@ export function selfTestStreamLanguage(): string {
   }
   const one = (name: string, parser: Parameters<typeof StreamLanguage.define>[0], text: string): string => {
     try {
-      const lang = StreamLanguage.define(parser);
+      const adapted = isObsidianStreamFork ? { ...parser, token: (s: Parameters<typeof parser.token>[0], st: unknown) => { const r = parser.token(s, st); return r ? toCm5Token(r) : r; } } : parser;
+      const lang = StreamLanguage.define(adapted);
       const tokens = tokenize(text, lang);
       if (tokens === null) return `${name}: parse timed out`;
       const classes = tokens.filter((t) => t.classes !== null).length;
-      // Which copy of @lezer/highlight tagged the tree: the plugin's getStyleTags
-      // sees a rule only when it is the same copy; ruleOf sees it by shape.
+      // How the first token is tagged: a lezer highlight rule (npm's
+      // StreamLanguage) or the fork's raw token string (Obsidian's).
       const state = EditorState.create({ doc: text, extensions: [lang] });
       const tree = ensureSyntaxTree(state, text.length, 1000);
-      let first = tree?.topNode.firstChild ?? null;
-      while (first && !ruleOf(first.type)) first = first.nextSibling;
-      const copies = !first ? "no tagged node" : getStyleTags(first) ? "one @lezer/highlight copy" : "TWO @lezer/highlight copies (rule by shape only)";
-      // When nothing is recognised, say what the first token's node type
-      // carries, so the shape can be read from the log.
-      const probe = tree?.topNode.firstChild ?? null;
-      const shape = probe ? describeNodeType(probe.type) : "no first child";
-      return `${name}: ${classes > 0 ? "ok" : "no token classes"} (${tokens.length} tokens, ${classes} classed; tree ${tree ? tree.toString().slice(0, 80) : "null"}; ${copies}; first ${shape})`;
+      const first = tree?.topNode.firstChild ?? null;
+      const tagging = !first ? "no first node" : ruleOf(first.type) ? "highlight rule" : forkTokenOf(first.type) ? `fork token "${forkTokenOf(first.type)}"` : `untagged: ${describeNodeType(first.type)}`;
+      return `${name}: ${classes > 0 ? "ok" : "no token classes"} (${tokens.length} tokens, ${classes} classed; tree ${tree ? tree.toString().slice(0, 60) : "null"}; ${tagging})`;
     } catch (e) {
       return `${name}: FAILED: ${describeError(e)}`;
     }
@@ -128,6 +124,7 @@ export default class NativeFileEditorPlugin extends Plugin {
       new Notice(`Native File Editor cannot start: ${e instanceof Error ? e.message : String(e)}`);
       return;
     }
+    log.info("plugin", `@codemirror/language is ${isObsidianStreamFork ? "Obsidian's fork (tokenClassNodeProp + lineHighlighter present)" : "the npm package (no fork exports)"}`);
     log.info("plugin", `stream-language self-test: ${selfTestStreamLanguage()}`);
 
     this.registerView(VIEW_TYPE_TEXT, (leaf: WorkspaceLeaf) =>

@@ -7,3 +7,5 @@ Thumbs.db
 tests/e2e/out/
 # The vault path copy.bat and clean.cmd install into on this machine.
 local.cmd
+/*.bat
+/*.cmd

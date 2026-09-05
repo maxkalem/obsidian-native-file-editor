@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { tokenClassNames } from "../src/highlight/highlighter";
 
 /**
  * A class the code emits and the stylesheet does not know is invisible to the
@@ -48,8 +49,13 @@ describe("styles.css agrees with the classes the code emits", () => {
     expect(emitted.size).toBeGreaterThan(0);
   });
 
-  it("every emitted class has a rule", () => {
-    expect([...emitted].filter((c) => !styled.has(c)).sort()).toEqual([]);
+  it("every emitted class has a rule, except the nfe-tok-* vocabulary, which Obsidian's cm-* rules colour", () => {
+    expect([...emitted].filter((c) => !styled.has(c) && !c.startsWith("nfe-tok-")).sort()).toEqual([]);
+  });
+
+  it("every nfe-tok-* class the stylesheet names is one the highlighter emits", () => {
+    const vocabulary = new Set(tokenClassNames());
+    expect([...styled].filter((c) => c.startsWith("nfe-tok-") && !vocabulary.has(c)).sort()).toEqual([]);
   });
 
   it("every styled class is emitted", () => {

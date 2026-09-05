@@ -14,6 +14,7 @@ import {
   rectangularSelection,
 } from "@codemirror/view";
 import { OBSIDIAN_SCHEME_CLASS, nfeHighlighter } from "../highlight/highlighter";
+import { forkLineHighlighter } from "../highlight/obsidianFork";
 import type { EditorFactory, EditorHandle, EditorOptions } from "./editor";
 
 /** The gutter marker: a triangle pointing down when open, right when folded. */
@@ -58,6 +59,10 @@ export function buildExtensions(options: EditorOptions): Extension[] {
     search({ top: true }),
     syntaxHighlighting(nfeHighlighter),
     codeFolding({ placeholderDOM: foldPlaceholder }),
+    // Obsidian's fork colours stream-mode tokens with its own decorator, which
+    // StreamLanguage.define() does not include (obsidianFork.ts). Absent
+    // elsewhere; harmless on lezer trees.
+    ...(forkLineHighlighter ? [forkLineHighlighter] : []),
     EditorView.editorAttributes.of({ class: OBSIDIAN_SCHEME_CLASS }),
     EditorState.tabSize.of(options.tabSize),
     indentUnit.of(options.tabInsertsSpaces ? " ".repeat(options.tabSize) : "\t"),
