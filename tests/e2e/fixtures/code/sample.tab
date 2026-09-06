@@ -1,0 +1,5 @@
+# nnCron
+#( note
+Time: 0 9 * * 1-5 *
+Action: StartIn: "C:\\notes" Run: "backup.exe"
+)#

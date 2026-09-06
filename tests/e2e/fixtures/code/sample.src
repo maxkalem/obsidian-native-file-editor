@@ -1,0 +1,6 @@
+// EScript
+function main()
+{
+  var count = 3;
+  if (count > 2) print("big");
+}

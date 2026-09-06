@@ -18,6 +18,8 @@ type Any = any;
 // windows work; the plugin reads its timers from the first.
 const g = globalThis as Any;
 if (g.activeWindow === undefined) g.activeWindow = globalThis;
+// `activeDocument` carries only what the palette <style> sink needs: a head to append to.
+if (g.activeDocument === undefined) g.activeDocument = { head: fakeEl("head"), createElement: (tag: string) => fakeEl(tag) };
 
 export const __notices: string[] = [];
 export const __openedModals: string[] = [];
@@ -372,6 +374,94 @@ export class PluginSettingTab {
   update(): void {}
   display(): void {}
   hide(): void {}
+}
+
+/**
+ * A Setting row for `render` items: records name, desc and the components it
+ * was given, and lets a test click a button by tooltip or text.
+ */
+export class Setting {
+  settingEl: Any;
+  controlEl: Any;
+  nameText = "";
+  descText = "";
+  buttons: Array<{ text: string; tooltip: string; icon: string; click: () => void }> = [];
+  texts: Array<{ inputEl: Any; value: string; onChange: ((v: string) => void) | null }> = [];
+  constructor(containerEl: Any) {
+    this.settingEl = adopt(containerEl, fakeEl("div", "setting-item"));
+    this.controlEl = adopt(this.settingEl, fakeEl("div", "setting-item-control"));
+  }
+  setName(n: string): this {
+    this.nameText = n;
+    return this;
+  }
+  setDesc(d: string): this {
+    this.descText = d;
+    return this;
+  }
+  setClass(): this {
+    return this;
+  }
+  private button(): Any {
+    const entry: { text: string; tooltip: string; icon: string; click: () => void } = { text: "", tooltip: "", icon: "", click: () => undefined };
+    this.buttons.push(entry);
+    const comp: Any = {
+      setButtonText: (t: string) => ((entry.text = t), comp),
+      setTooltip: (t: string) => ((entry.tooltip = t), comp),
+      setIcon: (i: string) => ((entry.icon = i), comp),
+      setCta: () => comp,
+      setDisabled: () => comp,
+      onClick: (fn: () => void) => ((entry.click = fn), comp),
+    };
+    return comp;
+  }
+  addButton(cb: (c: Any) => void): this {
+    cb(this.button());
+    return this;
+  }
+  addExtraButton(cb: (c: Any) => void): this {
+    cb(this.button());
+    return this;
+  }
+  addText(cb: (c: Any) => void): this {
+    const inputEl = adopt(this.controlEl, fakeEl("input"));
+    inputEl.value = "";
+    inputEl.focus = () => undefined;
+    const entry: { inputEl: Any; value: string; onChange: ((v: string) => void) | null } = { inputEl, value: "", onChange: null };
+    this.texts.push(entry);
+    const comp: Any = {
+      inputEl,
+      setValue: (v: string) => ((entry.value = v), (inputEl.value = v), comp),
+      setPlaceholder: () => comp,
+      onChange: (fn: (v: string) => void) => ((entry.onChange = fn), comp),
+    };
+    cb(comp);
+    return this;
+  }
+  addToggle(cb: (c: Any) => void): this {
+    cb({ setValue: () => undefined, onChange: () => undefined });
+    return this;
+  }
+  /** Click the button whose tooltip or text contains `what`. */
+  __click(what: string): void {
+    const b = this.buttons.find((x) => x.tooltip.includes(what) || x.text.includes(what));
+    if (!b) throw new Error(`no button matching ${what}; have ${this.buttons.map((x) => x.text || x.tooltip).join(", ")}`);
+    b.click();
+  }
+}
+
+export class SuggestModal extends Modal {
+  setPlaceholder(): void {}
+}
+
+export class FuzzySuggestModal extends SuggestModal {
+  getItems(): unknown[] {
+    return [];
+  }
+  getItemText(item: unknown): string {
+    return String(item);
+  }
+  onChooseItem(_item: unknown): void {}
 }
 
 export interface Command {

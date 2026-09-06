@@ -25,6 +25,8 @@ export interface Transport {
   inflateRaw(data: Uint8Array): Promise<Uint8Array>;
   deflateRaw(data: Uint8Array): Promise<Uint8Array>;
   listDir(vaultPath: string): Promise<DirectoryListing>;
+  /** Creates the folder and every missing parent; an existing folder is not an error. */
+  mkdir(vaultPath: string): Promise<void>;
 }
 
 export type TransportErrorCode =
@@ -36,6 +38,7 @@ export type TransportErrorCode =
   | "inflate-failed"
   | "deflate-failed"
   | "list-failed"
+  | "mkdir-failed"
   | "unsupported";
 
 /**

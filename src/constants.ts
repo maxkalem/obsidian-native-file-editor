@@ -23,6 +23,18 @@ export const DEFAULT_LARGE_FILE_BYTES = 5 * 1024 * 1024;
 /** Second command id; frozen like the first. */
 export const COMMAND_NEW_FILE = "new-file";
 
+/** Palette commands; frozen like the others. */
+export const COMMAND_RELOAD_PALETTES = "reload-palettes";
+export const COMMAND_WRITE_EXAMPLE_PALETTE = "write-example-palette";
+
+/** Run commands (ADR-004); frozen like the others. Desktop only. */
+export const COMMAND_RUN_FILE = "run-file";
+export const COMMAND_STOP_RUN = "stop-run";
+
+/** Run defaults, per device (ADR-004). */
+export const DEFAULT_RUN_TIMEOUT_MS = 30_000;
+export const DEFAULT_RUN_OUTPUT_CAP_BYTES = 1024 * 1024;
+
 /** The log, inside the plugin folder so both platforms can write it through the adapter. */
 export const LOG_FILE_NAME = "nfe.log";
 

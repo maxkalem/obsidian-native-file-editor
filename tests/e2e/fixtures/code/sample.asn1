@@ -1,0 +1,7 @@
+-- ASN.1
+Notes DEFINITIONS ::= BEGIN
+  Note ::= SEQUENCE {
+    id     INTEGER,
+    title  UTF8String (SIZE (1..64)) OPTIONAL
+  }
+END

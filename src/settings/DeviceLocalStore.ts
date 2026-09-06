@@ -1,5 +1,6 @@
-import { DEFAULT_LARGE_FILE_BYTES, PLUGIN_ID } from "../constants";
+import { DEFAULT_LARGE_FILE_BYTES, DEFAULT_RUN_OUTPUT_CAP_BYTES, DEFAULT_RUN_TIMEOUT_MS, PLUGIN_ID } from "../constants";
 import type { ViewMode } from "../core/openMode";
+import { type RunnerDef, normalizeRunners } from "../run/runners";
 
 /**
  * Device-local state, in localStorage scoped by vault. It never travels with
@@ -15,6 +16,14 @@ export interface DeviceLocalState {
   lastNewFileExtension: string;
   /** The last set of yielded extensions the notice was shown for, so it is shown once per change, not per start. */
   yieldNoticeKey: string;
+  /** Run (ADR-004): off until this device turns it on. */
+  runEnabled: boolean;
+  runTimeoutMs: number;
+  runOutputCapBytes: number;
+  /** The user's interpreters for this device, one or more per language; starts EMPTY (the sandbox and the page view need none). Paths never leave the device. */
+  runners: RunnerDef[];
+  /** Vault path -> whether the output panel was open, per file. */
+  runPanelOpen: Record<string, boolean>;
 }
 
 export const DEFAULT_DEVICE_STATE: DeviceLocalState = {
@@ -22,6 +31,11 @@ export const DEFAULT_DEVICE_STATE: DeviceLocalState = {
   largeFileBytes: DEFAULT_LARGE_FILE_BYTES,
   lastNewFileExtension: "txt",
   yieldNoticeKey: "",
+  runEnabled: false,
+  runTimeoutMs: DEFAULT_RUN_TIMEOUT_MS,
+  runOutputCapBytes: DEFAULT_RUN_OUTPUT_CAP_BYTES,
+  runners: [],
+  runPanelOpen: {},
 };
 
 /** The subset of Storage the store uses; a test hands in a Map-backed fake. */
@@ -38,7 +52,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 export function normalizeDeviceState(raw: unknown): DeviceLocalState {
-  const out: DeviceLocalState = { ...DEFAULT_DEVICE_STATE, lastMode: {} };
+  const out: DeviceLocalState = { ...DEFAULT_DEVICE_STATE, lastMode: {}, runners: [], runPanelOpen: {} };
   if (!isRecord(raw)) return out;
   if (isRecord(raw.lastMode)) {
     for (const [path, mode] of Object.entries(raw.lastMode)) {
@@ -52,6 +66,14 @@ export function normalizeDeviceState(raw: unknown): DeviceLocalState {
     out.lastNewFileExtension = raw.lastNewFileExtension;
   }
   if (typeof raw.yieldNoticeKey === "string") out.yieldNoticeKey = raw.yieldNoticeKey;
+  if (typeof raw.runEnabled === "boolean") out.runEnabled = raw.runEnabled;
+  if (typeof raw.runTimeoutMs === "number" && Number.isFinite(raw.runTimeoutMs) && raw.runTimeoutMs >= 1000) out.runTimeoutMs = Math.floor(raw.runTimeoutMs);
+  if (typeof raw.runOutputCapBytes === "number" && Number.isFinite(raw.runOutputCapBytes) && raw.runOutputCapBytes >= 1024) out.runOutputCapBytes = Math.floor(raw.runOutputCapBytes);
+  const runners = normalizeRunners(raw.runners);
+  if (runners) out.runners = runners.runners;
+  if (isRecord(raw.runPanelOpen)) {
+    for (const [path, open] of Object.entries(raw.runPanelOpen)) if (open === true) out.runPanelOpen[path] = true;
+  }
   return out;
 }
 
@@ -89,10 +111,25 @@ export class DeviceLocalStore {
   }
 
   forgetPath(path: string): void {
-    if (!(path in this.state.lastMode)) return;
+    if (!(path in this.state.lastMode) && !(path in this.state.runPanelOpen)) return;
     const next = { ...this.state.lastMode };
     delete next[path];
-    this.update({ lastMode: next });
+    const panels = { ...this.state.runPanelOpen };
+    delete panels[path];
+    this.update({ lastMode: next, runPanelOpen: panels });
+  }
+
+  /** Whether the output panel is open for a file; only open panels are stored, capped like the modes. */
+  rememberRunPanel(path: string, open: boolean): void {
+    const next: Record<string, boolean> = { ...this.state.runPanelOpen };
+    delete next[path];
+    if (open) next[path] = true;
+    const keys = Object.keys(next);
+    for (let i = 0; i < keys.length - MAX_REMEMBERED_FILES; i++) {
+      const k = keys[i];
+      if (k !== undefined) delete next[k];
+    }
+    this.update({ runPanelOpen: next });
   }
 
   private read(): DeviceLocalState {

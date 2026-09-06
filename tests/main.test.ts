@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { Events, Menu, TFile, TFolder, __modalInstances, __notices, __openedModals, __resetObsidianMock, mockPlugin } from "./mocks/obsidian";
 import { VIEW_TYPE_TEXT } from "../src/constants";
 import NativeFileEditorPlugin, { logFilePath, readOwnedExtensions, selfTestStreamLanguage, vaultId } from "../src/main";
+import { PALETTE_STYLE_ID } from "../src/ui/styleSink";
 
 /**
  * Load-time orchestration: which extensions are registered, when the yield
@@ -14,6 +15,7 @@ import NativeFileEditorPlugin, { logFilePath, readOwnedExtensions, selfTestStrea
 /** An adapter that records log appends; everything else the sink needs is a no-op. */
 function makeAdapter() {
   const appended: string[] = [];
+  const written: string[] = [];
   return {
     appended,
     exists: async () => true,
@@ -22,6 +24,10 @@ function makeAdapter() {
     rename: async () => undefined,
     remove: async () => undefined,
     mkdir: async () => undefined,
+    list: async () => ({ files: [], folders: [] }),
+    readBinary: async () => new ArrayBuffer(0),
+    writeBinary: async (p: string) => void written.push(p),
+    written,
   };
 }
 
@@ -67,7 +73,7 @@ describe("plugin load", () => {
     expect(taken.extensions).not.toContain("log");
     expect(taken.extensions).not.toContain("md");
     expect(__notices).toEqual(["Native File Editor left .log to cm-code-editor. Take them over per extension in its settings."]);
-    expect(plugin.commands.map((c) => c.id)).toEqual(["toggle-mode", "new-file"]);
+    expect(plugin.commands.map((c) => c.id)).toEqual(["toggle-mode", "new-file", "reload-palettes", "write-example-palette"]);
     expect(plugin.settingTabs).toHaveLength(1);
   });
 
@@ -83,6 +89,21 @@ describe("plugin load", () => {
     expect(text).toContain("legacy shell: ok");
     expect(text).toMatch(/\[claims\] took \d+ extensions/);
     expect(text.endsWith("\n")).toBe(true);
+  });
+
+  it("loads palettes into one <style> element without writing anything, and offers the palette and reread commands", async () => {
+    const head = (globalThis as unknown as { activeDocument: { head: { children: Array<{ id?: string; textContent?: string }> } } }).activeDocument.head;
+    head.children.length = 0;
+    const app = makeApp({});
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, {} as never));
+    await plugin.onload();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(app.adapter.written).toEqual([]);
+    expect(head.children.map((c) => c.id)).toEqual([PALETTE_STYLE_ID]);
+    expect(head.children[0]?.textContent).toBe("");
+    expect(plugin.commands.map((c) => c.id)).toContain("reload-palettes");
+    expect(plugin.commands.map((c) => c.id)).toContain("write-example-palette");
+    head.children.length = 0;
   });
 
   it("adds New file to a folder's context menu and opens the dialog with the extensions", async () => {

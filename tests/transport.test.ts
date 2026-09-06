@@ -41,6 +41,10 @@ class FakeAdapter implements AdapterLike {
   async remove(p: string): Promise<void> {
     this.files.delete(p);
   }
+  dirs = new Set<string>();
+  async mkdir(p: string): Promise<void> {
+    this.dirs.add(p);
+  }
   async list(p: string): Promise<{ files: string[]; folders: string[] }> {
     const prefix = p === "" ? "" : `${p}/`;
     const files = new Set<string>();
@@ -162,6 +166,22 @@ describe.each<[string, () => Transport, (rel: string, data: Uint8Array) => void,
     seed("root/sub/c.txt", new Uint8Array([1]));
     const t = make();
     expect(await t.listDir("root")).toEqual({ files: ["root/a.txt", "root/b.txt"], folders: ["root/sub"] });
+  });
+
+  it("mkdir creates missing parents and accepts an existing folder; a write into it then works", async () => {
+    const t = make();
+    await t.mkdir("new/deep/folder");
+    await t.mkdir("new/deep/folder");
+    await t.writeBinaryAtomic("new/deep/folder/f.txt", new Uint8Array([7]));
+    expect(readBack("new/deep/folder/f.txt")).toEqual(new Uint8Array([7]));
+  });
+});
+
+describe("desktop mkdir failure", () => {
+  it("is a TransportError with the mkdir-failed code", async () => {
+    const failing = { fs: { promises: { ...fs.promises, mkdir: async () => Promise.reject(Object.assign(new Error("EACCES"), { code: "EACCES" })) } }, path, zlib };
+    const t = new DesktopTransport(tmp, failing as never, fixedRandom);
+    await expect(t.mkdir("x")).rejects.toMatchObject({ code: "mkdir-failed" });
   });
 });
 

@@ -14,6 +14,6 @@
 
 **Edits are not saved.** Autosave writes one second after the last keystroke, and a failure shows a notice with the reason. If the notice names a temp file beside the original, the new content is in that file: the write of the original failed after the temp copy was complete.
 
-**Colours look wrong for a language.** Tokens carry Obsidian's own `cm-*` classes under `cm-s-obsidian`, so a file is coloured exactly like a fenced code block in a note: compare with a block of the same language in a note; if they match, it is the theme. Palettes as CSS files (overriding the `nfe-tok-*` classes) are the next milestone.
+**Colours look wrong for a language.** Tokens carry Obsidian's own `cm-*` classes under `cm-s-obsidian`, so a file is coloured exactly like a fenced code block in a note: compare with a block of the same language in a note; if they match, it is the theme. If they differ, a palette is in effect: the log's `[palette]` line at start names every file read from the palette folder and what each contributed, and the command "Reload palettes" re-reads the folder after a change. A theme file that contributed nothing says so in the same line (`skipped ... not understood`).
 
 **A notice about left-alone extensions appears again.** It reappears only when the set of yielded extensions changes, for example after installing or removing another plugin that opens text files.

@@ -18,6 +18,20 @@ export interface SharedSettings {
   wordWrap: boolean;
   tabSize: number;
   tabInsertsSpaces: boolean;
+  /**
+   * The palette folder, vault-relative with forward slashes and no trailing
+   * slash; empty means the default under the plugin folder (see
+   * `resolvePaletteFolder`). Shared: the folder travels with the vault.
+   */
+  paletteFolder: string;
+  /** Custom palettes on or off; off means the folder is not read and no palette applies. */
+  customPalettes: boolean;
+  /** The vault folder of JSON language definitions (tier 4); empty means the default under the plugin folder. Read at load. */
+  languageFolder: string;
+  /** Custom languages on or off; off means the folder is not read. */
+  customLanguages: boolean;
+  /** Custom file types: lower-case extension -> the registry language name that opens it. */
+  customExtensions: Record<string, string>;
 }
 
 export const DEFAULT_SETTINGS: SharedSettings = {
@@ -27,7 +41,23 @@ export const DEFAULT_SETTINGS: SharedSettings = {
   wordWrap: false,
   tabSize: 4,
   tabInsertsSpaces: false,
+  paletteFolder: "",
+  customPalettes: false,
+  languageFolder: "",
+  customLanguages: false,
+  customExtensions: {},
 };
+
+/** A vault folder setting, cleaned, or the default `<subfolder>` under the plugin folder. */
+export function resolvePluginFolder(setting: string, configDir: string, pluginId: string, subfolder: string): string {
+  const cleaned = setting.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return cleaned.length > 0 ? cleaned : `${configDir}/plugins/${pluginId}/${subfolder}`;
+}
+
+/** The palette folder for a setting value: the setting, cleaned, or the default under the plugin folder. */
+export function resolvePaletteFolder(setting: string, configDir: string, pluginId: string): string {
+  return resolvePluginFolder(setting, configDir, pluginId, "palettes");
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -39,7 +69,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * never reach the code that reads it.
  */
 export function normalizeSettings(raw: unknown): SharedSettings {
-  const out: SharedSettings = { ...DEFAULT_SETTINGS, extensions: {} };
+  const out: SharedSettings = { ...DEFAULT_SETTINGS, extensions: {}, customExtensions: {} };
   if (!isRecord(raw)) return out;
 
   if (isRecord(raw.extensions)) {
@@ -56,5 +86,14 @@ export function normalizeSettings(raw: unknown): SharedSettings {
     out.tabSize = raw.tabSize;
   }
   if (typeof raw.tabInsertsSpaces === "boolean") out.tabInsertsSpaces = raw.tabInsertsSpaces;
+  if (typeof raw.paletteFolder === "string" && !raw.paletteFolder.includes("..")) out.paletteFolder = raw.paletteFolder.trim();
+  if (typeof raw.languageFolder === "string" && !raw.languageFolder.includes("..")) out.languageFolder = raw.languageFolder.trim();
+  if (typeof raw.customPalettes === "boolean") out.customPalettes = raw.customPalettes;
+  if (typeof raw.customLanguages === "boolean") out.customLanguages = raw.customLanguages;
+  if (isRecord(raw.customExtensions)) {
+    for (const [ext, name] of Object.entries(raw.customExtensions)) {
+      if (typeof name === "string" && name.trim().length > 0 && /^[a-z0-9_+-]+$/i.test(ext)) out.customExtensions[ext.toLowerCase()] = name.trim();
+    }
+  }
   return out;
 }

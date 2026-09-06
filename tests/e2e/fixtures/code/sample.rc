@@ -1,0 +1,7 @@
+// Resource script
+#include <windows.h>
+IDD_MAIN DIALOG 0, 0, 200, 100
+CAPTION "Notes"
+BEGIN
+    PUSHBUTTON "OK", IDOK, 70, 70, 50, 14
+END

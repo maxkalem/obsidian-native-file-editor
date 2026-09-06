@@ -13,10 +13,29 @@ import {
   encodeText,
 } from "../model/text/encoding";
 import type { Transport } from "../platform/transport";
+import type { ExecuteHandle, ExecuteRequest } from "../run/execute";
+import { RunPanel } from "../run/RunPanel";
+import type { RunnerDef } from "../run/runners";
 import type { DeviceLocalStore } from "../settings/DeviceLocalStore";
 import type { SharedSettings } from "../settings/settings";
 import { LargeFileModal, formatBytes } from "./LargeFileModal";
 import type { EditorFactory, EditorHandle } from "./editor";
+
+/**
+ * What the view needs to run the file it shows (ADR-004). Absent on mobile and
+ * when the device has Run turned off: then there is no button, no panel and
+ * no command. The view never sees a process; `execute` does.
+ */
+export interface RunViewDeps {
+  readonly enabled: () => boolean;
+  readonly runnersFor: (extension: string) => readonly RunnerDef[];
+  /** The file's absolute OS path, folder and stem, or null when this device cannot say. */
+  readonly locate: (vaultPath: string) => { file: string; dir: string; stem: string } | null;
+  readonly execute: (req: ExecuteRequest) => ExecuteHandle;
+  readonly timeoutMs: () => number;
+  readonly outputCapBytes: () => number;
+  readonly copy?: (text: string) => void;
+}
 
 export interface TextViewDeps {
   readonly settings: () => SharedSettings;
@@ -26,6 +45,9 @@ export interface TextViewDeps {
   readonly timers: Timers;
   readonly now: () => number;
   readonly log: Logger;
+  /** Called after every successful write with the vault path; the plugin reloads palettes saved from inside Obsidian. */
+  readonly afterSave?: (path: string) => void;
+  readonly run?: RunViewDeps;
 }
 
 /**
@@ -57,6 +79,7 @@ export class TextView extends FileView {
   private nfeLastWriteAt = 0;
   private nfeLoadedPath: string | null = null;
   private nfeLanguage: ResolvedLanguage | null = null;
+  private nfeRunPanel: RunPanel | null = null;
 
   constructor(leaf: WorkspaceLeaf, deps: TextViewDeps) {
     super(leaf);
@@ -167,7 +190,74 @@ export class TextView extends FileView {
         new Notice(`Native File Editor could not save ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
       },
     });
+    if (this.nfeRunAvailable() && device.runPanelOpen[file.path] === true) this.nfeOpenRunPanel(false);
     this.nfeShow(decision.mode);
+  }
+
+  /** Run is on this device, turned on, and knows a runner for this file. */
+  nfeRunAvailable(): boolean {
+    const run = this.nfeDeps.run;
+    if (!run || !this.file || !run.enabled()) return false;
+    return run.runnersFor(this.file.extension).length > 0;
+  }
+
+  get runPanelOpen(): boolean {
+    return this.nfeRunPanel !== null;
+  }
+
+  get running(): boolean {
+    return this.nfeRunPanel?.isRunning ?? false;
+  }
+
+  /** The Run button and the command: save what the editor holds, open the panel, start the selected runner. */
+  async runFile(): Promise<void> {
+    if (!this.nfeRunAvailable() || !this.nfeDoc) return;
+    await this.nfeAutosave?.flush();
+    this.nfeOpenRunPanel(true);
+    await this.nfeRunPanel?.run();
+  }
+
+  stopRun(): void {
+    this.nfeRunPanel?.stop();
+  }
+
+  toggleRunPanel(): void {
+    if (this.nfeRunPanel) this.nfeCloseRunPanel();
+    else if (this.nfeRunAvailable()) this.nfeOpenRunPanel(true);
+  }
+
+  private nfeOpenRunPanel(remember: boolean): void {
+    const run = this.nfeDeps.run;
+    if (this.nfeRunPanel || !run || !this.file) return;
+    const panel = new RunPanel(this.nfeBodyEl, {
+      runners: () => (this.file ? run.runnersFor(this.file.extension) : []),
+      start: (def, onOutput) => {
+        const path = this.nfeLoadedPath ?? this.file?.path ?? "";
+        const where = run.locate(path);
+        const text = this.nfeEditor?.getText() ?? this.nfeDoc?.text ?? "";
+        if (!where) {
+          return {
+            stop: () => undefined,
+            done: Promise.resolve({ exitCode: null, timedOut: false, stopped: false, truncated: false, ms: 0, error: "this device cannot resolve the file's path", step: 0, steps: 0 }),
+          };
+        }
+        this.nfeDeps.log.info("run", `${path} with ${def.name}`);
+        return run.execute({ def, ...where, text, timeoutMs: run.timeoutMs(), outputCapBytes: run.outputCapBytes(), onOutput });
+      },
+      timers: this.nfeDeps.timers,
+      now: this.nfeDeps.now,
+      copy: run.copy,
+      onClose: () => this.nfeCloseRunPanel(),
+    });
+    this.nfeRunPanel = panel;
+    if (remember) this.nfeDeps.device.rememberRunPanel(this.file.path, true);
+  }
+
+  private nfeCloseRunPanel(): void {
+    if (!this.nfeRunPanel) return;
+    this.nfeRunPanel.destroy();
+    this.nfeRunPanel = null;
+    if (this.file) this.nfeDeps.device.rememberRunPanel(this.file.path, false);
   }
 
   override async onUnloadFile(file: TFile): Promise<void> {
@@ -223,6 +313,8 @@ export class TextView extends FileView {
   private nfeShow(mode: ViewMode): void {
     this.nfeMode = mode;
     this.nfeDestroyEditor();
+    // The run panel survives a mode switch: detach it, empty the body, put it back under the new editor.
+    const panelEl = this.nfeRunPanel?.rootEl ?? null;
     this.nfeBodyEl.empty();
     if (!this.nfeDoc) return;
     const s = this.nfeDeps.settings();
@@ -230,6 +322,15 @@ export class TextView extends FileView {
     const host = this.nfeBodyEl.createDiv({ cls: "nfe-editor" });
     host.addClass(OBSIDIAN_SCHEME_CLASS);
     if (readOnly) host.addClass("nfe-readonly");
+    // What a palette scopes on: the extension, the language badge, the file
+    // name and the vault path, as data attributes on the host (see
+    // palette/render.ts). Empty when the file has none.
+    if (this.file) {
+      host.setAttribute("data-nfe-ext", this.file.extension.toLowerCase());
+      host.setAttribute("data-nfe-lang", this.nfeLanguage?.entry.name ?? languageFor(this.file.extension)?.name ?? "");
+      host.setAttribute("data-nfe-name", this.file.name);
+      host.setAttribute("data-nfe-path", this.file.path);
+    }
     const options = {
       text: this.nfeDoc.text,
       readOnly,
@@ -254,6 +355,7 @@ export class TextView extends FileView {
       new Notice("Native File Editor: highlighting failed for this file; shown as plain text. Details are in the plugin log.");
     }
     if (!readOnly) this.nfeEditor.focus();
+    if (panelEl) this.nfeBodyEl.appendChild(panelEl);
     this.nfeDeps.log.debug("view", `${mode} ${this.nfeLoadedPath ?? "?"}: view built in ${this.nfeDeps.now() - started} ms`);
     this.nfeRenderHead();
   }
@@ -274,7 +376,13 @@ export class TextView extends FileView {
         text: "read-only: not valid UTF-8, shown as a guess",
       });
     }
-    const btn = this.nfeHeadEl.createEl("button", {
+    const buttons = this.nfeHeadEl.createDiv({ cls: "nfe-head-buttons" });
+    if (this.nfeRunAvailable()) {
+      const runBtn = buttons.createEl("button", { cls: "nfe-mode-button nfe-run-head-button", text: "Run" });
+      setIcon(runBtn.createSpan({ cls: "nfe-mode-icon" }), "play");
+      runBtn.addEventListener("click", () => void this.runFile());
+    }
+    const btn = buttons.createEl("button", {
       cls: "nfe-mode-button",
       text: this.nfeMode === "preview" ? "Edit" : "Preview",
     });
@@ -303,6 +411,7 @@ export class TextView extends FileView {
     this.nfeSizeBytes = bytes.byteLength;
     this.nfeDoc = { text, info: this.nfeDoc.info };
     this.nfeDeps.log.debug("save", `${path}: ${bytes.byteLength} B`);
+    this.nfeDeps.afterSave?.(path);
   }
 
   /** The file is gone from the vault: drop the text, say so, write nothing. */
@@ -357,6 +466,11 @@ export class TextView extends FileView {
       await this.nfeAutosave.flush();
       this.nfeAutosave.cancel();
       this.nfeAutosave = null;
+    }
+    // Leaving the file stops its program; whether the panel was open is already remembered.
+    if (this.nfeRunPanel) {
+      this.nfeRunPanel.destroy();
+      this.nfeRunPanel = null;
     }
     this.nfeDestroyEditor();
     this.nfeDoc = null;

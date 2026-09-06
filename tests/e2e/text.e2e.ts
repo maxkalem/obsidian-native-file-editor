@@ -41,6 +41,9 @@ class DirectoryAdapter implements AdapterLike {
   async remove(p: string): Promise<void> {
     fs.rmSync(this.abs(p), { force: true });
   }
+  async mkdir(p: string): Promise<void> {
+    fs.mkdirSync(this.abs(p), { recursive: true });
+  }
   async list(p: string): Promise<{ files: string[]; folders: string[] }> {
     const prefix = p === "" ? "" : `${p}/`;
     const files: string[] = [];

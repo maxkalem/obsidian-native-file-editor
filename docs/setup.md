@@ -16,9 +16,49 @@ At load the plugin leaves alone every extension another plugin already opens, an
 
 ## Settings
 
-Shared across devices: initial mode (preview first, always editing, or remember per file), line numbers, word wrap, tab size, tab inserts spaces, and the file-type toggles.
+Shared across devices: initial mode (preview first, always editing, or remember per file), line numbers, word wrap, tab size, tab inserts spaces, the palette folder, and the file-type toggles.
 
-This device only: the large-file limit. A file above it opens in preview with an Edit button that asks before building the editor.
+This device only: the large-file limit (a file above it opens in preview with an Edit button that asks before building the editor), and everything under Run: the toggle, the timeout, the output limit, the runner list.
+
+## Adding a language without a release
+
+Settings, Native File Editor, Languages, **Use custom languages**; the folder row appears (default `.obsidian/plugins/native-file-editor/languages/`; the folder icon opens it in the explorer and creates it if missing, the second icon picks another folder inside the vault). **Create example…** writes the plugin's own table for a keyword-based language as `<lexer>.json`; edit it and press **Reread**. Or write a file from scratch in this shape (`docs/languages/hollywood.json` in the repository is a complete one):
+
+```json
+{
+  "name": "Xlang",
+  "extensions": ["xl", "xlang"],
+  "caseInsensitive": false,
+  "commentLine": "//",
+  "commentStart": "/*",
+  "commentEnd": "*/",
+  "sets": [
+    ["keyword", ["if", "else", "return"]],
+    ["type", "int string bool"],
+    ["builtin", ["print"]]
+  ]
+}
+```
+
+`sets` roles are `keyword`, `builtin`, `type`, `constant`, `property`, `meta` and `special`; words may be a list or one space-separated string. While a file is in the folder its definition is used for its extensions, bundled or not; the log's `[languages]` line names what each file registered and what it replaced, or why it did not load. A new extension is registered at **Reread**; one another plugin serves waits for **Reload plugin**. To open an extension no table names, use Settings, File types, Custom file types, **Add**. The bundled tier-4 tables come from Notepad++ through `node scripts/convert-langs-model.mjs "C:\Program Files\Notepad++\langs.model.xml"`, which rewrites `src/highlight/langs.generated.ts` and the examples under `docs/languages/`.
+
+## Palettes
+
+Settings, Palettes, **Use custom palettes**; the folder row appears with the same buttons. **Create example…** asks for a language and writes `<Language>_light.css` and `<Language>_dark.css` from the theme's own colours: working palettes that change nothing until edited. Edit a value, press **Reread** (or save the file from inside the plugin, which rereads by itself). A Notepad++ theme from `Notepad++\themes\` or a CodeMirror theme module dropped into the folder works as it is; name it `<Language>_dark.xml` to limit it to one language and theme, or leave the name as it is for every file. The README says how names are read.
+
+## Run (desktop)
+
+Settings, Native File Editor, Run (this device), **Enable Run**; the timeout, the output limit and the **Interpreters** list appear under it. A Run button appears in the head bar of every file whose language has an interpreter; the commands "Run file" and "Stop run" can take hotkeys. The panel under the editor shows the output, stdout in the text colour and stderr in the error colour, then the exit code and the time.
+
+Interpreters are yours to install; the plugin never downloads anything. The defaults call each language's standard tool by its bare name (`python`, `node`, `lua`, `ruby`, `perl`, `php`, `bash`, `pwsh`, `cmd`, `Rscript`, `go`, `rustc`, `cc`, `c++`, `java`, `dotnet`, `kotlinc`, `swift`, `dart`, `julia`, `racket`, `clojure`, `escript`, `runghc`, `ocaml`, `tclsh`, `sqlite3`, `elixir`, `nim`, `raku`, `godot`) and rely on `PATH`. Check with a terminal: if `python --version` works there, the Python runner works here (Obsidian inherits the login environment; on macOS a tool installed only for a shell profile may need its absolute path).
+
+Each row of **Interpreters** is one language: the language, then the command line. The folder icon opens a native file dialog; the program you pick replaces the first word. The pencil turns the line into a text field: the program first, then its arguments, `{file}` for the file's path (`{dir}` its folder, `{stem}` its name without extension, `{tmp}` a scratch folder for that run, removed afterwards); quote anything with spaces; Enter or leaving the field saves. **Add** picks a language from every one the plugin knows, then the program, and makes a row `program {file}`; two rows for one language give the panel a dropdown; the list's delete removes a row; **Reset interpreters to the defaults** brings the bundled list back. HTML and MHTML have "Open in browser": the file goes to the operating system's default application. Compile-then-run rows (Rust, C, Kotlin) are shown but have no edit field; they stay as the defaults.
+
+A portable interpreter can live anywhere, including inside the vault, but not wisely inside the plugin folder: `clean.cmd` wipes it, a synced or Git-tracked vault carries it, and the path differs per device. Runner definitions are device-local and never sync.
+
+**Timeout** and **Output limit** are per device; a run past either is killed. On Windows the kill goes through `taskkill /T`, on macOS and Linux through the process group, so the interpreter's children go with it.
+
+Mobile has no Run: the button, the commands and this settings group do not exist there.
 
 ## The log
 

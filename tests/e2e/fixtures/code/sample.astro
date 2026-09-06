@@ -1,0 +1,17 @@
+---
+// Astro component frontmatter
+import Layout from "../layouts/Layout.astro";
+const title = "Notes";
+const items = await fetchItems();
+---
+
+<Layout title={title}>
+  <h1>{title}</h1>
+  <ul>
+    {items.map((item) => <li class="note">{item.name}</li>)}
+  </ul>
+</Layout>
+
+<style>
+  .note { font-weight: 600; }
+</style>

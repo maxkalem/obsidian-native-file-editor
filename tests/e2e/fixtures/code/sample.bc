@@ -1,0 +1,8 @@
+| BaanC
+function main()
+{
+    long count = 3;
+    if (count > 2) {
+        message("big %d", count);
+    }
+}

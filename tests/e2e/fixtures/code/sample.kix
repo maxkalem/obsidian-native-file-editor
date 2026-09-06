@@ -1,0 +1,5 @@
+;KiXtart
+$count = 3
+If $count > 2
+  ? "big " + $count
+EndIf

@@ -15,10 +15,6 @@ const OBSIDIAN_CODE_EDITOR =
  * an extension may leave it only by entering the registry.
  */
 const NOT_YET_COVERED: Record<string, string> = {
-  graphql: "tier 3 (cm6-graphql)",
-  bat: "tier 4 (Notepad++ batch keywords)",
-  cmd: "tier 4 (Notepad++ batch keywords)",
-  makefile: "tier 4 (Notepad++ makefile keywords)",
   svg: "Obsidian owns it (image view)",
 };
 

@@ -267,6 +267,135 @@
   font-style: italic;
 }
 
+/* Run (ADR-004): the head bar's buttons sit together on the right; the output
+   panel sits under the editor, grows with its text up to a share of the pane,
+   and scrolls inside. */
+.nfe-text-content .nfe-head-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  flex: 0 0 auto;
+}
+
+.nfe-text-content .nfe-run-head-button {
+  color: var(--text-accent);
+}
+
+.nfe-text-content .nfe-run-panel {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  max-height: 40%;
+  min-height: 0;
+  border-top: var(--border-width) solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+}
+
+.nfe-text-content .nfe-run-head {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  flex: 0 0 auto;
+  padding: var(--size-4-1) var(--size-4-3);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.nfe-text-content .nfe-run-button {
+  flex: 0 0 auto;
+  min-width: 4em;
+}
+
+.nfe-text-content .nfe-run-running {
+  color: var(--text-error);
+}
+
+.nfe-text-content .nfe-run-select {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--font-ui-smaller);
+}
+
+.nfe-text-content .nfe-run-status {
+  white-space: nowrap;
+}
+
+.nfe-text-content .nfe-run-spacer {
+  flex: 1 1 auto;
+}
+
+.nfe-text-content .nfe-run-tool {
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller);
+  padding: 0 var(--size-4-2);
+}
+
+.nfe-text-content .nfe-run-close {
+  color: var(--text-muted);
+}
+
+.nfe-text-content .nfe-run-output-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background-color: var(--background-primary);
+}
+
+.nfe-text-content .nfe-run-output {
+  margin: 0;
+  padding: var(--size-4-2) var(--size-4-3);
+  font-family: var(--font-monospace);
+  font-size: var(--code-size);
+  line-height: var(--line-height-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-normal);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.nfe-text-content .nfe-run-stdout {
+  color: var(--text-normal);
+}
+
+.nfe-text-content .nfe-run-stderr {
+  color: var(--text-error);
+}
+
+.nfe-text-content .nfe-run-info {
+  color: var(--text-muted);
+}
+
+.nfe-text-content .nfe-hidden {
+  display: none;
+}
+
+/* A rendered page takes most of the pane; the frame fills the output area. */
+.nfe-text-content .nfe-run-page-mode {
+  flex: 1 1 65%;
+  max-height: 75%;
+}
+
+.nfe-text-content .nfe-run-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 12em;
+  border: none;
+  background-color: var(--background-primary);
+}
+
+.nfe-text-content .nfe-run-page-mode .nfe-run-output:empty {
+  display: none;
+}
+
+/* Settings: the interpreter's command line, edited in place, wants the room. */
+.nfe-setting-argv {
+  width: 100%;
+  min-width: 20em;
+  font-family: var(--font-monospace);
+}
+
 .nfe-text-content .nfe-error {
   padding: var(--size-4-4);
   color: var(--text-error);

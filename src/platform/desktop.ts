@@ -22,6 +22,7 @@ export interface NodeModules {
       rename(from: string, to: string): Promise<void>;
       unlink(path: string): Promise<void>;
       readdir(path: string, options: { withFileTypes: true }): Promise<Array<{ name: string; isFile(): boolean; isDirectory(): boolean }>>;
+      mkdir(path: string, options: { recursive: true }): Promise<string | undefined>;
     };
   };
   path: {
@@ -135,5 +136,13 @@ export class DesktopTransport implements Transport {
     files.sort();
     folders.sort();
     return { files, folders };
+  }
+
+  async mkdir(vaultPath: string): Promise<void> {
+    try {
+      await this.node.fs.promises.mkdir(this.absolute(vaultPath), { recursive: true });
+    } catch (e) {
+      throw new TransportError("mkdir-failed", `Cannot create ${vaultPath}`, vaultPath, e);
+    }
   }
 }

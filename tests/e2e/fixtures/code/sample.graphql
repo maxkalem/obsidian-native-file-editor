@@ -1,0 +1,31 @@
+# Notes API schema
+"""
+A note in the vault.
+"""
+type Note implements Node {
+  id: ID!
+  title: String!
+  body: String
+  tags: [Tag!]!
+  createdAt: DateTime! @deprecated(reason: "use created")
+}
+
+interface Node { id: ID! }
+enum Sort { NEWEST OLDEST }
+scalar DateTime
+
+type Query {
+  notes(first: Int = 10, sort: Sort = NEWEST): [Note!]!
+  note(id: ID!): Note
+}
+
+query Recent($n: Int!) {
+  notes(first: $n) {
+    ...NoteFields
+  }
+}
+
+fragment NoteFields on Note {
+  id
+  title
+}

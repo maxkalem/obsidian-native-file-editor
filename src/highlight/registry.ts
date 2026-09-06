@@ -12,9 +12,20 @@ import { rust } from "@codemirror/lang-rust";
 import { MSSQL, MySQL, PLSQL, PostgreSQL, SQLite, sql } from "@codemirror/lang-sql";
 import { xml } from "@codemirror/lang-xml";
 import { yaml } from "@codemirror/lang-yaml";
+import { astro } from "@fazelstudio/codemirror-lang-astro";
+import { prisma } from "@fazelstudio/codemirror-lang-prisma";
+import { nix } from "@replit/codemirror-lang-nix";
+import { parser as solidityParser } from "@replit/codemirror-lang-solidity";
+import { svelte } from "@replit/codemirror-lang-svelte";
+import { elixir } from "codemirror-lang-elixir";
+import { hcl } from "codemirror-lang-hcl";
+import { graphqlMode } from "./graphqlMode";
+import { type KeywordLanguage, keywordMode } from "./keywordMode";
+import { NPP_LANGUAGES } from "./langs.generated";
 import { type Language, LanguageSupport, StreamLanguage, type StreamParser } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
 import { apl } from "@codemirror/legacy-modes/mode/apl";
+import { asn1 } from "@codemirror/legacy-modes/mode/asn1";
 import { asciiArmor } from "@codemirror/legacy-modes/mode/asciiarmor";
 import { brainfuck } from "@codemirror/legacy-modes/mode/brainfuck";
 import { ceylon, csharp, dart, kotlin, nesC, objectiveC, objectiveCpp, scala, shader, squirrel } from "@codemirror/legacy-modes/mode/clike";
@@ -112,9 +123,10 @@ import { adaptStreamParser } from "./obsidianFork";
  * Tiers, from the handoff's inventory: tier 1 is the official lezer packages
  * (the fourteen the user confirmed), tier 2 is `@codemirror/legacy-modes`
  * where tier 1 has nothing. Where both offer a language, tier 1 is listed and
- * the legacy mode is not. Tier 3 (community packages) and tier 4 (the keyword
- * tables and the vault definitions folder) are still to come; until then an
- * extension outside this list is not registered at all.
+ * the legacy mode is not. Tier 3 is the confirmed set of community packages,
+ * each bundled after its licence and size were checked (THIRD_PARTY_NOTICES).
+ * Tier 4 (the keyword tables and the vault definitions folder) is still to
+ * come; until then an extension outside this list is not registered at all.
  *
  * Every grammar module here is evaluated when Obsidian loads main.js, whatever
  * `load` does (ADR-001): the function exists so the Language object, which is
@@ -122,8 +134,12 @@ import { adaptStreamParser } from "./obsidianFork";
  * that type is actually opened.
  */
 
-/** `builtin` is a stream mode of this plugin's own; `legacy` comes from `@codemirror/legacy-modes`. */
-export type LanguageSource = "lezer" | "legacy" | "builtin" | null;
+/**
+ * `builtin` is a stream mode of this plugin's own (including the Notepad++
+ * tables); `legacy` comes from `@codemirror/legacy-modes`; `vault` is a JSON
+ * definition from the vault's language folder, registered at load.
+ */
+export type LanguageSource = "lezer" | "legacy" | "builtin" | "vault" | null;
 
 export interface LanguageEntry {
   /** Human-readable name shown in the head bar. */
@@ -167,14 +183,14 @@ const ENTRIES: readonly LanguageEntry[] = [
   builtin("Log", ["log", "out", "err"], logMode as StreamParser<unknown>),
 
   // Tier 1: official lezer packages.
-  lezer("JavaScript", ["js", "mjs", "cjs", "jsx", "es6"], () => javascript({ jsx: true })),
+  lezer("JavaScript", ["js", "mjs", "cjs", "jsx", "es6", "jsm"], () => javascript({ jsx: true })),
   lezer("TypeScript", ["ts", "mts", "cts"], () => javascript({ typescript: true })),
   lezer("TSX", ["tsx"], () => javascript({ typescript: true, jsx: true })),
   lezer("Python", ["py", "pyw", "pyi"], () => python()),
-  lezer("HTML", ["html", "htm", "xhtml"], () => html()),
+  lezer("HTML", ["html", "htm", "xhtml", "shtml", "shtm", "xht", "hta", "jsp"], () => html()),
   lezer("CSS", ["css"], () => css()),
-  lezer("JSON", ["json", "jsonc", "jsonld", "geojson", "webmanifest", "har"], () => json()),
-  lezer("XML", ["xml", "xsl", "xslt", "xsd", "plist", "csproj", "vbproj", "fsproj", "props", "targets", "xaml", "rss", "atom", "wsdl", "xliff", "resx", "nuspec", "opml"], () => xml()),
+  lezer("JSON", ["json", "jsonc", "json5", "jsonld", "geojson", "webmanifest", "har"], () => json()),
+  lezer("XML", ["xml", "xsl", "xslt", "xsd", "plist", "csproj", "vbproj", "fsproj", "props", "targets", "xaml", "rss", "atom", "wsdl", "xliff", "xlf", "resx", "nuspec", "opml", "xul", "kml", "mxml", "xsml", "xbl", "sxbl", "sitemap", "gml", "gpx", "vcproj", "vcxproj", "csxproj", "dbproj"], () => xml()),
   lezer("YAML", ["yaml", "yml"], () => yaml()),
   lezer("SQL", ["sql", "ddl", "dml"], () => sql()),
   lezer("PostgreSQL", ["pgsql", "psql"], () => sql({ dialect: PostgreSQL })),
@@ -186,8 +202,21 @@ const ENTRIES: readonly LanguageEntry[] = [
   lezer("Rust", ["rs"], () => rust()),
   lezer("Go", ["go"], () => go()),
   lezer("Java", ["java"], () => java()),
-  lezer("PHP", ["php", "phtml", "php5", "phps"], () => php()),
-  lezer("C/C++", ["c", "h", "cpp", "cc", "cxx", "c++", "hpp", "hh", "hxx", "h++", "ino", "cu", "cuh"], () => cpp()),
+  lezer("PHP", ["php", "phtml", "php3", "php4", "php5", "phps", "phpt"], () => php()),
+  lezer("C/C++", ["c", "h", "cpp", "cc", "cxx", "c++", "hpp", "hh", "hxx", "h++", "ino", "cu", "cuh", "lex"], () => cpp()),
+
+  // Tier 3: community lezer packages, one decision each (handoff §17; sizes
+  // and licences in THIRD_PARTY_NOTICES.md). Only what tiers 1 and 2 lack.
+  lezer("Svelte", ["svelte"], () => svelte()),
+  lezer("Astro", ["astro"], () => astro()),
+  lezer("Elixir", ["ex", "exs"], () => elixir()),
+  lezer("HCL", ["hcl", "tf", "tfvars", "nomad"], () => hcl()),
+  lezer("Nix", ["nix"], () => nix()),
+  lezer("Prisma", ["prisma"], () => prisma()),
+  // Solidity's package is a stream parser; it goes through the same fork adapter as tier 2.
+  legacy("Solidity", ["sol"], solidityParser as StreamParser<unknown>),
+  // GraphQL: this plugin's own keyword mode (cm6-graphql would bring the graphql package).
+  builtin("GraphQL", ["graphql", "gql", "graphqls"], graphqlMode as StreamParser<unknown>),
 
   // Tier 2: legacy stream modes where tier 1 has nothing.
   legacy("C#", ["cs", "csx"], csharp),
@@ -202,9 +231,9 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("Shader", ["glsl", "vert", "frag", "geom", "comp", "tesc", "tese", "hlsl", "fx", "shader", "cginc"], shader),
   legacy("Clojure", ["clj", "cljs", "cljc", "edn"], clojure),
   legacy("CMake", ["cmake"], cmake),
-  legacy("COBOL", ["cob", "cbl", "cpy"], cobol),
+  legacy("COBOL", ["cob", "cbl", "cpy", "cbd", "cdb", "cdc", "copy", "lst"], cobol),
   legacy("CoffeeScript", ["coffee", "litcoffee"], coffeeScript),
-  legacy("Common Lisp", ["lisp", "cl", "asd", "el"], commonLisp),
+  legacy("Common Lisp", ["lisp", "lsp", "cl", "asd", "el"], commonLisp),
   legacy("Crystal", ["cr"], crystal),
   legacy("SCSS", ["scss"], sCSS),
   legacy("Less", ["less"], less),
@@ -225,11 +254,11 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("Factor", ["factor"], factor),
   legacy("FCL", ["fcl"], fcl),
   legacy("Forth", ["fth", "4th", "forth"], forth),
-  legacy("Fortran", ["f", "for", "f77", "f90", "f95", "f03", "f08"], fortran),
+  legacy("Fortran", ["f", "for", "f77", "f90", "f95", "f03", "f08", "f2k", "f23"], fortran),
   legacy("Assembly (GAS)", ["s", "asm"], gas),
   legacy("Gherkin", ["feature"], gherkin),
   legacy("Groovy", ["groovy", "gvy", "gradle"], groovy),
-  legacy("Haskell", ["hs"], haskell),
+  legacy("Haskell", ["hs", "lhs", "las"], haskell),
   legacy("Haxe", ["hx"], haxe),
   legacy("HXML", ["hxml"], hxml),
   legacy("HTTP", ["http"], http),
@@ -240,7 +269,7 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("Mathematica", ["wl", "wls", "nb"], mathematica),
   legacy("mbox", ["mbox", "eml"], mbox),
   legacy("mIRC", ["mrc"], mirc),
-  legacy("OCaml", ["ml", "mli"], oCaml),
+  legacy("OCaml", ["ml", "mli", "thy"], oCaml),
   legacy("F#", ["fs", "fsx", "fsi"], fSharp),
   legacy("Standard ML", ["sml", "sig", "fun"], sml),
   legacy("Modelica", ["mo"], modelica),
@@ -252,23 +281,23 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("N-Triples", ["nt", "nq"], ntriples),
   legacy("Octave", ["octave"], octave),
   legacy("Oz", ["oz"], oz),
-  legacy("Pascal", ["pas", "pp", "dpr", "lpr", "dpk"], pascal),
+  legacy("Pascal", ["pas", "pp", "p", "dpr", "lpr", "dpk"], pascal),
   legacy("PEG.js", ["pegjs", "peggy"], pegjs),
-  legacy("Perl", ["pl", "pm", "pod", "cgi"], perl),
+  legacy("Perl", ["pl", "pm", "pod", "cgi", "plx", "t"], perl),
   legacy("Pig", ["pig"], pig),
   legacy("PowerShell", ["ps1", "psm1", "psd1"], powerShell),
-  legacy("Properties", ["properties", "ini", "cfg", "conf", "env", "editorconfig", "gitignore", "gitattributes", "gitmodules", "gitconfig", "npmrc", "prefs", "reg", "inf", "url", "desktop", "service"], properties),
+  legacy("Properties", ["properties", "ini", "cfg", "conf", "env", "editorconfig", "gitignore", "gitattributes", "gitmodules", "gitconfig", "npmrc", "prefs", "reg", "inf", "url", "wer", "desktop", "service"], properties),
   legacy("Protocol Buffers", ["proto"], protobuf),
   legacy("Pug", ["pug", "jade"], pug),
   legacy("Puppet", ["puppet"], puppet),
   legacy("Cython", ["pyx", "pxd", "pxi"], cython),
   legacy("Q", ["q"], q),
-  legacy("R", ["r", "rprofile"], r),
+  legacy("R", ["r", "rprofile", "splus"], r),
   legacy("RPM spec", ["spec"], rpmSpec),
   legacy("Ruby", ["rb", "rake", "gemspec", "podspec", "ru", "rbw"], ruby),
   legacy("SAS", ["sas"], sas),
-  legacy("Scheme", ["scm", "ss", "rkt", "sld"], scheme),
-  legacy("Shell", ["sh", "bash", "zsh", "fish", "ksh", "csh", "tcsh", "bashrc", "zshrc", "profile", "bash_profile", "bash_aliases"], shell),
+  legacy("Scheme", ["scm", "ss", "smd", "rkt", "sld"], scheme),
+  legacy("Shell", ["sh", "bash", "zsh", "fish", "ksh", "csh", "tcsh", "bsh", "bashrc", "zshrc", "profile", "bash_profile", "bash_aliases"], shell),
   legacy("Sieve", ["sieve"], sieve),
   legacy("Smalltalk", ["st"], smalltalk),
   legacy("SPARQL", ["rq", "sparql"], sparql),
@@ -281,9 +310,10 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("troff", ["troff", "roff", "man", "nroff"], troff),
   legacy("TTCN-3", ["ttcn", "ttcn3"], ttcn),
   legacy("Turtle", ["ttl"], turtle),
-  legacy("Visual Basic", ["vb", "bas", "frm"], vb),
+  legacy("Visual Basic", ["vb", "vba", "bas", "frm"], vb),
   legacy("VBScript", ["vbs", "wsf"], vbScript),
-  legacy("ASP", ["asp"], vbScriptASP),
+  legacy("ASP", ["asp", "aspx"], vbScriptASP),
+  legacy("ASN.1", ["asn1", "asn", "mib"], asn1({})),
   legacy("Velocity", ["vm", "vtl"], velocity),
   legacy("Verilog", ["v", "sv", "svh", "vh"], verilog),
   legacy("TL-Verilog", ["tlv"], tlv),
@@ -296,9 +326,26 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("APL", ["apl"], apl),
   legacy("ASCII armor", ["asc", "pgp"], asciiArmor),
   legacy("Brainfuck", ["bf", "b"], brainfuck),
+  // Tier 4: Notepad++ keyword tables through the generic keyword mode
+  // (langs.generated.ts, scripts/convert-langs-model.mjs), for the languages
+  // no tier above covers. Plain files Notepad++ names without keywords.
+  ...NPP_LANGUAGES.map(
+    (def): LanguageEntry => ({
+      name: def.name,
+      extensions: def.extensions,
+      source: "builtin",
+      // The keyword map is built on first open, not at load: 27 of them would be paid at every start otherwise.
+      load: () => StreamLanguage.define(adaptStreamParser(keywordMode(def) as StreamParser<unknown>)),
+    })
+  ),
+  plain("NFO", ["nfo"]),
+  plain("Intel HEX", ["hex"]),
+  plain("Motorola S-record", ["mot", "srec"]),
+  plain("Tektronix hex", ["tek"]),
+  plain("MHTML", ["mht", "mhtml"]),
 ];
 
-const BY_EXTENSION: ReadonlyMap<string, LanguageEntry> = (() => {
+const BY_EXTENSION: Map<string, LanguageEntry> = (() => {
   const m = new Map<string, LanguageEntry>();
   for (const e of ENTRIES) {
     for (const ext of e.extensions) {
@@ -310,6 +357,69 @@ const BY_EXTENSION: ReadonlyMap<string, LanguageEntry> = (() => {
   return m;
 })();
 
+/** Definitions from the vault's language folder and the user's custom file types, added at load. */
+const VAULT_ENTRIES: LanguageEntry[] = [];
+/** ext -> the bundled entry a vault definition or custom type displaced, so it can be put back. */
+const DISPLACED: Map<string, LanguageEntry | undefined> = new Map();
+
+/**
+ * Registers one JSON definition from the vault (tier 4, the data path that
+ * needs no release). The vault file WINS for its extensions: while the file is
+ * in the folder its definition is used, bundled or not (the user's rule); what
+ * it displaced is reported so the log can say so. Must run before the plugin
+ * registers its extensions with Obsidian, or be followed by a registration of
+ * the new extensions.
+ */
+export function registerVaultLanguage(def: KeywordLanguage): { entry: LanguageEntry; displaced: string[] } {
+  const extensions = [...new Set(def.extensions.map((e) => e.toLowerCase()))];
+  const entry: LanguageEntry = {
+    name: def.name,
+    extensions,
+    source: "vault",
+    load: () => StreamLanguage.define(adaptStreamParser(keywordMode(def) as StreamParser<unknown>)),
+  };
+  const displaced: string[] = [];
+  for (const ext of extensions) {
+    const previous = BY_EXTENSION.get(ext);
+    if (previous && previous !== entry) displaced.push(`.${ext} (was ${previous.name})`);
+    if (!DISPLACED.has(ext)) DISPLACED.set(ext, previous);
+    BY_EXTENSION.set(ext, entry);
+  }
+  VAULT_ENTRIES.push(entry);
+  if (!BY_NAME.has(entry.name.toLowerCase())) BY_NAME.set(entry.name.toLowerCase(), entry);
+  return { entry, displaced };
+}
+
+/**
+ * A custom file type: one extension mapped onto a language the registry
+ * already has (`Plain text` included), for files the user wants opened that no
+ * table names. The mapping wins over a bundled claim for that extension.
+ */
+export function registerCustomExtension(ext: string, languageName: string): { entry: LanguageEntry; displaced: string | null } | null {
+  const target = languageNamed(languageName);
+  const lower = ext.toLowerCase().replace(/^\./, "");
+  if (!target || !/^[a-z0-9_+-]+$/.test(lower)) return null;
+  const previous = BY_EXTENSION.get(lower);
+  if (previous === target) return { entry: target, displaced: null };
+  if (!DISPLACED.has(lower)) DISPLACED.set(lower, previous);
+  const entry: LanguageEntry = { name: target.name, extensions: [lower], source: target.source, load: target.load };
+  // Same language, one more extension: share the resolved Language through the target.
+  VAULT_ENTRIES.push(entry);
+  BY_EXTENSION.set(lower, target);
+  return { entry: target, displaced: previous ? `.${lower} (was ${previous.name})` : null };
+}
+
+/** Forget every vault definition and custom type; the bundled claims they displaced come back. */
+export function __clearVaultLanguages(): void {
+  for (const [ext, previous] of DISPLACED) {
+    if (previous) BY_EXTENSION.set(ext, previous);
+    else BY_EXTENSION.delete(ext);
+  }
+  DISPLACED.clear();
+  for (const e of VAULT_ENTRIES) if (BY_NAME.get(e.name.toLowerCase()) === e) BY_NAME.delete(e.name.toLowerCase());
+  VAULT_ENTRIES.length = 0;
+}
+
 /** Every extension the registry knows, lower-case, without the dot. */
 export function registeredExtensions(): string[] {
   return [...BY_EXTENSION.keys()];
@@ -317,6 +427,13 @@ export function registeredExtensions(): string[] {
 
 export function languageFor(extension: string): LanguageEntry | null {
   return BY_EXTENSION.get(extension.toLowerCase()) ?? null;
+}
+
+const BY_NAME: Map<string, LanguageEntry> = new Map(ENTRIES.map((e) => [e.name.toLowerCase(), e]));
+
+/** The entry whose display name this is, case-insensitively (`c#`, `JavaScript`), or null. */
+export function languageNamed(name: string): LanguageEntry | null {
+  return BY_NAME.get(name.trim().toLowerCase()) ?? null;
 }
 
 const RESOLVED = new WeakMap<LanguageEntry, ResolvedLanguage>();
@@ -339,7 +456,25 @@ export function resolveLanguage(entry: LanguageEntry): ResolvedLanguage | null {
   return resolved;
 }
 
-/** Exposed for the registry test only: duplicates, sources, and Obsidian-owned entries. */
+/** Every language name the registry knows, bundled and vault, in registry order, for pickers. */
+export function allLanguageNames(): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const e of [...ENTRIES, ...VAULT_ENTRIES]) {
+    if (seen.has(e.name)) continue;
+    seen.add(e.name);
+    out.push(e.name);
+  }
+  return out;
+}
+
+/** The keyword table behind a tier-4 language, for "create an example definition"; null for grammars and legacy modes. */
+export function keywordTableFor(languageName: string): KeywordLanguage | null {
+  const lower = languageName.trim().toLowerCase();
+  return NPP_LANGUAGES.find((l) => l.name.toLowerCase() === lower) ?? null;
+}
+
+/** Exposed for the registry test only: duplicates, sources, and Obsidian-owned entries. Bundled entries only. */
 export function __allEntries(): readonly LanguageEntry[] {
   return ENTRIES;
 }

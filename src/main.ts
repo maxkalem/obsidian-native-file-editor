@@ -1,6 +1,22 @@
-import { type App, type Menu, Notice, Platform, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
+import { type App, FileSystemAdapter, type Menu, Notice, Platform, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
 import { StreamLanguage } from "@codemirror/language";
-import { COMMAND_NEW_FILE, COMMAND_TOGGLE_MODE, LOG_FILE_NAME, PLUGIN_ID, VIEW_TYPE_TEXT } from "./constants";
+import {
+  COMMAND_NEW_FILE,
+  COMMAND_RELOAD_PALETTES,
+  COMMAND_RUN_FILE,
+  COMMAND_STOP_RUN,
+  COMMAND_TOGGLE_MODE,
+  COMMAND_WRITE_EXAMPLE_PALETTE,
+  LOG_FILE_NAME,
+  PLUGIN_ID,
+  VIEW_TYPE_TEXT,
+} from "./constants";
+import { PaletteLoader } from "./palette/loader";
+import { createDesktopShell, reloadPlugin } from "./platform/desktopShell";
+import { setupRun } from "./run/setup";
+import { pickLanguage, promptText } from "./ui/pickers";
+import { DocumentStyleSink } from "./ui/styleSink";
+import { readThemeColours } from "./ui/themeColours";
 import { decideClaims, describeYielded } from "./core/claims";
 import { Logger, describeError } from "./core/log";
 import type { Timers } from "./core/autosave";
@@ -10,13 +26,14 @@ import { EditorState } from "@codemirror/state";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { logMode } from "./highlight/logMode";
-import { registeredExtensions } from "./highlight/registry";
+import { allLanguageNames, keywordTableFor, registeredExtensions } from "./highlight/registry";
 import { AdapterLogSink } from "./platform/logSink";
 import { createTransport } from "./platform/select";
 import type { Transport } from "./platform/transport";
 import { DeviceLocalStore } from "./settings/DeviceLocalStore";
 import { NfeSettingsTab } from "./settings/SettingsTab";
-import { DEFAULT_SETTINGS, type SharedSettings, normalizeSettings } from "./settings/settings";
+import { DEFAULT_SETTINGS, type SharedSettings, normalizeSettings, resolvePaletteFolder, resolvePluginFolder } from "./settings/settings";
+import { loadVaultLanguages, writeExampleLanguage } from "./highlight/vaultLanguages";
 import { NewFileModal } from "./ui/NewFileModal";
 import { TextView } from "./ui/TextView";
 import { codeMirrorFactory } from "./ui/codemirror";
@@ -100,6 +117,10 @@ export default class NativeFileEditorPlugin extends Plugin {
   private nfeDevice!: DeviceLocalStore;
   private nfeTransport!: Transport;
   private nfeLog!: Logger;
+  private nfePalettes!: PaletteLoader;
+  private nfeStyleSink!: DocumentStyleSink;
+  /** Extensions registered with Obsidian so far; a reread registers only what is new. */
+  private readonly nfeRegistered = new Set<string>();
 
   override async onload(): Promise<void> {
     const timers: Timers = {
@@ -127,6 +148,40 @@ export default class NativeFileEditorPlugin extends Plugin {
     log.info("plugin", `@codemirror/language is ${isObsidianStreamFork ? "Obsidian's fork (tokenClassNodeProp + lineHighlighter present)" : "the npm package (no fork exports)"}`);
     log.info("plugin", `stream-language self-test: ${selfTestStreamLanguage()}`);
 
+    // Palettes: read from the vault folder when custom palettes are on,
+    // applied as one <style>. Loading runs after onload and swallows its own
+    // errors into the log, so a broken folder cannot break the load.
+    this.nfeStyleSink = new DocumentStyleSink(() => activeDocument);
+    this.nfePalettes = new PaletteLoader({
+      transport: this.nfeTransport,
+      sink: this.nfeStyleSink,
+      log,
+      folder: () => this.paletteFolder(),
+      enabled: () => this.nfeSettings.customPalettes,
+    });
+    void this.nfePalettes.load().catch((e: unknown) => log.error("palette", "loading palettes failed", e));
+
+    // Run (ADR-004): desktop only, off until the device toggle says otherwise.
+    // Absent here means no button, no panel, no commands.
+    const adapter = this.app.vault.adapter;
+    const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null;
+    const shell = createDesktopShell(basePath);
+    const run = setupRun({
+      isDesktopApp: Platform.isDesktopApp,
+      basePath,
+      device: this.nfeDevice,
+      timers,
+      log,
+      copy: (text) => {
+        try {
+          void navigator.clipboard.writeText(text).catch(() => undefined);
+        } catch {
+          // No clipboard here.
+        }
+      },
+    });
+    if (run) log.info("plugin", `run available (off until enabled: ${this.nfeDevice.get().runEnabled ? "enabled" : "disabled"} on this device)`);
+
     this.registerView(VIEW_TYPE_TEXT, (leaf: WorkspaceLeaf) =>
       new TextView(leaf, {
         settings: () => this.nfeSettings,
@@ -136,8 +191,38 @@ export default class NativeFileEditorPlugin extends Plugin {
         timers,
         now: () => Date.now(),
         log,
+        afterSave: (path) => void this.nfePalettes.reloadIfInside(path).catch((e: unknown) => log.error("palette", "reload after save failed", e)),
+        ...(run ? { run } : {}),
       })
     );
+
+    if (run) {
+      this.addCommand({
+        id: COMMAND_RUN_FILE,
+        name: "Run file",
+        checkCallback: (checking) => {
+          const view = this.app.workspace.getActiveViewOfType(TextView);
+          if (!view || !view.nfeRunAvailable()) return false;
+          if (!checking) void view.runFile();
+          return true;
+        },
+      });
+      this.addCommand({
+        id: COMMAND_STOP_RUN,
+        name: "Stop run",
+        checkCallback: (checking) => {
+          const view = this.app.workspace.getActiveViewOfType(TextView);
+          if (!view || !view.running) return false;
+          if (!checking) view.stopRun();
+          return true;
+        },
+      });
+    }
+
+    // Vault language definitions and custom file types join the registry
+    // before the claims below, so their extensions are claimed like any
+    // bundled one. A bad file is named once; the load goes on.
+    await this.loadLanguages();
 
     // Cover everything, yield by default: extensions another plugin already
     // serves are left alone, and the notice about it is shown once per change
@@ -148,7 +233,10 @@ export default class NativeFileEditorPlugin extends Plugin {
       owned,
       toggles: this.nfeSettings.extensions,
     });
-    if (decision.take.length > 0) this.registerExtensions(decision.take, VIEW_TYPE_TEXT);
+    if (decision.take.length > 0) {
+      this.registerExtensions(decision.take, VIEW_TYPE_TEXT);
+      for (const ext of decision.take) this.nfeRegistered.add(ext);
+    }
     log.info(
       "claims",
       `took ${decision.take.length} extensions; yielded ${decision.yielded.map((y) => `.${y.ext}->${y.viewType}`).join(", ") || "none"}; disabled ${decision.disabled.map((d) => `.${d}`).join(", ") || "none"}`
@@ -183,6 +271,18 @@ export default class NativeFileEditorPlugin extends Plugin {
       },
     });
 
+    this.addCommand({ id: COMMAND_RELOAD_PALETTES, name: "Reread languages and palettes", callback: () => void this.reread(true) });
+    this.addCommand({
+      id: COMMAND_WRITE_EXAMPLE_PALETTE,
+      name: "Create example palette for a language",
+      callback: () => {
+        void (async () => {
+          const language = await pickLanguage(this.app, allLanguageNames(), "Language for the example palette (light and dark files)");
+          if (language !== null) await this.createExamplePalette(language);
+        })();
+      },
+    });
+
     // A folder gets "New file" inside it; a file gets "New file" beside it.
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu: Menu, file) => {
@@ -200,10 +300,7 @@ export default class NativeFileEditorPlugin extends Plugin {
     this.addSettingTab(
       new NfeSettingsTab(this.app, this, {
         settings: () => this.nfeSettings,
-        saveSettings: async (next) => {
-          this.nfeSettings = next;
-          await this.saveData(next);
-        },
+        saveSettings: (next) => this.saveSettings(next),
         device: this.nfeDevice,
         ownedElsewhere: () => {
           const all = readOwnedExtensions(this.app);
@@ -211,15 +308,112 @@ export default class NativeFileEditorPlugin extends Plugin {
           for (const [ext, type] of Object.entries(all)) if (type !== VIEW_TYPE_TEXT) out[ext] = type;
           return out;
         },
+        paletteFolder: () => this.paletteFolder(),
+        languageFolder: () => this.languageFolder(),
+        shell,
+        ensureFolder: (vaultPath) => this.nfeTransport.mkdir(vaultPath),
+        languages: () => allLanguageNames(),
+        tableLanguages: () => allLanguageNames().filter((n) => keywordTableFor(n) !== null),
+        pickLanguage: (languages, placeholder) => pickLanguage(this.app, languages, placeholder),
+        promptText: (title, description, placeholder) => promptText(this.app, title, description, placeholder),
+        reread: () => this.reread(false),
+        createExamplePalette: (language) => this.createExamplePalette(language),
+        createExampleLanguage: (language) => this.createExampleLanguage(language),
+        reloadPlugin: async () => {
+          const err = await reloadPlugin(this.app, PLUGIN_ID);
+          if (err) new Notice(`Native File Editor: reload failed: ${err}`);
+        },
+        isDesktop: () => run !== null,
+        notice: (message) => void new Notice(message, 8000),
+        refresh: () => undefined,
       })
     );
   }
 
+  /** Vault definitions (when on) and custom types into the registry; the notice names how many files failed. */
+  private async loadLanguages(): Promise<void> {
+    const report = await loadVaultLanguages({
+      transport: this.nfeTransport,
+      folder: this.nfeSettings.customLanguages ? this.languageFolder() : null,
+      customExtensions: this.nfeSettings.customExtensions,
+      log: this.nfeLog,
+    });
+    if (report.problems.length > 0) new Notice(`Native File Editor: ${report.problems.length} language definition${report.problems.length === 1 ? "" : "s"} not loaded; see the plugin log.`, 8000);
+  }
+
+  /**
+   * Read both folders again. New extensions are registered with Obsidian at
+   * once (nobody else can own an extension that did not exist a moment ago);
+   * an extension another plugin serves stays with it until the next reload,
+   * as the yield rule says. Open panes keep their language until reopened.
+   */
+  async reread(announce: boolean): Promise<void> {
+    await this.loadLanguages();
+    const owned = readOwnedExtensions(this.app);
+    const fresh = registeredExtensions().filter((ext) => !this.nfeRegistered.has(ext) && (owned[ext] === undefined || owned[ext] === VIEW_TYPE_TEXT) && this.nfeSettings.extensions[ext] !== false);
+    if (fresh.length > 0) {
+      this.registerExtensions(fresh, VIEW_TYPE_TEXT);
+      for (const ext of fresh) this.nfeRegistered.add(ext);
+      this.nfeLog.info("claims", `reread took ${fresh.length} new extension${fresh.length === 1 ? "" : "s"}: ${fresh.map((e) => `.${e}`).join(", ")}`);
+    }
+    const report = await this.nfePalettes.load();
+    if (announce) {
+      const n = report.palettes.length;
+      new Notice(`Native File Editor: languages reread${fresh.length > 0 ? ` (+${fresh.length} extensions)` : ""}; ${this.nfeSettings.customPalettes ? `${n} palette${n === 1 ? "" : "s"}` : "palettes off"}${report.skipped.length > 0 ? `; ${report.skipped.length} skipped (see the log)` : ""}`);
+    }
+  }
+
+  /** The light and dark example palettes for one language, from the theme's live colours, into the palette folder. */
+  async createExamplePalette(language: string): Promise<void> {
+    try {
+      const colours = { light: readThemeColours(activeDocument, "light"), dark: readThemeColours(activeDocument, "dark") };
+      const written = await this.nfePalettes.writeExample(language, colours);
+      if (!this.nfeSettings.customPalettes) await this.saveSettings({ ...this.nfeSettings, customPalettes: true });
+      await this.nfePalettes.load();
+      new Notice(`Native File Editor: wrote ${written.map((p) => p.slice(p.lastIndexOf("/") + 1)).join(" and ")} into ${this.paletteFolder()}`);
+    } catch (e) {
+      this.nfeLog.error("palette", `example for ${language} failed`, e);
+      new Notice(`Native File Editor: could not write the example palette: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /** The plugin's own keyword table for a language as a JSON file in the language folder; only table-driven languages have one. */
+  async createExampleLanguage(language: string): Promise<void> {
+    try {
+      const path = await writeExampleLanguage(this.nfeTransport, this.languageFolder(), language);
+      if (path === null) {
+        new Notice(`Native File Editor: ${language} is a grammar, not a keyword table; only keyword-based languages have an example definition.`);
+        return;
+      }
+      if (!this.nfeSettings.customLanguages) await this.saveSettings({ ...this.nfeSettings, customLanguages: true });
+      await this.reread(false);
+      new Notice(`Native File Editor: wrote ${path}`);
+    } catch (e) {
+      this.nfeLog.error("languages", `example for ${language} failed`, e);
+      new Notice(`Native File Editor: could not write the example definition: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   override onunload(): void {
     // Obsidian restores the previous owner of every extension this plugin
-    // registered and detaches its views; the log is the only thing to finish.
+    // registered and detaches its views; the palette <style> and the log are
+    // the plugin's own to remove and finish.
+    this.nfeStyleSink?.clear();
     this.nfeLog?.info("plugin", "unload");
     void this.nfeLog?.flush();
+  }
+
+  private async saveSettings(next: SharedSettings): Promise<void> {
+    this.nfeSettings = next;
+    await this.saveData(next);
+  }
+
+  paletteFolder(): string {
+    return resolvePaletteFolder(this.nfeSettings.paletteFolder, this.app.vault.configDir, PLUGIN_ID);
+  }
+
+  languageFolder(): string {
+    return resolvePluginFolder(this.nfeSettings.languageFolder, this.app.vault.configDir, PLUGIN_ID, "languages");
   }
 
   /** The dialog, then the file, then the pane: an empty file in the editor. */

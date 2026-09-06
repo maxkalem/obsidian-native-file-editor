@@ -17,7 +17,8 @@ import { Logger } from "../src/core/log";
 import type { Transport } from "../src/platform/transport";
 import { DeviceLocalStore } from "../src/settings/DeviceLocalStore";
 import { DEFAULT_SETTINGS, type SharedSettings } from "../src/settings/settings";
-import { TextView } from "../src/ui/TextView";
+import { type RunViewDeps, TextView } from "../src/ui/TextView";
+import type { ExecuteRequest, ExecuteResult } from "../src/run/execute";
 import type { EditorFactory, EditorHandle, EditorOptions } from "../src/ui/editor";
 
 /**
@@ -74,6 +75,9 @@ class FakeTransport implements Transport {
   listDir(): Promise<{ files: string[]; folders: string[] }> {
     return Promise.resolve({ files: [], folders: [] });
   }
+  mkdir(): Promise<void> {
+    return Promise.resolve();
+  }
 }
 
 class FakeTimers implements Timers {
@@ -97,7 +101,7 @@ class FakeTimers implements Timers {
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
-function harness(overrides: Partial<SharedSettings> = {}) {
+function harness(overrides: Partial<SharedSettings> = {}, run?: RunViewDeps) {
   const vault = new Events();
   const leaf = { app: { vault, workspace: {} } };
   const transport = new FakeTransport();
@@ -123,6 +127,7 @@ function harness(overrides: Partial<SharedSettings> = {}) {
       timers,
       now: () => now,
       log,
+      ...(run ? { run } : {}),
     })
   );
   return {
@@ -397,3 +402,95 @@ describe("TextView", () => {
     expect(h.view.canAcceptExtension("docx")).toBe(false);
   });
 });
+
+describe("TextView and Run (ADR-004)", () => {
+  function runDeps(enabled = true) {
+    const requests: ExecuteRequest[] = [];
+    const resolvers: Array<(r: ExecuteResult) => void> = [];
+    const deps: RunViewDeps = {
+      enabled: () => enabled,
+      runnersFor: (ext) => (ext === "py" ? [{ language: "Python", name: "Python", argv: ["python", "{file}"] }] : []),
+      locate: (path) => ({ file: `/vault/${path}`, dir: "/vault", stem: path.replace(/\.py$/, "") }),
+      execute: (req) => {
+        requests.push(req);
+        return { stop: () => undefined, done: new Promise<ExecuteResult>((r) => resolvers.push(r)) };
+      },
+      timeoutMs: () => 30000,
+      outputCapBytes: () => 1024,
+    };
+    return { deps, requests, resolvers };
+  }
+
+  it("without run deps, or with Run disabled, or for a file with no runner, there is no Run button and runFile does nothing", async () => {
+    for (const h of [harness(), harness({}, runDeps(false).deps)]) {
+      h.transport.files.set("a.py", utf8("print(1)"));
+      await h.view.__load(new TFile("a.py"));
+      expect(__findByClass(h.head(), "nfe-run-head-button")).toBeNull();
+      expect(h.view.nfeRunAvailable()).toBe(false);
+      await h.view.runFile();
+      expect(h.view.runPanelOpen).toBe(false);
+    }
+    const h = harness({}, runDeps().deps);
+    h.transport.files.set("a.txt", utf8("x"));
+    await h.view.__load(new TFile("a.txt"));
+    expect(__findByClass(h.head(), "nfe-run-head-button")).toBeNull();
+  });
+
+  it("Run flushes unsaved typing, opens the panel under the editor, runs with the file's location and text, and remembers the panel", async () => {
+    const r = runDeps();
+    const h = harness({}, r.deps);
+    h.transport.files.set("a.py", utf8("print(1)"));
+    await h.view.__load(new TFile("a.py"));
+    expect(__findByClass(h.head(), "nfe-run-head-button").textContent).toBe("Run");
+    await h.view.setMode("edit");
+    h.lastEditor().type("print(2)");
+    __fire(__findByClass(h.head(), "nfe-run-head-button"), "click");
+    await tick();
+    // The write happened before the run started.
+    expect(h.transport.writes.map((w) => new TextDecoder().decode(w.bytes))).toEqual(["print(2)"]);
+    expect(r.requests).toHaveLength(1);
+    expect(r.requests[0]).toMatchObject({ file: "/vault/a.py", dir: "/vault", stem: "a", text: "print(2)", timeoutMs: 30000, outputCapBytes: 1024 });
+    expect(r.requests[0]?.def.name).toBe("Python");
+    const body = h.body();
+    expect(body.children.map((c: { className: string }) => c.className.split(" ")[0])).toEqual(["nfe-editor", "nfe-run-panel"]);
+    expect(h.view.running).toBe(true);
+    expect(h.device.get().runPanelOpen).toEqual({ "a.py": true });
+    r.requests[0]?.onOutput({ kind: "stdout", text: "2\n" });
+    // A mode switch keeps the panel and its output, below the new editor.
+    await h.view.setMode("preview");
+    const after = h.body();
+    expect(after.children.map((c: { className: string }) => c.className.split(" ")[0])).toEqual(["nfe-editor", "nfe-run-panel"]);
+    expect(__textOf(__findByClass(after, "nfe-run-output"))).toBe("2\n");
+    r.resolvers[0]?.({ exitCode: 0, timedOut: false, stopped: false, truncated: false, ms: 10, error: null, step: 1, steps: 1 });
+    await tick();
+    expect(h.view.running).toBe(false);
+    // Close forgets the panel; reopening the file with the panel remembered opens it without running.
+    h.view.toggleRunPanel();
+    expect(h.view.runPanelOpen).toBe(false);
+    expect(h.device.get().runPanelOpen).toEqual({});
+    h.view.toggleRunPanel();
+    expect(h.view.runPanelOpen).toBe(true);
+    await h.view.__unload();
+    expect(h.device.get().runPanelOpen).toEqual({ "a.py": true });
+    await h.view.__load(new TFile("a.py"));
+    expect(h.view.runPanelOpen).toBe(true);
+    expect(r.requests).toHaveLength(1);
+  });
+
+  it("the Run file command is refused while running is impossible, and Stop only while running", async () => {
+    const r = runDeps();
+    const h = harness({}, r.deps);
+    h.transport.files.set("a.py", utf8("print(1)"));
+    await h.view.__load(new TFile("a.py"));
+    expect(h.view.running).toBe(false);
+    void h.view.runFile();
+    await tick();
+    expect(h.view.running).toBe(true);
+    h.view.stopRun();
+    // The fake handle's stop does nothing; the view only forwards it.
+    r.resolvers[0]?.({ exitCode: null, timedOut: false, stopped: true, truncated: false, ms: 10, error: null, step: 1, steps: 1 });
+    await tick();
+    expect(h.view.running).toBe(false);
+  });
+});
+

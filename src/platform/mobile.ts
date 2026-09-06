@@ -20,6 +20,7 @@ export interface AdapterLike {
   rename(normalizedPath: string, normalizedNewPath: string): Promise<void>;
   remove(normalizedPath: string): Promise<void>;
   list(normalizedPath: string): Promise<{ files: string[]; folders: string[] }>;
+  mkdir(normalizedPath: string): Promise<void>;
 }
 
 /** The Web Streams compression API, present in Android WebView and iOS 16.4+. */
@@ -151,6 +152,15 @@ export class MobileTransport implements Transport {
       return { files: [...l.files].sort(), folders: [...l.folders].sort() };
     } catch (e) {
       throw new TransportError("list-failed", `Cannot list ${vaultPath}`, vaultPath, e);
+    }
+  }
+
+  /** The adapter's mkdir creates missing parents and accepts an existing folder. */
+  async mkdir(vaultPath: string): Promise<void> {
+    try {
+      await this.adapter.mkdir(vaultPath);
+    } catch (e) {
+      throw new TransportError("mkdir-failed", `Cannot create ${vaultPath}`, vaultPath, e);
     }
   }
 }

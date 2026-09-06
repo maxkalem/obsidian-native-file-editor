@@ -1,0 +1,7 @@
+// Gui4Cli
+G4C
+WINDOW 0 0 200 100 "Note"
+xOnLoad
+  GuiOpen #this
+xButton 10 10 80 20 "OK"
+  GuiQuit #this

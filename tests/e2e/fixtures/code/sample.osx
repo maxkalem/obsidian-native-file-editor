@@ -1,0 +1,8 @@
+// OScript
+function void main()
+{
+    Integer count = 3
+    if (count > 2)
+        echo("big")
+    end
+}
