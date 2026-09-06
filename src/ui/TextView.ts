@@ -12,7 +12,7 @@ import {
   describeLineEnding,
   encodeText,
 } from "../model/text/encoding";
-import type { Transport } from "../platform/transport";
+import { type Transport, TransportError } from "../platform/transport";
 import type { ExecuteHandle, ExecuteRequest } from "../run/execute";
 import { RunPanel } from "../run/RunPanel";
 import type { RunnerDef } from "../run/runners";
@@ -47,6 +47,12 @@ export interface TextViewDeps {
   readonly log: Logger;
   /** Called after every successful write with the vault path; the plugin reloads palettes saved from inside Obsidian. */
   readonly afterSave?: (path: string) => void;
+  /**
+   * Called when a file Obsidian lists is not on disk any more (renamed or
+   * deleted outside Obsidian while its watcher missed it): the plugin asks
+   * Obsidian to drop the stale index entry so the explorer stops showing it.
+   */
+  readonly onMissing?: (path: string) => void;
   readonly run?: RunViewDeps;
 }
 
@@ -146,6 +152,15 @@ export class TextView extends FileView {
     try {
       bytes = await this.nfeDeps.transport.readBinary(file.path);
     } catch (e) {
+      if (e instanceof TransportError && e.code === "not-found") {
+        // Obsidian's index still lists a file the disk no longer has: the
+        // explorer entry is stale (open item 9). Say so and let the plugin
+        // ask Obsidian to reconcile it.
+        log.info("view", `${file.path} is listed by Obsidian but not on disk; asking Obsidian to drop the stale entry`);
+        this.nfeRenderError(`${file.path} no longer exists on disk. The file list was out of date; it has been refreshed.`);
+        this.nfeDeps.onMissing?.(file.path);
+        return;
+      }
       log.error("view", `read ${file.path} failed`, e);
       this.nfeRenderError(`Cannot read ${file.path}: ${e instanceof Error ? e.message : String(e)}`);
       return;

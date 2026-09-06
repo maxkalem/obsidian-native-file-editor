@@ -24,7 +24,7 @@ The plugin keeps a diagnostic log at `<config>/plugins/native-file-editor/nfe.lo
 
 ## Generated code and HTML
 
-Nothing executes generated code, and nothing from the vault is executed: a CodeMirror theme module dropped into the palette folder is scanned as text for its colour literals (see `src/palette/codemirrorTheme.ts`), never evaluated. Electron's `shell.openPath` is used, on the desktop only and only on a click, to open a folder in the file explorer or an HTML file in the default browser; the native open dialogs are Electron's own. Palette CSS reaches the page through the `textContent` of one `<style>` element. No `innerHTML` is used with document content; DOM is built with `createEl`, `createDiv` and `setText`.
+Nothing executes generated code, and nothing from the vault is executed: a CodeMirror theme module dropped into the palette folder is scanned as text for its colour literals (see `src/palette/codemirrorTheme.ts`), never evaluated. Web pages are rendered inside Obsidian only in a sandboxed `iframe` (empty `sandbox`, a `default-src 'none'` policy injected into the document). The native open dialogs in settings are Electron's own, desktop only, on a click. Palette CSS reaches the page through the `textContent` of one `<style>` element. No `innerHTML` is used with document content; DOM is built with `createEl`, `createDiv` and `setText`.
 
 ## Coexistence
 

@@ -17,7 +17,9 @@ import { setupRun } from "./run/setup";
 import { pickLanguage, promptText } from "./ui/pickers";
 import { DocumentStyleSink } from "./ui/styleSink";
 import { readThemeColours } from "./ui/themeColours";
+import { BUILD_STAMP } from "./build";
 import { decideClaims, describeYielded } from "./core/claims";
+import { findStaleFiles } from "./core/staleSweep";
 import { Logger, describeError } from "./core/log";
 import type { Timers } from "./core/autosave";
 import { forkTokenOf, ruleOf, tokenize } from "./highlight/highlighter";
@@ -133,7 +135,7 @@ export default class NativeFileEditorPlugin extends Plugin {
       now: () => Date.now(),
     });
     const log = this.nfeLog;
-    log.info("plugin", `load ${this.manifest.version} on ${Platform.isDesktopApp ? "desktop" : "mobile"}${Platform.isAndroidApp ? "/android" : Platform.isIosApp ? "/ios" : ""}`);
+    log.info("plugin", `load ${this.manifest.version} build ${BUILD_STAMP} on ${Platform.isDesktopApp ? "desktop" : "mobile"}${Platform.isAndroidApp ? "/android" : Platform.isIosApp ? "/ios" : ""}`);
 
     this.nfeSettings = normalizeSettings(await this.loadData());
     this.nfeDevice = new DeviceLocalStore(vaultId(this.app), safeLocalStorage());
@@ -192,6 +194,7 @@ export default class NativeFileEditorPlugin extends Plugin {
         now: () => Date.now(),
         log,
         afterSave: (path) => void this.nfePalettes.reloadIfInside(path).catch((e: unknown) => log.error("palette", "reload after save failed", e)),
+        onMissing: (path) => this.reconcileMissing(path),
         ...(run ? { run } : {}),
       })
     );
@@ -241,6 +244,27 @@ export default class NativeFileEditorPlugin extends Plugin {
       "claims",
       `took ${decision.take.length} extensions; yielded ${decision.yielded.map((y) => `.${y.ext}->${y.viewType}`).join(", ") || "none"}; disabled ${decision.disabled.map((d) => `.${d}`).join(", ") || "none"}`
     );
+    // Once the workspace is up, compare the plugin's files with the disk:
+    // a batch rename made outside Obsidian can leave ghosts in its index that
+    // only a plugin registering this many extensions makes visible. The same
+    // rename announces itself as a burst of "create" events for the new
+    // names, so a sweep follows each burst (the listener is registered after
+    // layout, when Obsidian has stopped firing "create" for every file it
+    // indexes at start).
+    this.app.workspace.onLayoutReady(() => {
+      void this.sweepStale("after load");
+      let pending: number | null = null;
+      this.registerEvent(
+        this.app.vault.on("create", (file) => {
+          if (!(file instanceof TFile) || !this.nfeRegistered.has(file.extension.toLowerCase())) return;
+          if (pending !== null) timers.clearTimeout(pending);
+          pending = timers.setTimeout(() => {
+            pending = null;
+            void this.sweepStale("after new files appeared");
+          }, 2000);
+        })
+      );
+    });
     if (decision.yielded.length > 0) {
       const key = decision.yielded.map((y) => `${y.ext}:${y.viewType}`).join(",");
       if (this.nfeDevice.get().yieldNoticeKey !== key) {
@@ -330,6 +354,44 @@ export default class NativeFileEditorPlugin extends Plugin {
     );
   }
 
+  /**
+   * A file Obsidian lists but the disk lacks: Obsidian's adapter can re-check
+   * one path against the disk (`reconcileDeletion`, not in the public
+   * typings), which removes the stale index entry and fires the delete event
+   * the explorer listens to. Guarded; absent, the entry stays until Obsidian
+   * restarts, which is what happens today anyway.
+   */
+  private reconcileMissing(path: string): void {
+    const adapter = this.app.vault.adapter as unknown as { reconcileDeletion?: (normalizedPath: string, realPath: string) => Promise<void> | void };
+    if (typeof adapter.reconcileDeletion !== "function") {
+      this.nfeLog.info("view", "this Obsidian build has no adapter.reconcileDeletion; the stale entry stays until restart");
+      return;
+    }
+    try {
+      void Promise.resolve(adapter.reconcileDeletion(path, path)).catch((e: unknown) => this.nfeLog.error("view", `reconcileDeletion(${path}) failed`, e));
+    } catch (e) {
+      this.nfeLog.error("view", `reconcileDeletion(${path}) threw`, e);
+    }
+  }
+
+  /**
+   * Every file Obsidian lists under one of this plugin's extensions, checked
+   * against the disk one folder listing at a time; each ghost goes through
+   * `reconcileMissing`. Errors stay in the log: this is housekeeping.
+   */
+  async sweepStale(reason: string): Promise<number> {
+    try {
+      const report = await findStaleFiles(this.app.vault.getFiles(), this.nfeRegistered, (folder) => this.nfeTransport.listDir(folder));
+      for (const path of report.missing) this.reconcileMissing(path);
+      const unlisted = report.unlisted.length > 0 ? `; ${report.unlisted.length} folder${report.unlisted.length === 1 ? "" : "s"} could not be listed` : "";
+      this.nfeLog.info("vault", `${reason}: ${report.checked} listed file${report.checked === 1 ? "" : "s"} checked against the disk; ${report.missing.length} stale${report.missing.length > 0 ? ` (${report.missing.join(", ")})` : ""}${unlisted}`);
+      return report.missing.length;
+    } catch (e) {
+      this.nfeLog.error("vault", `stale sweep (${reason}) failed`, e);
+      return 0;
+    }
+  }
+
   /** Vault definitions (when on) and custom types into the registry; the notice names how many files failed. */
   private async loadLanguages(): Promise<void> {
     const report = await loadVaultLanguages({
@@ -357,9 +419,10 @@ export default class NativeFileEditorPlugin extends Plugin {
       this.nfeLog.info("claims", `reread took ${fresh.length} new extension${fresh.length === 1 ? "" : "s"}: ${fresh.map((e) => `.${e}`).join(", ")}`);
     }
     const report = await this.nfePalettes.load();
+    const stale = await this.sweepStale("reread");
     if (announce) {
       const n = report.palettes.length;
-      new Notice(`Native File Editor: languages reread${fresh.length > 0 ? ` (+${fresh.length} extensions)` : ""}; ${this.nfeSettings.customPalettes ? `${n} palette${n === 1 ? "" : "s"}` : "palettes off"}${report.skipped.length > 0 ? `; ${report.skipped.length} skipped (see the log)` : ""}`);
+      new Notice(`Native File Editor: languages reread${fresh.length > 0 ? ` (+${fresh.length} extensions)` : ""}; ${this.nfeSettings.customPalettes ? `${n} palette${n === 1 ? "" : "s"}` : "palettes off"}${report.skipped.length > 0 ? `; ${report.skipped.length} skipped (see the log)` : ""}${stale > 0 ? `; ${stale} stale file entr${stale === 1 ? "y" : "ies"} dropped` : ""}`);
     }
   }
 

@@ -7,7 +7,16 @@ import { type RunnerDef, normalizeRunners } from "../run/runners";
  * the vault: what this device last showed, and how much work this device is
  * willing to do, are not things another device should inherit.
  */
+/**
+ * The shape's version. 1 (or none) stored the default interpreter list in
+ * `runners`; from 2 the list is the user's own and starts empty, so a stored
+ * state below 2 drops its runners on load. Bump when a stored field changes
+ * meaning; `normalizeDeviceState` does the migration.
+ */
+export const DEVICE_STATE_VERSION = 2;
+
 export interface DeviceLocalState {
+  version: number;
   /** Vault path -> last mode, for the "remember per file" initial mode. */
   lastMode: Record<string, ViewMode>;
   /** Files above this size open in preview only unless the user insists. */
@@ -27,6 +36,7 @@ export interface DeviceLocalState {
 }
 
 export const DEFAULT_DEVICE_STATE: DeviceLocalState = {
+  version: DEVICE_STATE_VERSION,
   lastMode: {},
   largeFileBytes: DEFAULT_LARGE_FILE_BYTES,
   lastNewFileExtension: "txt",
@@ -69,7 +79,9 @@ export function normalizeDeviceState(raw: unknown): DeviceLocalState {
   if (typeof raw.runEnabled === "boolean") out.runEnabled = raw.runEnabled;
   if (typeof raw.runTimeoutMs === "number" && Number.isFinite(raw.runTimeoutMs) && raw.runTimeoutMs >= 1000) out.runTimeoutMs = Math.floor(raw.runTimeoutMs);
   if (typeof raw.runOutputCapBytes === "number" && Number.isFinite(raw.runOutputCapBytes) && raw.runOutputCapBytes >= 1024) out.runOutputCapBytes = Math.floor(raw.runOutputCapBytes);
-  const runners = normalizeRunners(raw.runners);
+  // Below version 2 the stored list was the old bundled defaults, not the user's: drop it.
+  const version = typeof raw.version === "number" ? raw.version : 1;
+  const runners = version >= 2 ? normalizeRunners(raw.runners) : null;
   if (runners) out.runners = runners.runners;
   if (isRecord(raw.runPanelOpen)) {
     for (const [path, open] of Object.entries(raw.runPanelOpen)) if (open === true) out.runPanelOpen[path] = true;
@@ -108,6 +120,12 @@ export class DeviceLocalStore {
       if (k !== undefined) delete next[k];
     }
     this.update({ lastMode: next });
+  }
+
+  /** Back to the defaults for this device, on the user's request only. */
+  reset(): void {
+    this.state = { ...DEFAULT_DEVICE_STATE, lastMode: {}, runners: [], runPanelOpen: {} };
+    this.write();
   }
 
   forgetPath(path: string): void {

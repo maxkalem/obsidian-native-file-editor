@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 import { type ExecuteDeps, type ExecuteRequest, execute, precheck } from "../src/run/execute";
 import { OutputCap, type ProcessRequest, type ProcessRunner, type RunHandle, type RunOutput, type RunResult, type TempDirs, type WorkerRunner } from "../src/run/runner";
 import {
-  DEFAULT_RUNNERS,
+  BUILTIN_RUNNERS,
+  STANDARD_COMMANDS,
+  STANDARD_STEPS,
   type RunnerDef,
   expandArgv,
   formatArgvLine,
+  formatStepsLine,
   normalizeRunners,
   parseArgvLine,
+  parseStepsLine,
+  runnerForProgram,
   refusePath,
   runnerLanguageExists,
   runnersFor,
@@ -25,23 +30,33 @@ import {
 const ctx = { file: "/v/notes/app.py", dir: "/v/notes", stem: "app", tmp: "/tmp/nfe-run-x" };
 
 describe("runner definitions", () => {
-  it("every default is valid, names a language the registry knows, and calls a bare command or a placeholder-built path", () => {
-    for (const def of DEFAULT_RUNNERS) {
+  it("the built-ins and the standard commands are valid and name languages the registry knows", () => {
+    for (const def of BUILTIN_RUNNERS) {
       expect(validateRunner(def), def.name).toBeNull();
       expect(runnerLanguageExists(def), def.language).toBe(true);
-      for (const step of stepsOf(def)) {
-        const command = step[0] ?? "";
-        expect(!/[\\/]/.test(command) || command.startsWith("{tmp}"), `${def.name}: ${command}`).toBe(true);
-      }
     }
-    // Runners are found through the file's LANGUAGE, so every extension of it shares them.
-    expect(runnersFor("JS", DEFAULT_RUNNERS).map((r) => r.name)).toEqual(["Sandbox (Web Worker)", "Node"]);
-    expect(runnersFor("mjs", DEFAULT_RUNNERS).map((r) => r.name)).toEqual(["Sandbox (Web Worker)", "Node"]);
-    expect(runnersFor("pyw", DEFAULT_RUNNERS).map((r) => r.name)).toEqual(["Python"]);
-    expect(runnersFor("htm", DEFAULT_RUNNERS).map((r) => r.kind)).toEqual(["open"]);
-    expect(runnersFor("mht", DEFAULT_RUNNERS).map((r) => r.kind)).toEqual(["open"]);
-    expect(runnersFor("xyz", DEFAULT_RUNNERS)).toEqual([]);
-    expect(runnersFor("txt", DEFAULT_RUNNERS)).toEqual([]);
+    for (const [language, argv] of Object.entries(STANDARD_COMMANDS)) {
+      expect(runnerLanguageExists({ language, name: "x", argv }), language).toBe(true);
+      expect(validateRunner({ language, name: "x", argv }), language).toBeNull();
+      expect(argv[0]).not.toMatch(/[\\/{]/);
+    }
+  });
+
+  it("a file gets the user's interpreters for its language, or what the plugin does by itself when there are none", () => {
+    // Nothing added: JavaScript has the sandbox, web pages have the page view, Python has nothing.
+    expect(runnersFor("JS", []).map((r) => r.kind)).toEqual(["worker"]);
+    expect(runnersFor("mjs", []).map((r) => r.kind)).toEqual(["worker"]);
+    expect(runnersFor("htm", []).map((r) => r.kind)).toEqual(["page"]);
+    expect(runnersFor("mht", []).map((r) => r.kind)).toEqual(["page"]);
+    expect(runnersFor("py", [])).toEqual([]);
+    expect(runnersFor("xyz", [])).toEqual([]);
+    // An added interpreter replaces the built-in behaviour and covers every extension of the language.
+    const node: RunnerDef = { language: "JavaScript", name: "node", argv: ["node", "{file}"] };
+    const python: RunnerDef = { language: "Python", name: "python", argv: ["python", "{file}"] };
+    expect(runnersFor("js", [node, python])).toEqual([node]);
+    expect(runnersFor("cjs", [node, python])).toEqual([node]);
+    expect(runnersFor("pyw", [node, python])).toEqual([python]);
+    expect(runnersFor("html", [node, python]).map((r) => r.kind)).toEqual(["page"]);
   });
 
   it("expands placeholders inside an element and never splits or joins elements", () => {
@@ -66,7 +81,8 @@ describe("runner definitions", () => {
     expect(validateRunner({ language: "Python", name: "P", argv: ["python", ""] })).toMatch(/empty argument/);
     expect(validateRunner({ language: "Python", name: "P", argv: ["{file}"] })).toMatch(/file as the command/);
     expect(validateRunner({ language: "JavaScript", name: "W", kind: "worker" })).toBeNull();
-    expect(validateRunner({ language: "HTML", name: "O", kind: "open" })).toBeNull();
+    expect(validateRunner({ language: "HTML", name: "P", kind: "page" })).toBeNull();
+    expect(validateRunner({ language: "HTML", name: "P", kind: "page", argv: ["x"] })).toMatch(/must not have argv/);
     expect(validateRunner({ language: "JavaScript", name: "W", kind: "worker", argv: ["node"] })).toMatch(/must not have argv/);
     expect(validateRunner({ language: "SQL", name: "S", argv: ["sqlite3"], stdin: "" })).toMatch(/empty stdin/);
   });
@@ -94,8 +110,23 @@ describe("runner definitions", () => {
       "entry 6 is not an object",
       'entry 7: runner "Y" has neither argv nor steps',
     ]);
-    // The stored defaults round-trip.
-    expect(normalizeRunners(JSON.parse(JSON.stringify(DEFAULT_RUNNERS)))?.runners).toEqual(DEFAULT_RUNNERS);
+    expect(normalizeRunners(JSON.parse(JSON.stringify(BUILTIN_RUNNERS)))?.runners).toEqual(BUILTIN_RUNNERS);
+  });
+
+  it("a new runner wraps the picked program in the language's standard arguments or steps", () => {
+    expect(runnerForProgram("Python", "C:\\Py\\python.exe")).toEqual({ language: "Python", name: "python", argv: ["C:\\Py\\python.exe", "{file}"] });
+    expect(runnerForProgram("TypeScript", "/usr/bin/node")).toEqual({ language: "TypeScript", name: "node", argv: ["/usr/bin/node", "--experimental-strip-types", "{file}"] });
+    expect(runnerForProgram("Go", "/usr/bin/go")).toEqual({ language: "Go", name: "go", steps: [["/usr/bin/go", "build", "-o", "{tmp}/{stem}", "{file}"], ["{tmp}/{stem}"]] });
+    expect(runnerForProgram("Hollywood", "/opt/hw")).toEqual({ language: "Hollywood", name: "hw", argv: ["/opt/hw", "{file}"] });
+    for (const [language] of Object.entries(STANDARD_STEPS)) expect(validateRunner(runnerForProgram(language, "/x/y")), language).toBeNull();
+  });
+
+  it("steps format as lines joined with && and parse back, quotes respected", () => {
+    const steps = [["C:\\r c\\rustc.exe", "{file}", "-o", "{tmp}/{stem}"], ["{tmp}/{stem}", "a && b"]];
+    const line = formatStepsLine(steps);
+    expect(line).toBe('"C:\\r c\\rustc.exe" {file} -o {tmp}/{stem} && {tmp}/{stem} "a && b"');
+    expect(parseStepsLine(line)).toEqual(steps);
+    expect(parseStepsLine("a && && b")).toEqual([["a"], ["b"]]);
   });
 
   it("the argv line for the settings field quotes what needs it and parses back exactly", () => {
@@ -181,7 +212,7 @@ describe("execute", () => {
     const processes = new FakeProcesses();
     processes.script.set("python", { out: "1\n", exit: 0 });
     const out: RunOutput[] = [];
-    const r = await execute(request({ language: "Python", name: "Python", argv: ["python", "{file}"] }, (o) => out.push(o)), { processes, worker: new FakeWorker(), tempDirs: new FakeTemp(), openPath: null }).done;
+    const r = await execute(request({ language: "Python", name: "Python", argv: ["python", "{file}"] }, (o) => out.push(o)), { processes, worker: new FakeWorker(), tempDirs: new FakeTemp() }).done;
     expect(processes.requests[0]).toMatchObject({ argv: ["python", "/v/notes/app.py"], cwd: "/v/notes", stdinText: undefined, timeoutMs: 1000, outputCapBytes: 4096 });
     expect(out).toEqual([
       { kind: "info", text: "[Python] python /v/notes/app.py\n" },
@@ -195,14 +226,14 @@ describe("execute", () => {
     processes.script.set("rustc", { err: "error[E0425]\n", exit: 1 });
     const temp = new FakeTemp();
     const def: RunnerDef = { language: "Rust", name: "rustc + run", steps: [["rustc", "{file}", "-o", "{tmp}/{stem}"], ["{tmp}/{stem}"]] };
-    const r = await execute(request(def), { processes, worker: new FakeWorker(), tempDirs: temp, openPath: null }).done;
+    const r = await execute(request(def), { processes, worker: new FakeWorker(), tempDirs: temp }).done;
     expect(processes.requests.map((q) => q.argv)).toEqual([["rustc", "/v/notes/app.py", "-o", "/tmp/nfe-run-0/app"]]);
     expect(r).toMatchObject({ exitCode: 1, step: 1, steps: 2 });
     expect(temp.removed).toEqual(["/tmp/nfe-run-0"]);
     // Success runs both, the second step being the compiled program.
     processes.script.set("rustc", { exit: 0 });
     processes.script.set("/tmp/nfe-run-1/app", { out: "ok\n", exit: 0 });
-    const r2 = await execute(request(def), { processes, worker: new FakeWorker(), tempDirs: temp, openPath: null }).done;
+    const r2 = await execute(request(def), { processes, worker: new FakeWorker(), tempDirs: temp }).done;
     expect(processes.requests.slice(1).map((q) => q.argv)).toEqual([["rustc", "/v/notes/app.py", "-o", "/tmp/nfe-run-1/app"], ["/tmp/nfe-run-1/app"]]);
     expect(r2).toMatchObject({ exitCode: 0, step: 2, steps: 2 });
     expect(temp.removed).toEqual(["/tmp/nfe-run-0", "/tmp/nfe-run-1"]);
@@ -210,14 +241,14 @@ describe("execute", () => {
 
   it("feeds the document to stdin when the runner says so, on the last step only", async () => {
     const processes = new FakeProcesses();
-    await execute(request({ language: "SQL", name: "sqlite3", argv: ["sqlite3", ":memory:"], stdin: "{file}" }), { processes, worker: new FakeWorker(), tempDirs: null, openPath: null }).done;
+    await execute(request({ language: "SQL", name: "sqlite3", argv: ["sqlite3", ":memory:"], stdin: "{file}" }), { processes, worker: new FakeWorker(), tempDirs: null }).done;
     expect(processes.requests[0]?.stdinText).toBe("print(1)\n");
   });
 
   it("stop kills the current step and ends the run as stopped", async () => {
     const processes = new FakeProcesses();
     processes.script.set("python", { hang: true, exit: 0 });
-    const h = execute(request({ language: "Python", name: "Python", argv: ["python", "{file}"] }), { processes, worker: new FakeWorker(), tempDirs: null, openPath: null });
+    const h = execute(request({ language: "Python", name: "Python", argv: ["python", "{file}"] }), { processes, worker: new FakeWorker(), tempDirs: null });
     await Promise.resolve();
     h.stop();
     const r = await h.done;
@@ -229,18 +260,42 @@ describe("execute", () => {
     const processes = new FakeProcesses();
     const worker = new FakeWorker();
     const out: RunOutput[] = [];
-    const r = await execute(request({ language: "JavaScript", name: "Sandbox (Web Worker)", kind: "worker" }, (o) => out.push(o)), { processes, worker, tempDirs: null, openPath: null }).done;
+    const r = await execute(request({ language: "JavaScript", name: "Sandbox (Web Worker)", kind: "worker" }, (o) => out.push(o)), { processes, worker, tempDirs: null }).done;
     expect(worker.codes).toEqual(["print(1)\n"]);
     expect(processes.requests).toEqual([]);
     expect(out[0]).toEqual({ kind: "info", text: "[Sandbox (Web Worker)]\n" });
     expect(r).toMatchObject({ exitCode: 0, step: 1, steps: 1 });
   });
 
+  it("a page runner emits the document for the panel's frame, with the no-network policy, and no process", async () => {
+    const processes = new FakeProcesses();
+    const out: RunOutput[] = [];
+    const html = "<html><head><title>x</title></head><body>hi</body></html>";
+    const r = await execute({ ...request({ language: "HTML", name: "Page (inside Obsidian)", kind: "page" }, (o) => out.push(o)), text: html }, { processes, worker: new FakeWorker(), tempDirs: null }).done;
+    expect(processes.requests).toEqual([]);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.kind).toBe("page");
+    expect(out[0]?.text).toContain('<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'');
+    expect(out[0]?.text).toContain("<body>hi</body>");
+    expect(r).toMatchObject({ exitCode: 0, error: null });
+    // A fragment without <html> is wrapped.
+    const out2: RunOutput[] = [];
+    await execute({ ...request({ language: "HTML", name: "P", kind: "page" }, (o) => out2.push(o)), text: "<p>only</p>" }, { processes, worker: new FakeWorker(), tempDirs: null }).done;
+    expect(out2[0]?.text).toMatch(/^<!doctype html><html><head><meta http-equiv="Content-Security-Policy"/);
+    // An MHTML archive yields its html part; one without fails to start.
+    const mht = 'MIME-Version: 1.0\nContent-Type: multipart/related; boundary="----=_B"\n\n------=_B\nContent-Type: text/html; charset="utf-8"\nContent-Transfer-Encoding: quoted-printable\n\n<html><body>caf=C3=A9 =3D 1</body></html>\n------=_B--\n';
+    const out3: RunOutput[] = [];
+    await execute({ ...request({ language: "MHTML", name: "P", kind: "page" }, (o) => out3.push(o)), text: mht }, { processes, worker: new FakeWorker(), tempDirs: null }).done;
+    expect(out3[0]?.text).toContain("café = 1");
+    const bad = await execute({ ...request({ language: "MHTML", name: "P", kind: "page" }), text: 'MIME-Version: 1.0\nContent-Type: multipart/related; boundary="b"\n\n--b\nContent-Type: text/plain\n\nx\n--b--' }, { processes, worker: new FakeWorker(), tempDirs: null }).done;
+    expect(bad.error).toMatch(/no text\/html part/);
+  });
+
   it("refuses before starting: no process runner (mobile), a bad path, a temp dir it does not have, an invalid definition", async () => {
-    const deps: ExecuteDeps = { processes: null, worker: new FakeWorker(), tempDirs: null, openPath: null };
+    const deps: ExecuteDeps = { processes: null, worker: new FakeWorker(), tempDirs: null };
     expect(precheck(request({ language: "Python", name: "P", argv: ["python", "{file}"] }), deps)).toMatch(/desktop/);
     expect(precheck(request({ language: "JavaScript", name: "W", kind: "worker" }), deps)).toBeNull();
-    const withProcesses: ExecuteDeps = { processes: new FakeProcesses(), worker: new FakeWorker(), tempDirs: null, openPath: null };
+    const withProcesses: ExecuteDeps = { processes: new FakeProcesses(), worker: new FakeWorker(), tempDirs: null };
     expect(precheck({ ...request({ language: "Python", name: "P", argv: ["python", "{file}"] }), file: "/v/a\nb" }, withProcesses)).toMatch(/line break/);
     expect(precheck(request({ language: "Rust", name: "R", steps: [["rustc", "{file}", "-o", "{tmp}/x"], ["{tmp}/x"]] }), withProcesses)).toMatch(/temp directory/);
     expect(precheck(request({ language: "Python", name: "P" }), withProcesses)).toMatch(/neither argv/);
@@ -251,7 +306,7 @@ describe("execute", () => {
   it("a process that could not start reports the reason", async () => {
     const processes = new FakeProcesses();
     processes.script.set("python", { exit: 0, error: "python: not found" });
-    const r = await execute(request({ language: "Python", name: "P", argv: ["python", "{file}"] }), { processes, worker: new FakeWorker(), tempDirs: null, openPath: null }).done;
+    const r = await execute(request({ language: "Python", name: "P", argv: ["python", "{file}"] }), { processes, worker: new FakeWorker(), tempDirs: null }).done;
     expect(r.error).toBe("python: not found");
     expect(r.exitCode).toBeNull();
   });

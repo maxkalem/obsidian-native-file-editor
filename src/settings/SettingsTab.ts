@@ -1,7 +1,7 @@
 import { type App, type Plugin, PluginSettingTab, type Setting, type SettingDefinitionItem, type SettingGroupItem } from "obsidian";
 import { registeredExtensions } from "../highlight/registry";
 import type { DesktopShell } from "../platform/desktopShell";
-import { DEFAULT_RUNNERS, type RunnerDef, formatArgvLine, parseArgvLine } from "../run/runners";
+import { type RunnerDef, STANDARD_COMMANDS, formatArgvLine, formatStepsLine, parseArgvLine, parseStepsLine, runnerForProgram } from "../run/runners";
 import type { DeviceLocalStore } from "./DeviceLocalStore";
 import type { SharedSettings } from "./settings";
 
@@ -83,33 +83,22 @@ function folderRow(
       setting.setDesc(`${opts.folder()}. ${opts.desc}`);
       const shell = deps.shell;
       if (shell) {
-        setting.addExtraButton((b) =>
+        setting.addButton((b) =>
           b
-            .setIcon("folder-open")
-            .setTooltip("Open the folder in the file explorer (created if missing)")
+            .setButtonText("Choose folder…")
+            .setTooltip("Pick the folder in the file explorer; the current one is created first and opened")
             .onClick(() => {
               void (async () => {
-                const folder = opts.folder();
-                await deps.ensureFolder(folder);
-                const err = await shell.openPath(shell.toAbsolute(folder));
-                if (err) deps.notice(`Native File Editor: could not open the folder: ${err}`);
-              })();
-            })
-        );
-        setting.addExtraButton((b) =>
-          b
-            .setIcon("folder-input")
-            .setTooltip("Choose another folder inside the vault")
-            .onClick(() => {
-              void (async () => {
-                const picked = await shell.pickFolder(shell.toAbsolute(opts.folder()));
+                const current = opts.folder();
+                await deps.ensureFolder(current);
+                const picked = await shell.pickFolder(shell.toAbsolute(current));
                 if (picked === null) return;
                 const vaultPath = shell.toVaultPath(picked);
                 if (vaultPath === null) {
                   deps.notice("Native File Editor: the folder must be inside the vault.");
                   return;
                 }
-                await opts.save(vaultPath);
+                if (vaultPath !== current) await opts.save(vaultPath);
                 await deps.reread();
                 deps.refresh();
               })();
@@ -155,26 +144,30 @@ function runnerRow(deps: SettingsTabDeps, index: number): SettingGroupItem {
     desc: def.name,
     render: (setting: Setting) => {
       setting.setName(def.language);
-      if (def.kind === "worker" || def.kind === "open") {
-        setting.setDesc(def.kind === "worker" ? `${def.name}: runs inside Obsidian, no program of yours` : `${def.name}: the operating system opens the file with its default application`);
-        return;
-      }
-      const line = def.steps ? def.steps.map((s) => formatArgvLine(s)).join("  &&  ") : formatArgvLine(def.argv ?? []);
-      setting.setDesc(`${def.name}: ${line}`);
+      // A compile-then-run row shows its steps joined with ` && `; the folder
+      // button replaces the FIRST step's program (the compiler), the pencil
+      // edits every step on one line.
+      const line = def.steps ? formatStepsLine(def.steps) : formatArgvLine(def.argv ?? []);
+      setting.setDesc(line);
       let editing = false;
       let field: { inputEl: HTMLInputElement; setValue(v: string): unknown } | null = null;
       const shell = deps.shell;
-      if (shell && def.argv) {
+      if (shell) {
         setting.addExtraButton((b) =>
           b
             .setIcon("folder")
-            .setTooltip("Choose the interpreter executable")
+            .setTooltip("Choose the program (for a compile-then-run language: the compiler, the first step)")
             .onClick(() => {
               void (async () => {
-                const argv = def.argv ?? [];
-                const picked = await shell.pickFile(argv[0] ?? "");
+                const first = def.steps ? (def.steps[0] ?? []) : (def.argv ?? []);
+                const picked = await shell.pickFile(first[0] ?? "");
                 if (picked === null) return;
-                save({ ...def, argv: [picked, ...argv.slice(1)] });
+                if (def.steps) {
+                  const steps = def.steps.map((step, i) => (i === 0 ? [picked, ...step.slice(1)] : [...step]));
+                  save({ ...def, steps });
+                } else {
+                  save({ ...def, argv: [picked, ...(def.argv ?? []).slice(1)] });
+                }
                 deps.refresh();
               })();
             })
@@ -189,7 +182,7 @@ function runnerRow(deps: SettingsTabDeps, index: number): SettingGroupItem {
             editing = true;
             setting.addText((t) => {
               field = t;
-              t.setValue(def.argv ? formatArgvLine(def.argv) : line);
+              t.setValue(line);
               t.inputEl.addClass("nfe-setting-argv");
               t.inputEl.addEventListener("keydown", (e: KeyboardEvent) => {
                 if (e.key === "Enter") commit();
@@ -199,18 +192,34 @@ function runnerRow(deps: SettingsTabDeps, index: number): SettingGroupItem {
             field?.inputEl.focus();
           })
       );
+      setting.addExtraButton((b) =>
+        b
+          .setIcon("trash")
+          .setTooltip("Remove this interpreter; the language goes back to what the plugin does by itself, if anything")
+          .onClick(() => {
+            const runners = [...deps.device.get().runners];
+            runners.splice(index, 1);
+            deps.device.update({ runners });
+            deps.refresh();
+          })
+      );
       const commit = () => {
         if (!field) return;
-        const argv = parseArgvLine(field.inputEl.value);
-        if (argv.length === 0 || (argv[0] ?? "").includes("{file}")) {
-          deps.notice("Native File Editor: the command line needs a program first, then its arguments.");
-          return;
-        }
         if (def.steps) {
-          deps.notice("Native File Editor: a multi-step runner is edited as JSON in localStorage for now; only single-command runners have the edit field.");
-          return;
+          const steps = parseStepsLine(field.inputEl.value);
+          if (steps.length === 0 || steps.some((s) => (s[0] ?? "").includes("{file}"))) {
+            deps.notice("Native File Editor: each step needs a program first, then its arguments; steps are separated by &&.");
+            return;
+          }
+          save({ ...def, steps });
+        } else {
+          const argv = parseArgvLine(field.inputEl.value);
+          if (argv.length === 0 || (argv[0] ?? "").includes("{file}")) {
+            deps.notice("Native File Editor: the command line needs a program first, then its arguments.");
+            return;
+          }
+          save({ ...def, argv });
         }
-        save({ ...def, argv });
         deps.refresh();
       };
     },
@@ -336,7 +345,7 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
             items: [
               {
                 name: "Enable Run",
-                desc: "Adds a Run button to the head bar and the commands Run file and Stop run. A run starts the interpreter set for the file's language, on this device, with your permissions, only when you press Run. Off by default; nothing ever runs on its own.",
+                desc: "Adds a Run button to the head bar and the commands Run file and Stop run. JavaScript runs in a sandbox inside Obsidian and web pages render inside Obsidian; any other language runs through an interpreter you add below, on this device, with your permissions, only when you press Run. Off by default; nothing ever runs on its own.",
                 control: { type: "toggle", key: "device.runEnabled" },
               },
               {
@@ -351,44 +360,28 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
                 control: { type: "number", key: "device.runOutputCapKb", min: 1, step: 64 },
                 visible: runOn,
               },
+              ...runnerItems.map((item) => ({ ...item, visible: runOn })),
               {
-                name: "Reset interpreters to the defaults",
-                desc: "Each language's own standard tool, found through PATH.",
+                name: "Add interpreter…",
+                desc: `One per language: pick the language, then the program that runs its files. The program replaces what the plugin does by itself for that language (the JavaScript sandbox, the page view). Languages that already have an interpreter are not offered.${deps.shell ? "" : " Needs the desktop app."}`,
                 action: () => {
-                  deps.device.update({ runners: [...DEFAULT_RUNNERS] });
-                  deps.refresh();
+                  void (async () => {
+                    const taken = new Set(deps.device.get().runners.map((r) => r.language));
+                    const language = await deps.pickLanguage(
+                      deps.languages().filter((l) => !taken.has(l)),
+                      "Language to run"
+                    );
+                    if (language === null) return;
+                    const shell = deps.shell;
+                    const program = shell ? await shell.pickFile(STANDARD_COMMANDS[language]?.[0] ?? "") : null;
+                    if (program === null) return;
+                    deps.device.update({ runners: [...deps.device.get().runners, runnerForProgram(language, program)] });
+                    deps.refresh();
+                  })();
                 },
                 visible: runOn,
               },
             ],
-          },
-          {
-            type: "list",
-            heading: "Interpreters",
-            emptyState: "No interpreters. Add one: pick a language, then its program.",
-            items: runnerItems,
-            visible: runOn,
-            addItem: {
-              name: "Add",
-              action: () => {
-                void (async () => {
-                  const language = await deps.pickLanguage(deps.languages(), "Language to run");
-                  if (language === null) return;
-                  const shell = deps.shell;
-                  const program = shell ? await shell.pickFile("") : null;
-                  if (program === null) return;
-                  const name = program.replace(/^.*[\\/]/, "").replace(/\.exe$/i, "");
-                  deps.device.update({ runners: [...deps.device.get().runners, { language, name, argv: [program, "{file}"] }] });
-                  deps.refresh();
-                })();
-              },
-            },
-            onDelete: (index: number) => {
-              const runners = [...deps.device.get().runners];
-              runners.splice(index, 1);
-              deps.device.update({ runners });
-              deps.refresh();
-            },
           },
         ] as SettingDefinitionItem[])
       : []),
@@ -446,8 +439,17 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
       items: [
         {
           name: "Reload plugin",
-          desc: "Disable and enable Native File Editor: applies file-type changes and rereads everything. This settings page closes.",
+          desc: "Disable and enable Native File Editor: applies file-type changes and rereads everything. The settings window closes and reopens here.",
           action: () => void deps.reloadPlugin(),
+        },
+        {
+          name: "Reset this device's settings",
+          desc: "Forgets what is stored for this device in Obsidian's local storage, which a reinstall does not touch: the interpreters, the Run switch and limits, the large-file limit, remembered modes. Shared settings in data.json stay.",
+          action: () => {
+            deps.device.reset();
+            deps.refresh();
+            deps.notice("Native File Editor: device settings reset.");
+          },
         },
       ],
     },

@@ -14,7 +14,7 @@ import {
 } from "./mocks/obsidian";
 import type { Timers } from "../src/core/autosave";
 import { Logger } from "../src/core/log";
-import type { Transport } from "../src/platform/transport";
+import { type Transport, TransportError } from "../src/platform/transport";
 import { DeviceLocalStore } from "../src/settings/DeviceLocalStore";
 import { DEFAULT_SETTINGS, type SharedSettings } from "../src/settings/settings";
 import { type RunViewDeps, TextView } from "../src/ui/TextView";
@@ -320,6 +320,19 @@ describe("TextView", () => {
     h.vault.trigger("modify", file);
     await tick();
     expect(h.lastEditor().text).toBe("mine");
+  });
+
+  it("a file Obsidian lists but the disk lacks: an error panel that says the list was stale, and the plugin is asked to reconcile", async () => {
+    const missing: string[] = [];
+    const h = harness();
+    (h.view as unknown as { nfeDeps: { onMissing?: (p: string) => void } }).nfeDeps.onMissing = (p) => void missing.push(p);
+    h.transport.readBinary = async (p: string) => {
+      throw new TransportError("not-found", `File not found: ${p}`, p);
+    };
+    await h.view.__load(new TFile("gone.txt"));
+    expect(__textOf(h.body())).toContain("no longer exists on disk");
+    expect(missing).toEqual(["gone.txt"]);
+    expect(h.log.recent().join("\n")).toContain("listed by Obsidian but not on disk");
   });
 
   it("a read failure shows an error in the body and no head", async () => {

@@ -41,6 +41,8 @@ function makeApp(owned: Record<string, string>) {
   const workspace = new Events() as unknown as Record<string, unknown>;
   workspace.getActiveViewOfType = () => null;
   workspace.getActiveFile = () => null;
+  workspace.onLayoutReady = (cb: () => void) => cb();
+  vault.getFiles = () => [];
   return {
     vault,
     workspace,
@@ -83,12 +85,48 @@ describe("plugin load", () => {
     await plugin.onload();
     await new Promise((r) => setTimeout(r, 1100));
     const text = app.adapter.appended.join("");
-    expect(text).toContain("[plugin] load 0.1.0");
+    expect(text).toContain("[plugin] load 0.1.0 build dev on");
     expect(text).toContain("[plugin] transport mobile");
     expect(text).toContain("self-test: builtin log: ok");
     expect(text).toContain("legacy shell: ok");
     expect(text).toMatch(/\[claims\] took \d+ extensions/);
     expect(text.endsWith("\n")).toBe(true);
+  });
+
+  it("after load, asks Obsidian to drop listed files the disk lacks, and logs the sweep", async () => {
+    const app = makeApp({});
+    (app.vault as Record<string, unknown>).getFiles = () => [new TFile("code/sample.py"), new TFile("code/py sample.py"), new TFile("notes.md")];
+    (app.adapter as Record<string, unknown>).list = async () => ({ files: ["code/py sample.py"], folders: [] });
+    const dropped: string[] = [];
+    (app.adapter as Record<string, unknown>).reconcileDeletion = (normalized: string, real: string) => void dropped.push(`${normalized}|${real}`);
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, { version: "0.1.0" } as never));
+    await plugin.onload();
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(dropped).toEqual(["code/sample.py|code/sample.py"]);
+    const text = app.adapter.appended.join("");
+    expect(text).toContain("[vault] after load: 2 listed files checked against the disk; 1 stale (code/sample.py)");
+  });
+
+  it("sweeps again two seconds after a burst of new files with its extensions", async () => {
+    const app = makeApp({});
+    let files = [new TFile("code/a.py")];
+    (app.vault as Record<string, unknown>).getFiles = () => files;
+    (app.adapter as Record<string, unknown>).list = async () => ({ files: ["code/b.py"], folders: [] });
+    const dropped: string[] = [];
+    (app.adapter as Record<string, unknown>).reconcileDeletion = (p: string) => void dropped.push(p);
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, { version: "0.1.0" } as never));
+    await plugin.onload();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(dropped).toEqual(["code/a.py"]);
+    files = [new TFile("code/a.py"), new TFile("code/b.py")];
+    const vault = app.vault as unknown as Events;
+    vault.trigger("create", new TFile("code/b.py"));
+    vault.trigger("create", new TFile("notes.md"));
+    vault.trigger("create", new TFile("code/b.py"));
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(dropped).toEqual(["code/a.py"]);
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(dropped).toEqual(["code/a.py", "code/a.py"]);
   });
 
   it("loads palettes into one <style> element without writing anything, and offers the palette and reread commands", async () => {

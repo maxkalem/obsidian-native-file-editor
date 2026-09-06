@@ -170,6 +170,23 @@ describe("RunPanel", () => {
     expect(parent.children).toHaveLength(0);
   });
 
+  it("a page output puts a sandboxed frame into the panel instead of text, and Clear removes it", async () => {
+    const panel = makePanel();
+    const run = panel.run();
+    started[0]?.onOutput({ kind: "page", text: "<html><body>hi</body></html>" });
+    started[0]?.resolve(result());
+    await run;
+    const frame = __findByClass(panel.rootEl, "nfe-run-frame");
+    expect(frame).not.toBeNull();
+    expect(frame.attrs.sandbox).toBe("");
+    expect(frame.srcdoc).toBe("<html><body>hi</body></html>");
+    expect(panel.rootEl.hasClass("nfe-run-page-mode")).toBe(true);
+    expect(__findByClass(panel.rootEl, "nfe-run-output").children).toHaveLength(0);
+    panel.clear();
+    expect(__findByClass(panel.rootEl, "nfe-run-frame")).toBeNull();
+    expect(panel.rootEl.hasClass("nfe-run-page-mode")).toBe(false);
+  });
+
   it("Run while running does nothing; destroy stops a run", async () => {
     const panel = makePanel();
     const run = panel.run();

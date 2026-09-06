@@ -84,17 +84,35 @@ export function createDesktopShell(basePath: string | null): DesktopShell | null
 
 /**
  * Restart this plugin through Obsidian's plugin manager (`app.plugins`, not in
- * the public typings). The settings tab that called this is torn down by the
- * disable; the user reopens it.
+ * the public typings). The settings window is closed before the disable (the
+ * tab dies with the plugin) and reopened afterwards on this plugin's own tab,
+ * which the enable re-registers under the plugin id; Community plugins is the
+ * fallback when that tab is not there.
  */
 export async function reloadPlugin(app: unknown, pluginId: string): Promise<string | null> {
-  const plugins = (app as { plugins?: { disablePlugin?: (id: string) => Promise<void>; enablePlugin?: (id: string) => Promise<void> } }).plugins;
+  const a = app as {
+    plugins?: { disablePlugin?: (id: string) => Promise<void>; enablePlugin?: (id: string) => Promise<void> };
+    setting?: { close?: () => void; open?: () => void; openTabById?: (id: string) => unknown };
+  };
+  const plugins = a.plugins;
   if (!plugins || typeof plugins.disablePlugin !== "function" || typeof plugins.enablePlugin !== "function") return "this Obsidian build does not expose the plugin manager";
+  try {
+    a.setting?.close?.();
+  } catch {
+    // Not open, or not this shape: nothing to close.
+  }
   try {
     await plugins.disablePlugin(pluginId);
     await plugins.enablePlugin(pluginId);
-    return null;
   } catch (e) {
     return e instanceof Error ? e.message : String(e);
   }
+  try {
+    a.setting?.open?.();
+    const own = a.setting?.openTabById?.(pluginId);
+    if (!own) a.setting?.openTabById?.("community-plugins");
+  } catch {
+    // The settings window is optional here.
+  }
+  return null;
 }

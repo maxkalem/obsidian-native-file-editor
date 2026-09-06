@@ -65,9 +65,11 @@ describe("DeviceLocalStore", () => {
       lastMode: { b: "edit" },
       runPanelOpen: { x: true },
     });
-    // A present runner list is the user's, even when empty; an absent one is the defaults.
-    expect(normalizeDeviceState({ runners: [] }).runners).toEqual([]);
-    expect(normalizeDeviceState({}).runners.length).toBeGreaterThan(20);
+    // The interpreter list starts empty and stays whatever the user added; a stored list without version 2 was the old bundled defaults and is dropped.
+    expect(normalizeDeviceState({}).runners).toEqual([]);
+    expect(normalizeDeviceState({ runners: [{ language: "Python", name: "p", argv: ["python", "{file}"] }] }).runners).toEqual([]);
+    expect(normalizeDeviceState({ version: 2, runners: [{ language: "Python", name: "p", argv: ["python", "{file}"] }] }).runners).toHaveLength(1);
+    expect(normalizeDeviceState({}).version).toBe(2);
   });
 });
 
@@ -201,28 +203,32 @@ describe("settings tab definitions", () => {
     expect(visibleOf(defs, "Language folder")).toBe(true);
   });
 
-  it("a folder row has open, change, reread and create-example buttons on the desktop; open creates the folder first", async () => {
+  it("a folder row has choose, reread and create-example buttons on the desktop; choose creates the current folder first and opens the dialog there", async () => {
     const h = harness({ ...DEFAULT_SETTINGS, customPalettes: true, customLanguages: true });
     const rows = renderRows(buildDefinitions(h.deps));
     const palette = rows.find((r) => r.name === "Palette folder")?.setting;
     if (!palette) throw new Error("no palette row");
     expect(palette.descText.startsWith(".obsidian/plugins/native-file-editor/palettes.")).toBe(true);
-    expect(palette.buttons.map((b) => b.icon || b.text)).toEqual(["folder-open", "folder-input", "Reread", "Create example…"]);
-    palette.__click("Open the folder");
+    expect(palette.buttons.map((b) => b.text)).toEqual(["Choose folder…", "Reread", "Create example…"]);
+    // Cancelled: the folder was still created, nothing else happens.
+    h.dialogs.folder = null;
+    palette.__click("Choose folder");
     await tick();
-    expect(h.actions).toEqual(["mkdir .obsidian/plugins/native-file-editor/palettes", "open /vault/.obsidian/plugins/native-file-editor/palettes"]);
-    // Change: a folder inside the vault is saved; one outside is refused.
+    expect(h.actions).toEqual(["mkdir .obsidian/plugins/native-file-editor/palettes"]);
+    // A folder outside the vault is refused.
     h.actions.length = 0;
     h.dialogs.folder = "/elsewhere/p";
-    palette.__click("Choose another folder");
+    palette.__click("Choose folder");
     await tick();
     expect(h.notices[0]).toMatch(/inside the vault/);
     expect(h.current().paletteFolder).toBe("");
+    // One inside is saved and reread.
+    h.actions.length = 0;
     h.dialogs.folder = "/vault/Palettes";
-    palette.__click("Choose another folder");
+    palette.__click("Choose folder");
     await tick();
     expect(h.current().paletteFolder).toBe("Palettes");
-    expect(h.actions).toEqual(["reread", "refresh"]);
+    expect(h.actions).toEqual(["mkdir .obsidian/plugins/native-file-editor/palettes", "reread", "refresh"]);
     // Create example: picks a language, writes, rereads.
     h.actions.length = 0;
     h.dialogs.language = "Python";
@@ -236,7 +242,6 @@ describe("settings tab definitions", () => {
     language?.__click("Create example");
     await tick();
     expect(h.actions).toEqual(["mkdir .obsidian/plugins/native-file-editor/languages", "language Batch", "reread", "refresh"]);
-    // Reread alone.
     h.actions.length = 0;
     language?.__click("Reread");
     await tick();
@@ -252,72 +257,91 @@ describe("settings tab definitions", () => {
     shellPresent = true;
   });
 
-  it("the Run group exists on the desktop only; its rows and the interpreter list hide until Run is on", async () => {
+  it("the Run group exists on the desktop only; its rows hide until Run is on; there is no interpreter until one is added", async () => {
     desktop = false;
     expect(JSON.stringify(buildDefinitions(harness().deps))).not.toContain("Enable Run");
     desktop = true;
     const h = harness();
     let defs = buildDefinitions(h.deps);
     expect(JSON.stringify(defs)).toContain("Enable Run");
+    expect(JSON.stringify(defs)).not.toContain("Interpreters");
+    expect(JSON.stringify(defs)).not.toContain("Reset interpreters");
     expect(visibleOf(defs, "Timeout (seconds)")).toBe(false);
-    expect(visibleOf(defs, "Interpreters")).toBe(false);
-    expect(readSettingValue("device.runEnabled", h.deps)).toBe(false);
-    expect(readSettingValue("device.runTimeoutS", h.deps)).toBe(30);
-    expect(readSettingValue("device.runOutputCapKb", h.deps)).toBe(1024);
+    expect(visibleOf(defs, "Add interpreter…")).toBe(false);
+    expect(h.device.get().runners).toEqual([]);
     await writeSettingValue("device.runEnabled", true, h.deps);
     expect(h.actions).toEqual(["refresh"]);
     defs = buildDefinitions(h.deps);
     expect(visibleOf(defs, "Timeout (seconds)")).toBe(true);
-    expect(visibleOf(defs, "Interpreters")).toBe(true);
+    expect(visibleOf(defs, "Add interpreter…")).toBe(true);
+    const run = defs.find((d) => "heading" in d && d.heading === "Run (this device)") as { items: Array<{ name: string }> };
+    expect(run.items.map((i) => i.name)).toEqual(["Enable Run", "Timeout (seconds)", "Output limit (KB)", "Add interpreter…"]);
     await writeSettingValue("device.runTimeoutS", 5, h.deps);
     await writeSettingValue("device.runOutputCapKb", 64, h.deps);
     expect(h.device.get()).toMatchObject({ runEnabled: true, runTimeoutMs: 5000, runOutputCapBytes: 65536 });
   });
 
-  it("interpreter rows show the language and the command line; the folder button swaps the program, the pencil edits the line, add and delete work", async () => {
+  it("Add offers only languages without an interpreter, then the program; rows sit at the bottom of the Run group with folder, pencil and trash", async () => {
     const h = harness();
-    h.device.update({ runEnabled: true, runners: [{ language: "Python", name: "Python", argv: ["python", "{file}"] }, { language: "JavaScript", name: "Sandbox (Web Worker)", kind: "worker" }] });
-    let rows = renderRows(buildDefinitions(h.deps)).filter((r) => r.name === "Python" || r.name === "JavaScript");
-    const python = rows[0]?.setting;
-    if (!python) throw new Error("no python row");
-    expect(python.nameText).toBe("Python");
-    expect(python.descText).toBe("Python: python {file}");
-    expect(python.buttons.map((b) => b.icon)).toEqual(["folder", "pencil"]);
-    const sandbox = rows[1]?.setting;
-    expect(sandbox?.descText).toContain("runs inside Obsidian");
-    expect(sandbox?.buttons).toEqual([]);
-    // The folder button replaces argv[0] with the picked program.
+    h.device.update({ runEnabled: true, runners: [{ language: "Python", name: "python", argv: ["python", "{file}"] }] });
+    const runGroup = () => buildDefinitions(h.deps).find((d) => "heading" in d && d.heading === "Run (this device)") as { items: Array<{ name: string; action?: () => void }> };
+    expect(runGroup().items.map((i) => i.name)).toEqual(["Enable Run", "Timeout (seconds)", "Output limit (KB)", "Python", "Add interpreter…"]);
+    // The picker's list excludes Python; the standard command's arguments follow the picked program.
+    let offered: string[] = [];
+    h.deps = { ...h.deps, pickLanguage: async (languages) => ((offered = languages), h.dialogs.language) };
+    h.dialogs.language = "JavaScript";
+    h.dialogs.file = "C:\\nodejs\\node.exe";
+    runGroup().items.find((i) => i.name === "Add interpreter…")?.action?.();
+    await tick();
+    expect(offered).toEqual(["JavaScript", "Batch"]);
+    expect(h.device.get().runners.at(-1)).toEqual({ language: "JavaScript", name: "node", argv: ["C:\\nodejs\\node.exe", "{file}"] });
+    // A language with a standard command gets its arguments; a compile-then-run language gets its steps around the compiler.
+    h.dialogs.language = "Batch";
+    h.dialogs.file = "/usr/bin/wine";
+    runGroup().items.find((i) => i.name === "Add interpreter…")?.action?.();
+    await tick();
+    expect(h.device.get().runners.at(-1)).toEqual({ language: "Batch", name: "wine", argv: ["/usr/bin/wine", "/c", "{file}"] });
+    h.dialogs.language = "Rust";
+    h.dialogs.file = "C:\\rust\\rustc.exe";
+    runGroup().items.find((i) => i.name === "Add interpreter…")?.action?.();
+    await tick();
+    expect(h.device.get().runners.at(-1)).toEqual({ language: "Rust", name: "rustc", steps: [["C:\\rust\\rustc.exe", "{file}", "-o", "{tmp}/{stem}"], ["{tmp}/{stem}"]] });
+    // A steps row shows ` && `, its folder button swaps the compiler, its pencil edits every step.
+    const rust = renderRows(buildDefinitions(h.deps)).find((r) => r.name === "Rust")!.setting;
+    expect(rust.descText).toBe("C:\\rust\\rustc.exe {file} -o {tmp}/{stem} && {tmp}/{stem}");
+    expect(rust.buttons.map((b) => b.icon)).toEqual(["folder", "pencil", "trash"]);
+    h.dialogs.file = "/opt/rustc";
+    rust.__click("Choose the program");
+    await tick();
+    expect(h.device.get().runners.at(-1)?.steps?.[0]?.[0]).toBe("/opt/rustc");
+    const rust2 = renderRows(buildDefinitions(h.deps)).find((r) => r.name === "Rust")!.setting;
+    rust2.__click("Edit the command line");
+    rust2.texts[0]!.inputEl.value = "/opt/rustc -O {file} -o {tmp}/{stem} && {tmp}/{stem} --fast";
+    __fire(rust2.texts[0]!.inputEl, "keydown", { key: "Enter" });
+    expect(h.device.get().runners.at(-1)?.steps).toEqual([["/opt/rustc", "-O", "{file}", "-o", "{tmp}/{stem}"], ["{tmp}/{stem}", "--fast"]]);
+    rust2.__click("Remove this interpreter");
+    // Rows: name, line, buttons; the folder button swaps the program, the pencil edits, the trash removes.
+    let rows = renderRows(buildDefinitions(h.deps)).filter((r) => ["Python", "JavaScript", "Batch"].includes(r.name));
+    expect(rows.map((r) => r.name)).toEqual(["Python", "JavaScript", "Batch"]);
+    const python = rows[0]!.setting;
+    expect(python.descText).toBe("python {file}");
+    expect(python.buttons.map((b) => b.icon)).toEqual(["folder", "pencil", "trash"]);
     h.dialogs.file = "C:\\Python312\\python.exe";
-    python.__click("Choose the interpreter");
+    python.__click("Choose the program");
     await tick();
     expect(h.device.get().runners[0]?.argv).toEqual(["C:\\Python312\\python.exe", "{file}"]);
-    // The pencil adds a text field with the quoted line; Enter commits the parsed argv.
     rows = renderRows(buildDefinitions(h.deps));
-    const row = rows.find((r) => r.name === "Python")?.setting;
-    if (!row) throw new Error("no python row");
+    const row = rows.find((r) => r.name === "Python")!.setting;
     row.__click("Edit the command line");
-    expect(row.texts).toHaveLength(1);
     expect(row.texts[0]?.value).toBe("C:\\Python312\\python.exe {file}");
     row.texts[0]!.inputEl.value = '"C:\\Python312\\python.exe" -u {file} --flag';
     __fire(row.texts[0]!.inputEl, "keydown", { key: "Enter" });
     expect(h.device.get().runners[0]?.argv).toEqual(["C:\\Python312\\python.exe", "-u", "{file}", "--flag"]);
-    // A line without a program is refused.
     row.texts[0]!.inputEl.value = "";
     __fire(row.texts[0]!.inputEl, "keydown", { key: "Enter" });
     expect(h.notices.at(-1)).toMatch(/needs a program/);
-    // Add: language, then program.
-    const list = buildDefinitions(h.deps).find((d) => "heading" in d && d.heading === "Interpreters") as unknown as { addItem: { action: () => void }; onDelete: (i: number) => void };
-    h.dialogs.language = "Batch";
-    h.dialogs.file = "/usr/bin/wine";
-    list.addItem.action();
-    await tick();
-    expect(h.device.get().runners.at(-1)).toEqual({ language: "Batch", name: "wine", argv: ["/usr/bin/wine", "{file}"] });
-    list.onDelete(0);
-    expect(h.device.get().runners.map((r) => r.language)).toEqual(["JavaScript", "Batch"]);
-    // Reset brings the defaults back.
-    const run = buildDefinitions(h.deps).find((d) => "heading" in d && d.heading === "Run (this device)") as { items: Array<{ name: string; action?: () => void }> };
-    run.items.find((i) => i.name.startsWith("Reset"))?.action?.();
-    expect(h.device.get().runners.length).toBeGreaterThan(20);
+    renderRows(buildDefinitions(h.deps)).find((r) => r.name === "JavaScript")!.setting.__click("Remove this interpreter");
+    expect(h.device.get().runners.map((r) => r.language)).toEqual(["Python", "Batch"]);
   });
 
   it("custom file types live on the File types page: add asks for the extension and a language, delete removes, both reread", async () => {
@@ -342,11 +366,16 @@ describe("settings tab definitions", () => {
     expect(h.current().customExtensions).toEqual({});
   });
 
-  it("the Reload plugin row calls back", () => {
+  it("the Plugin group: Reload calls back; Reset forgets this device's state", () => {
     const h = harness();
-    const group = buildDefinitions(h.deps).find((d) => "heading" in d && d.heading === "Plugin") as { items: Array<{ action?: () => void }> };
+    h.device.update({ runEnabled: true, runners: [{ language: "Python", name: "p", argv: ["python", "{file}"] }], largeFileBytes: 5 });
+    const group = buildDefinitions(h.deps).find((d) => "heading" in d && d.heading === "Plugin") as { items: Array<{ name: string; action?: () => void }> };
+    expect(group.items.map((i) => i.name)).toEqual(["Reload plugin", "Reset this device's settings"]);
     group.items[0]?.action?.();
     expect(h.actions).toEqual(["reload"]);
+    group.items[1]?.action?.();
+    expect(h.device.get()).toMatchObject({ runEnabled: false, runners: [], largeFileBytes: DEFAULT_LARGE_FILE_BYTES });
+    expect(h.notices.at(-1)).toMatch(/device settings reset/);
   });
 
   it("rejects out-of-range and wrong-typed writes without saving", async () => {

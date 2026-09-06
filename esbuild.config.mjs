@@ -2,9 +2,23 @@ import esbuild from "esbuild";
 import fs from "fs";
 import process from "process";
 
+/**
+ * The build stamp, UTC, `yyMMdd.HHmm` followed by the milliseconds of the
+ * current second (`260906.0551987`): one glance at the head of main.js or at
+ * the `[plugin] load` log line says which build this is, where the version
+ * alone (unchanged between releases) cannot.
+ */
+function buildStamp() {
+  const d = new Date();
+  const p = (n, w = 2) => String(n).padStart(w, "0");
+  return `${p(d.getUTCFullYear() % 100)}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}.${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCMilliseconds(), 3)}`;
+}
+const BUILD_STAMP = buildStamp();
+
 const banner = `/*
 Native File Editor for Obsidian - bundled output. Source: https://github.com/maxkalem/obsidian-native-file-editor
 Licence: GPL-3.0-only; src/format and src/model additionally MIT. See LICENSE and THIRD_PARTY_NOTICES.md.
+Build: ${BUILD_STAMP}
 */`;
 
 const prod = process.argv.includes("production");
@@ -112,6 +126,7 @@ const options = {
   minify: prod,
   metafile: true,
   outfile: "main.js",
+  define: { __NFE_BUILD__: JSON.stringify(BUILD_STAMP) },
 };
 
 if (prod) {

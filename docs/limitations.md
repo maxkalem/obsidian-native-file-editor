@@ -27,7 +27,8 @@ What the current build does not do, and why. Items leave this list when the code
 - Palettes are read at start, on Reread (button or command), and when a palette file is saved from this plugin. An edit made with another program needs Reread.
 - "Create example…" reads the theme's colours for the other variant by swapping the body's theme class for one synchronous style computation; a theme that keys its colours on something else than `.theme-dark` / `.theme-light` yields the current variant's colours for both files.
 - A vault language definition replaces the bundled one for its extensions while the file is there, grammars included: a `python.json` in the folder turns Python into a keyword-highlighted language until it is removed. That is the rule asked for ("from the folder while it is there"); the log's `[languages]` line names every replacement.
-- Native folder and file dialogs, "open in explorer" and "open in browser" exist on the desktop only; on mobile the folder rows show the path with Reread and Create example, and Run does not exist.
+- Native folder and file dialogs exist on the desktop only; on mobile the folder rows show the path with Reread and Create example, and Run does not exist.
+- The in-pane page view renders the HTML alone: scripts do not run, nothing loads from the network or the vault (images and stylesheets referenced by path stay blank; `data:` images and inline styles show). An MHTML archive contributes its HTML part only; its packed images are not resolved yet.
 
 ## Run
 

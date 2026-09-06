@@ -52,9 +52,29 @@ export const BUILTIN_RUNNERS: readonly RunnerDef[] = [
 ];
 
 /**
- * The bare command each language's standard tool answers to, used as the
- * default name and first word when the user adds an interpreter without
- * picking a file (and as the suggestion in the file dialog).
+ * Compile-then-run languages: the steps that follow the compiler the user
+ * picks (`{program}` is replaced by it). The second step runs what the first
+ * produced; Kotlin's needs `java` on PATH.
+ */
+export const STANDARD_STEPS: Readonly<Record<string, ReadonlyArray<readonly string[]>>> = {
+  Rust: [["{program}", "{file}", "-o", "{tmp}/{stem}"], ["{tmp}/{stem}"]],
+  "C/C++": [["{program}", "{file}", "-o", "{tmp}/{stem}"], ["{tmp}/{stem}"]],
+  Kotlin: [["{program}", "{file}", "-include-runtime", "-d", "{tmp}/{stem}.jar"], ["java", "-jar", "{tmp}/{stem}.jar"]],
+  Go: [["{program}", "build", "-o", "{tmp}/{stem}", "{file}"], ["{tmp}/{stem}"]],
+};
+
+/** A new runner for a language around the program the user picked: its standard steps or arguments, else `program {file}`. */
+export function runnerForProgram(language: string, program: string): RunnerDef {
+  const name = program.replace(/^.*[\\/]/, "").replace(/\.exe$/i, "");
+  const steps = STANDARD_STEPS[language];
+  if (steps) return { language, name, steps: steps.map((step) => step.map((a) => (a === "{program}" ? program : a))) };
+  const argv = STANDARD_COMMANDS[language];
+  return { language, name, argv: argv ? [program, ...argv.slice(1)] : [program, "{file}"] };
+}
+
+/**
+ * The bare command each language's standard tool answers to: the arguments
+ * after the program the user picks, and the suggestion in the file dialog.
  */
 export const STANDARD_COMMANDS: Readonly<Record<string, readonly string[]>> = {
   JavaScript: ["node", "{file}"],
@@ -68,7 +88,6 @@ export const STANDARD_COMMANDS: Readonly<Record<string, readonly string[]>> = {
   PowerShell: ["pwsh", "-NoProfile", "-File", "{file}"],
   Batch: ["cmd", "/c", "{file}"],
   R: ["Rscript", "{file}"],
-  Go: ["go", "run", "{file}"],
   Java: ["java", "{file}"],
   "C#": ["dotnet", "run", "--project", "{dir}"],
   Swift: ["swift", "{file}"],
@@ -216,6 +235,31 @@ export function normalizeRunners(raw: unknown): { runners: RunnerDef[]; rejected
  */
 export function formatArgvLine(argv: readonly string[]): string {
   return argv.map((a) => (/[\s"]/.test(a) || a.length === 0 ? `"${a.replace(/"/g, '\\"')}"` : a)).join(" ");
+}
+
+/** Steps as one line for the row: the argv lines joined with ` && `; `parseStepsLine` is the reverse. */
+export function formatStepsLine(steps: ReadonlyArray<readonly string[]>): string {
+  return steps.map((s) => formatArgvLine(s)).join(" && ");
+}
+
+/** Split an edited multi-step line at ` && ` (outside quotes) into argv arrays; empty steps are dropped. */
+export function parseStepsLine(line: string): string[][] {
+  const out: string[][] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i] ?? "";
+    if (c === '"' && line[i - 1] !== "\\") inQuotes = !inQuotes;
+    if (!inQuotes && c === "&" && line[i + 1] === "&") {
+      out.push(parseArgvLine(cur));
+      cur = "";
+      i++;
+      continue;
+    }
+    cur += c;
+  }
+  out.push(parseArgvLine(cur));
+  return out.filter((s) => s.length > 0);
 }
 
 /** Split an edited line back into elements: whitespace separates, double quotes group, `\"` is a quote inside quotes; any other backslash is literal. */
