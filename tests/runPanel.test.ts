@@ -170,7 +170,7 @@ describe("RunPanel", () => {
     expect(parent.children).toHaveLength(0);
   });
 
-  it("a page output puts a sandboxed frame into the panel instead of text, and Clear removes it", async () => {
+  it("a page output puts a sandboxed frame (scripts only, opaque origin) into the panel instead of text, and Clear removes it", async () => {
     const panel = makePanel();
     const run = panel.run();
     started[0]?.onOutput({ kind: "page", text: "<html><body>hi</body></html>" });
@@ -178,7 +178,7 @@ describe("RunPanel", () => {
     await run;
     const frame = __findByClass(panel.rootEl, "nfe-run-frame");
     expect(frame).not.toBeNull();
-    expect(frame.attrs.sandbox).toBe("");
+    expect(frame.attrs.sandbox).toBe("allow-scripts");
     expect(frame.srcdoc).toBe("<html><body>hi</body></html>");
     expect(panel.rootEl.hasClass("nfe-run-page-mode")).toBe(true);
     expect(__findByClass(panel.rootEl, "nfe-run-output").children).toHaveLength(0);

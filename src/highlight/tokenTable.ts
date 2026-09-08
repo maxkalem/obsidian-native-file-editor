@@ -73,7 +73,10 @@ export const TOKEN_CLASSES: ReadonlyArray<{ readonly tag: Tag; readonly class: s
   { tag: t.processingInstruction, class: "cm-meta nfe-tok-preproc" },
   { tag: t.heading, class: "cm-header nfe-tok-heading" },
   { tag: t.contentSeparator, class: "cm-hr nfe-tok-separator" },
-  { tag: t.list, class: "cm-formatting-list nfe-tok-list" },
+  // The markdown grammar tags a whole list item `list` (the marker itself is a
+  // processingInstruction); Obsidian's `cm-formatting-list` is its marker
+  // colour, so the item's text stays plain and only a palette can address it.
+  { tag: t.list, class: "nfe-tok-list" },
   { tag: t.quote, class: "cm-quote nfe-tok-quote" },
   { tag: t.emphasis, class: "cm-em nfe-tok-emphasis" },
   { tag: t.strong, class: "cm-strong nfe-tok-strong" },

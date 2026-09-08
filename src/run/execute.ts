@@ -1,5 +1,5 @@
 import type { ProcessRunner, RunHandle, RunOutput, RunResult, TempDirs, WorkerRunner } from "./runner";
-import { extractHtmlFromMhtml, looksLikeMhtml, pageDocument } from "./mhtml";
+import { looksLikeMhtml, pageDocument, renderMhtml } from "./mhtml";
 import { type RunContext, type RunnerDef, expandArg, expandArgv, refusePath, stepsOf, validateRunner } from "./runners";
 
 /**
@@ -74,10 +74,11 @@ export function execute(req: ExecuteRequest, deps: ExecuteDeps): ExecuteHandle {
   }
 
   if (req.def.kind === "page") {
-    // The page is the editor's text (an MHTML archive yields its HTML part),
-    // rendered by the panel in a sandboxed frame: no scripts, no network.
+    // The page is the editor's text (an MHTML archive yields its HTML part
+    // with its stylesheets and images inlined as data: URIs), rendered by the
+    // panel in a sandboxed frame: scripts in an opaque origin, no network.
     const started = Date.now();
-    const html = looksLikeMhtml(req.text) ? extractHtmlFromMhtml(req.text) : req.text;
+    const html = looksLikeMhtml(req.text) ? renderMhtml(req.text) : req.text;
     if (html === null) return fail("this MHTML file has no text/html part");
     req.onOutput({ kind: "page", text: pageDocument(html) });
     return { stop: () => undefined, done: Promise.resolve({ exitCode: 0, timedOut: false, stopped: false, truncated: false, ms: Date.now() - started, error: null, step: 1, steps: 1 }) };

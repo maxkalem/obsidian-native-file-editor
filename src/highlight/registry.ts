@@ -13,6 +13,7 @@ import { MSSQL, MySQL, PLSQL, PostgreSQL, SQLite, sql } from "@codemirror/lang-s
 import { xml } from "@codemirror/lang-xml";
 import { yaml } from "@codemirror/lang-yaml";
 import { astro } from "@fazelstudio/codemirror-lang-astro";
+import { assembly } from "@codincod/codemirror-lang-assembly";
 import { prisma } from "@fazelstudio/codemirror-lang-prisma";
 import { nix } from "@replit/codemirror-lang-nix";
 import { parser as solidityParser } from "@replit/codemirror-lang-solidity";
@@ -20,8 +21,13 @@ import { svelte } from "@replit/codemirror-lang-svelte";
 import { elixir } from "codemirror-lang-elixir";
 import { hcl } from "codemirror-lang-hcl";
 import { graphqlMode } from "./graphqlMode";
+import { hexRecordMode } from "./hexRecordMode";
+import { makefileMode } from "./makefileMode";
+import { mhtmlMode } from "./mhtmlMode";
+import { retag, withFallbackKeywords, withLineComment, wholeWords } from "./streamFixes";
+import { txt2tagsMode } from "./txt2tagsMode";
 import { type KeywordLanguage, keywordMode } from "./keywordMode";
-import { NPP_LANGUAGES } from "./langs.generated";
+import { NPP_FALLBACKS, NPP_LANGUAGES } from "./langs.generated";
 import { type Language, LanguageSupport, StreamLanguage, type StreamParser } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
 import { apl } from "@codemirror/legacy-modes/mode/apl";
@@ -51,7 +57,6 @@ import { factor } from "@codemirror/legacy-modes/mode/factor";
 import { fcl } from "@codemirror/legacy-modes/mode/fcl";
 import { forth } from "@codemirror/legacy-modes/mode/forth";
 import { fortran } from "@codemirror/legacy-modes/mode/fortran";
-import { gas } from "@codemirror/legacy-modes/mode/gas";
 import { gherkin } from "@codemirror/legacy-modes/mode/gherkin";
 import { groovy } from "@codemirror/legacy-modes/mode/groovy";
 import { haskell } from "@codemirror/legacy-modes/mode/haskell";
@@ -112,7 +117,6 @@ import { wast } from "@codemirror/legacy-modes/mode/wast";
 import { webIDL } from "@codemirror/legacy-modes/mode/webidl";
 import { xQuery } from "@codemirror/legacy-modes/mode/xquery";
 import { yacas } from "@codemirror/legacy-modes/mode/yacas";
-import { z80 } from "@codemirror/legacy-modes/mode/z80";
 import { logMode } from "./logMode";
 import { adaptStreamParser } from "./obsidianFork";
 
@@ -213,6 +217,10 @@ const ENTRIES: readonly LanguageEntry[] = [
   lezer("HCL", ["hcl", "tf", "tfvars", "nomad"], () => hcl()),
   lezer("Nix", ["nix"], () => nix()),
   lezer("Prisma", ["prisma"], () => prisma()),
+  // One grammar for the shape every assembler shares (8080/Z80, NASM/MASM/FASM,
+  // GNU as in both syntaxes, 68000, ARM, 6502, MIPS, RISC-V); replaces the
+  // legacy gas and z80 stream modes (2026-09-07), which knew one syntax each.
+  lezer("Assembly", ["s", "asm", "z80"], () => assembly()),
   // Solidity's package is a stream parser; it goes through the same fork adapter as tier 2.
   legacy("Solidity", ["sol"], solidityParser as StreamParser<unknown>),
   // GraphQL: this plugin's own keyword mode (cm6-graphql would bring the graphql package).
@@ -230,7 +238,8 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("nesC", ["nc"], nesC),
   legacy("Shader", ["glsl", "vert", "frag", "geom", "comp", "tesc", "tese", "hlsl", "fx", "shader", "cginc"], shader),
   legacy("Clojure", ["clj", "cljs", "cljc", "edn"], clojure),
-  legacy("CMake", ["cmake"], cmake),
+  // The cmake mode names every command `def`, which Obsidian leaves uncoloured; a CMake file is its commands.
+  legacy("CMake", ["cmake"], retag(cmake, { def: "keyword" })),
   legacy("COBOL", ["cob", "cbl", "cpy", "cbd", "cdb", "cdc", "copy", "lst"], cobol),
   legacy("CoffeeScript", ["coffee", "litcoffee"], coffeeScript),
   legacy("Common Lisp", ["lisp", "lsp", "cl", "asd", "el"], commonLisp),
@@ -255,7 +264,6 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("FCL", ["fcl"], fcl),
   legacy("Forth", ["fth", "4th", "forth"], forth),
   legacy("Fortran", ["f", "for", "f77", "f90", "f95", "f03", "f08", "f2k", "f23"], fortran),
-  legacy("Assembly (GAS)", ["s", "asm"], gas),
   legacy("Gherkin", ["feature"], gherkin),
   legacy("Groovy", ["groovy", "gvy", "gradle"], groovy),
   legacy("Haskell", ["hs", "lhs", "las"], haskell),
@@ -273,12 +281,13 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("F#", ["fs", "fsx", "fsi"], fSharp),
   legacy("Standard ML", ["sml", "sig", "fun"], sml),
   legacy("Modelica", ["mo"], modelica),
-  legacy("MscGen", ["msc", "mscgen"], mscgen),
-  legacy("MsGenny", ["msgenny"], msgenny),
-  legacy("Xù", ["xu"], xu),
+  // The mscgen family matches its constants by prefix (`Autosave` read as `auto` + `save`).
+  legacy("MscGen", ["msc", "mscgen"], wholeWords(mscgen)),
+  legacy("MsGenny", ["msgenny"], wholeWords(msgenny)),
+  legacy("Xù", ["xu"], wholeWords(xu)),
   legacy("nginx", ["nginx"], nginx),
   legacy("NSIS", ["nsi", "nsh"], nsis),
-  legacy("N-Triples", ["nt", "nq"], ntriples),
+  legacy("N-Triples", ["nt", "nq"], withLineComment(ntriples, "#")),
   legacy("Octave", ["octave"], octave),
   legacy("Oz", ["oz"], oz),
   legacy("Pascal", ["pas", "pp", "p", "dpr", "lpr", "dpk"], pascal),
@@ -286,14 +295,15 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("Perl", ["pl", "pm", "pod", "cgi", "plx", "t"], perl),
   legacy("Pig", ["pig"], pig),
   legacy("PowerShell", ["ps1", "psm1", "psd1"], powerShell),
-  legacy("Properties", ["properties", "ini", "cfg", "conf", "env", "editorconfig", "gitignore", "gitattributes", "gitmodules", "gitconfig", "npmrc", "prefs", "reg", "inf", "url", "wer", "desktop", "service"], properties),
+  // Keys as properties, values as strings, sections as keywords: the mode's own `def`/`quote`/`header` are uncoloured or blockquote-coloured in Obsidian.
+  legacy("Properties", ["properties", "ini", "cfg", "conf", "env", "editorconfig", "gitignore", "gitattributes", "gitmodules", "gitconfig", "npmrc", "prefs", "reg", "inf", "url", "wer", "desktop", "service"], retag(properties, { def: "propertyName", quote: "string", header: "keyword" })),
   legacy("Protocol Buffers", ["proto"], protobuf),
   legacy("Pug", ["pug", "jade"], pug),
   legacy("Puppet", ["puppet"], puppet),
   legacy("Cython", ["pyx", "pxd", "pxi"], cython),
   legacy("Q", ["q"], q),
   legacy("R", ["r", "rprofile", "splus"], r),
-  legacy("RPM spec", ["spec"], rpmSpec),
+  legacy("RPM spec", ["spec"], retag(rpmSpec, { header: "keyword", def: "variableName.standard" })),
   legacy("Ruby", ["rb", "rake", "gemspec", "podspec", "ru", "rbw"], ruby),
   legacy("SAS", ["sas"], sas),
   legacy("Scheme", ["scm", "ss", "smd", "rkt", "sld"], scheme),
@@ -303,11 +313,13 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("SPARQL", ["rq", "sparql"], sparql),
   legacy("LaTeX", ["tex", "sty", "ltx", "dtx", "latex"], stex),
   legacy("Swift", ["swift"], swift),
-  legacy("Tcl", ["tcl", "tk", "exp"], tcl),
+  // The tcl mode knows a few dozen commands; Notepad++'s list fills in the rest (`dict`, `clock`, `chan`, ...).
+  legacy("Tcl", ["tcl", "tk", "exp"], NPP_FALLBACKS.tcl ? withFallbackKeywords(tcl, NPP_FALLBACKS.tcl) : tcl),
   legacy("Textile", ["textile"], textile),
-  legacy("TiddlyWiki", ["tid"], tiddlyWiki),
+  // List bullets are `comment` in the TiddlyWiki mode; real comments keep the name.
+  legacy("TiddlyWiki", ["tid"], retag(tiddlyWiki, (raw, text) => (raw === "comment" && /^[*#]+$/.test(text) ? "keyword" : raw))),
   legacy("TOML", ["toml"], toml),
-  legacy("troff", ["troff", "roff", "man", "nroff"], troff),
+  legacy("troff", ["troff", "roff", "man", "nroff"], retag(troff, { quote: "keyword" })),
   legacy("TTCN-3", ["ttcn", "ttcn3"], ttcn),
   legacy("Turtle", ["ttl"], turtle),
   legacy("Visual Basic", ["vb", "vba", "bas", "frm"], vb),
@@ -322,7 +334,6 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("WebIDL", ["webidl", "widl"], webIDL),
   legacy("XQuery", ["xq", "xquery", "xqy", "xqm", "xql"], xQuery),
   legacy("Yacas", ["ys"], yacas),
-  legacy("Z80 assembly", ["z80"], z80),
   legacy("APL", ["apl"], apl),
   legacy("ASCII armor", ["asc", "pgp"], asciiArmor),
   legacy("Brainfuck", ["bf", "b"], brainfuck),
@@ -339,10 +350,13 @@ const ENTRIES: readonly LanguageEntry[] = [
     })
   ),
   plain("NFO", ["nfo"]),
-  plain("Intel HEX", ["hex"]),
-  plain("Motorola S-record", ["mot", "srec"]),
-  plain("Tektronix hex", ["tek"]),
-  plain("MHTML", ["mht", "mhtml"]),
+  // This plugin's own modes for formats Notepad++ colours with hand-written lexers (no keyword table to convert).
+  builtin("Intel HEX", ["hex"], hexRecordMode("ihex") as StreamParser<unknown>),
+  builtin("Motorola S-record", ["mot", "srec"], hexRecordMode("srec") as StreamParser<unknown>),
+  builtin("Tektronix hex", ["tek"], hexRecordMode("tek") as StreamParser<unknown>),
+  builtin("MHTML", ["mht", "mhtml"], mhtmlMode as StreamParser<unknown>),
+  builtin("Makefile", ["mak", "mk", "makefile"], makefileMode as StreamParser<unknown>),
+  builtin("txt2tags", ["t2t"], txt2tagsMode),
 ];
 
 const BY_EXTENSION: Map<string, LanguageEntry> = (() => {

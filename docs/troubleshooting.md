@@ -8,7 +8,7 @@
 
 **The pane opens but looks unstyled.** `styles.css` was not copied along with `main.js`. Copy both from the repository root into the plugin folder and reload.
 
-**A file opens read-only with "not valid UTF-8" in the head bar.** The bytes are not UTF-8 and carry no byte order mark, so the plugin decoded them as a guess and refuses to write the guess back. Convert the file to UTF-8 with another editor to edit it here.
+**A file opens read-only with "not valid UTF-8" in the head bar.** The bytes are not UTF-8 and carry no byte order mark, so the plugin decoded them as a guess (windows-1251 or windows-1252) and does not write the guess back unasked. Press Edit: the dialog offers a UTF-8 copy beside the file, opened in the editor, or editing the original in the guessed encoding if the text reads correctly. A notice "not saved … has no byte in windows-1251" while editing means a character the code page cannot hold was typed; remove it, or make a UTF-8 copy instead.
 
 **A large file opens as a preview even with "Always editing" set.** It is above the per-device large-file limit. Press Edit and confirm in the dialog, or raise the limit in settings; the limit is a per-device setting and is not synced.
 

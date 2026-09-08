@@ -43,6 +43,7 @@
     "@codemirror/state": "6.5.0",
     "@codemirror/view": "6.38.6",
     "@fazelstudio/codemirror-lang-astro": "^0.2.0",
+    "@codincod/codemirror-lang-assembly": "^0.3.0",
     "@fazelstudio/codemirror-lang-prisma": "^0.2.0",
     "@replit/codemirror-lang-nix": "^6.0.1",
     "@replit/codemirror-lang-solidity": "^6.0.2",

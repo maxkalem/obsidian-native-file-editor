@@ -163,15 +163,19 @@ export class RunPanel {
   }
 
   /**
-   * A web page rendered in the panel: an iframe with an empty `sandbox` (no
-   * scripts, no forms, a unique origin) and the document as `srcdoc`, whose
-   * CSP (run/mhtml.ts) lets nothing load from anywhere. The panel grows to
-   * page size while it shows one.
+   * A web page rendered in the panel: an iframe whose `sandbox` allows scripts
+   * and nothing else (no same-origin access, so the page lives in an opaque
+   * origin with no way to Obsidian's window, storage or Electron; no forms,
+   * popups, navigation or modals), and the document as `srcdoc`, whose CSP
+   * (run/mhtml.ts) lets nothing load from anywhere. Scripts were off until
+   * 2026-09-07; the user's pages are interactive (a sudoku), and a script in
+   * an opaque origin without network is what the JavaScript sandbox already
+   * grants a Worker. The panel grows to page size while it shows one.
    */
   private showPage(html: string): void {
     this.frame?.remove();
     const frame = this.wrapEl.createEl("iframe", { cls: "nfe-run-frame" });
-    frame.setAttribute("sandbox", "");
+    frame.setAttribute("sandbox", "allow-scripts");
     frame.setAttribute("referrerpolicy", "no-referrer");
     frame.setAttribute("title", "Page");
     frame.srcdoc = html;

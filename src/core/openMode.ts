@@ -8,7 +8,11 @@ export interface OpenModeInput {
   readonly remembered: ViewMode | null;
   readonly sizeBytes: number;
   readonly largeFileBytes: number;
-  /** A text decoded by guess cannot be written back, so it never opens editable. */
+  /**
+   * A text decoded by guess is not written back unasked, so it opens in
+   * preview whatever the setting says; Edit goes through the read-only modal,
+   * where the user confirms the encoding or takes a UTF-8 copy.
+   */
   readonly lossy: boolean;
 }
 
@@ -29,6 +33,7 @@ export interface OpenModeDecision {
 export function decideOpenMode(input: OpenModeInput): OpenModeDecision {
   const large = input.sizeBytes > input.largeFileBytes;
   if (large) return { mode: "preview", large: true, readOnly: input.lossy };
+  if (input.lossy) return { mode: "preview", large: false, readOnly: true };
   let mode: ViewMode;
   switch (input.setting) {
     case "edit":

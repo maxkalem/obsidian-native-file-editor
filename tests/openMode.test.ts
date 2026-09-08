@@ -24,7 +24,8 @@ describe("decideOpenMode", () => {
     expect(decideOpenMode({ ...base, setting: "edit", sizeBytes: 1000 }).large).toBe(false);
   });
 
-  it("a lossy decode is read-only in either mode", () => {
-    expect(decideOpenMode({ ...base, setting: "edit", lossy: true })).toEqual({ mode: "edit", large: false, readOnly: true });
+  it("a lossy decode opens in preview whatever the setting says, read-only; Edit is the modal's job", () => {
+    expect(decideOpenMode({ ...base, setting: "edit", lossy: true })).toEqual({ mode: "preview", large: false, readOnly: true });
+    expect(decideOpenMode({ ...base, setting: "remember", remembered: "edit", lossy: true })).toEqual({ mode: "preview", large: false, readOnly: true });
   });
 });

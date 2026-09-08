@@ -16,6 +16,12 @@ export interface SharedSettings {
   initialMode: InitialModeSetting;
   lineNumbers: boolean;
   wordWrap: boolean;
+  /** Spaces as dots, tabs as arrows, a line-ending badge at every line end, as Notepad++ shows them. */
+  showInvisibles: boolean;
+  /** Shortcut hints on the search panel's buttons ("Next (F3)"); the tooltips stay either way. */
+  searchHints: boolean;
+  /** Text direction: `auto` decides per line from its first strong character (Arabic and Hebrew lines read right to left), `ltr`/`rtl` force the whole document. */
+  textDirection: "auto" | "ltr" | "rtl";
   tabSize: number;
   tabInsertsSpaces: boolean;
   /**
@@ -39,6 +45,9 @@ export const DEFAULT_SETTINGS: SharedSettings = {
   initialMode: "preview",
   lineNumbers: true,
   wordWrap: false,
+  showInvisibles: false,
+  searchHints: true,
+  textDirection: "auto",
   tabSize: 4,
   tabInsertsSpaces: false,
   paletteFolder: "",
@@ -82,6 +91,9 @@ export function normalizeSettings(raw: unknown): SharedSettings {
   }
   if (typeof raw.lineNumbers === "boolean") out.lineNumbers = raw.lineNumbers;
   if (typeof raw.wordWrap === "boolean") out.wordWrap = raw.wordWrap;
+  if (typeof raw.showInvisibles === "boolean") out.showInvisibles = raw.showInvisibles;
+  if (typeof raw.searchHints === "boolean") out.searchHints = raw.searchHints;
+  if (raw.textDirection === "auto" || raw.textDirection === "ltr" || raw.textDirection === "rtl") out.textDirection = raw.textDirection;
   if (typeof raw.tabSize === "number" && Number.isInteger(raw.tabSize) && raw.tabSize >= 1 && raw.tabSize <= 16) {
     out.tabSize = raw.tabSize;
   }

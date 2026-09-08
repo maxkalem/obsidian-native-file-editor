@@ -2,7 +2,7 @@ import * as cmLanguage from "@codemirror/language";
 import type { StreamParser } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
 import type { NodeProp } from "@lezer/common";
-import type { Tag } from "@lezer/highlight";
+import { type Tag, tags as lezerTags } from "@lezer/highlight";
 import { TOKEN_CLASSES } from "./tokenTable";
 
 /**
@@ -83,13 +83,70 @@ const NFE_BY_CM5: ReadonlyMap<string, string> = (() => {
   return m;
 })();
 
-/** One raw token string (space-separated names) in CM5 vocabulary. Unknown names pass through. */
+/**
+ * The CM5 names a token may keep as they are: what Obsidian's stylesheet or
+ * styles.css has a rule for, plus the fork's `line-*` line styles. Anything
+ * else a mode returns is dropped rather than emitted as `cm-<name>`: the
+ * LiveScript mode names its whitespace `content`, and `cm-content` is
+ * CodeMirror's own content-container class, whose layout rules turned every
+ * space into a line break on the device (2026-09-07).
+ */
+const CM5_KNOWN: ReadonlySet<string> = new Set([
+  ...TOKEN_CLASSES.map((row) => row.class.split(" ").find((c) => /^cm-/.test(c))?.slice(3) ?? ""),
+  "variable-3",
+  "hr",
+]);
+
+/**
+ * A modern token name (`variableName.function.standard`, `operatorKeyword`)
+ * resolved the way npm's StreamLanguage does: the first part is a tag, the
+ * rest are modifiers applied in order; then the tag's set is walked from the
+ * most specific form outwards to the first row of the table. `keyword` for
+ * `operatorKeyword`, `def` for `variableName.definition`; null when no part is
+ * a tag or nothing in the set is in the table.
+ */
+function cm5ForModernName(name: string): string | null {
+  const parts = name.split(".");
+  const table = lezerTags as unknown as Record<string, unknown>;
+  let found: Tag[] = [];
+  for (const part of parts) {
+    const value = table[part];
+    if (typeof value === "function") {
+      if (found.length === 0) return null;
+      found = found.map((t) => (value as (t: Tag) => Tag)(t));
+    } else if (value && typeof value === "object") {
+      if (found.length > 0) return null;
+      found = Array.isArray(value) ? (value as Tag[]) : [value as Tag];
+    } else {
+      return null;
+    }
+  }
+  for (const tag of found) {
+    for (const sub of (tag as unknown as { set: readonly Tag[] }).set) {
+      const hit = CM5_BY_MODERN.get(String(sub));
+      if (hit !== undefined) return hit;
+    }
+  }
+  return null;
+}
+
+/** One raw token string (space-separated names) in CM5 vocabulary; names nothing styles are dropped. */
 export function toCm5Token(raw: string): string {
-  return raw
-    .split(" ")
-    .filter(Boolean)
-    .map((name) => CM5_BY_MODERN.get(name) ?? (name.includes(".") ? (CM5_BY_MODERN.get(name.split(".")[0] ?? "") ?? name.split(".")[0] ?? name) : name))
-    .join(" ");
+  const out: string[] = [];
+  for (const name of raw.split(" ").filter(Boolean)) {
+    const direct = CM5_BY_MODERN.get(name);
+    if (direct !== undefined) {
+      out.push(direct);
+      continue;
+    }
+    if (CM5_KNOWN.has(name) || name.startsWith("line-")) {
+      out.push(name);
+      continue;
+    }
+    const resolved = cm5ForModernName(name);
+    if (resolved !== null) out.push(resolved);
+  }
+  return out.join(" ");
 }
 
 /**

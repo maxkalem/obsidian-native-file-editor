@@ -32,12 +32,34 @@ describe("toCm5Token", () => {
     expect(toCm5Token("comment")).toBe("comment");
   });
 
-  it("keeps CM5 names and line styles as they are, and falls back to the base of an unknown dotted name", () => {
+  it("keeps CM5 names Obsidian styles and the fork's line styles as they are", () => {
     expect(toCm5Token("builtin")).toBe("builtin");
     expect(toCm5Token("variable-2")).toBe("variable-2");
+    expect(toCm5Token("def")).toBe("def");
+    expect(toCm5Token("header")).toBe("header");
+    expect(toCm5Token("hr")).toBe("hr");
     expect(toCm5Token("line-background-x")).toBe("line-background-x");
-    expect(toCm5Token("mystery.thing")).toBe("mystery");
     expect(toCm5Token("keyword  string")).toBe("keyword string");
+  });
+
+  it("resolves a modern name the table does not list through the tag hierarchy, as npm's StreamLanguage does", () => {
+    // LiveScript returns operatorKeyword; its set is operatorKeyword > keyword.
+    expect(toCm5Token("operatorKeyword")).toBe("keyword");
+    expect(toCm5Token("angleBracket")).toBe("bracket");
+    expect(toCm5Token("labelName")).toBe("variable-2");
+    expect(toCm5Token("variableName.function.standard")).toBe("def");
+    expect(toCm5Token("heading1")).toBe("header");
+    expect(toCm5Token("attributeValue")).toBe("string");
+  });
+
+  it("drops a name nothing styles instead of emitting cm-<name>: `content` is CodeMirror's own container class", () => {
+    // 2026-09-07: the LiveScript mode names whitespace `content`; `cm-content` made every space a line break.
+    expect(toCm5Token("content")).toBe("");
+    expect(toCm5Token("paren")).toBe("bracket");
+    expect(toCm5Token("mystery")).toBe("");
+    expect(toCm5Token("mystery.thing")).toBe("");
+    expect(toCm5Token("keyword content")).toBe("keyword");
+    expect(toCm5Token("scroller gutter line cursor")).toBe("");
   });
 });
 

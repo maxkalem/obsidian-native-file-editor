@@ -104,20 +104,51 @@ describe("plugin load", () => {
     await new Promise((r) => setTimeout(r, 1100));
     expect(dropped).toEqual(["code/sample.py|code/sample.py"]);
     const text = app.adapter.appended.join("");
-    expect(text).toContain("[vault] after load: 2 listed files checked against the disk; 1 stale (code/sample.py)");
+    expect(text).toContain("[vault] after load: 2 listed files checked against the disk; 1 stale (code/sample.py); 0 on disk but not listed");
   });
 
-  it("sweeps again two seconds after a burst of new files with its extensions", async () => {
+  it("after load, asks Obsidian to index the files the disk has under its extensions that the list lacks", async () => {
+    // The 2026-09-07 case: a batch rename whose create events the watcher lost.
+    const app = makeApp({});
+    (app.vault as Record<string, unknown>).getFiles = () => [new TFile("code/015 c sample.c"), new TFile("code/ceylon sample.ceylon")];
+    (app.adapter as Record<string, unknown>).list = async () => ({ files: ["code/015 c sample.c", "code/016 ceylon sample.ceylon", "code/.016 ceylon sample.ceylon.nfe-tmp-1", "code/notes.md"], folders: [] });
+    const dropped: string[] = [];
+    const adopted: string[] = [];
+    (app.adapter as Record<string, unknown>).reconcileDeletion = (p: string) => void dropped.push(p);
+    (app.adapter as Record<string, unknown>).reconcileInternalFile = (p: string) => void adopted.push(p);
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, { version: "0.1.0" } as never));
+    await plugin.onload();
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(dropped).toEqual(["code/ceylon sample.ceylon"]);
+    expect(adopted).toEqual(["code/016 ceylon sample.ceylon"]);
+    const text = app.adapter.appended.join("");
+    expect(text).toContain("[vault] after load: 2 listed files checked against the disk; 1 stale (code/ceylon sample.ceylon); 1 on disk but not listed (code/016 ceylon sample.ceylon)");
+  });
+
+  it("without adapter.reconcileInternalFile the sweep logs that and moves on", async () => {
+    const app = makeApp({});
+    (app.vault as Record<string, unknown>).getFiles = () => [new TFile("code/a.py")];
+    (app.adapter as Record<string, unknown>).list = async () => ({ files: ["code/a.py", "code/b.py"], folders: [] });
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, { version: "0.1.0" } as never));
+    await plugin.onload();
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(app.adapter.appended.join("")).toContain("this Obsidian build has no adapter.reconcileInternalFile");
+  });
+
+  it("sweeps again two seconds after a burst of created or deleted files with its extensions", async () => {
     const app = makeApp({});
     let files = [new TFile("code/a.py")];
     (app.vault as Record<string, unknown>).getFiles = () => files;
     (app.adapter as Record<string, unknown>).list = async () => ({ files: ["code/b.py"], folders: [] });
     const dropped: string[] = [];
+    const adopted: string[] = [];
     (app.adapter as Record<string, unknown>).reconcileDeletion = (p: string) => void dropped.push(p);
+    (app.adapter as Record<string, unknown>).reconcileInternalFile = (p: string) => void adopted.push(p);
     const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, { version: "0.1.0" } as never));
     await plugin.onload();
     await new Promise((r) => setTimeout(r, 20));
     expect(dropped).toEqual(["code/a.py"]);
+    expect(adopted).toEqual(["code/b.py"]);
     files = [new TFile("code/a.py"), new TFile("code/b.py")];
     const vault = app.vault as unknown as Events;
     vault.trigger("create", new TFile("code/b.py"));
@@ -127,7 +158,11 @@ describe("plugin load", () => {
     expect(dropped).toEqual(["code/a.py"]);
     await new Promise((r) => setTimeout(r, 1200));
     expect(dropped).toEqual(["code/a.py", "code/a.py"]);
-  });
+    expect(adopted).toEqual(["code/b.py"]);
+    vault.trigger("delete", new TFile("code/a.py"));
+    await new Promise((r) => setTimeout(r, 2300));
+    expect(dropped).toEqual(["code/a.py", "code/a.py", "code/a.py"]);
+  }, 10000);
 
   it("loads palettes into one <style> element without writing anything, and offers the palette and reread commands", async () => {
     const head = (globalThis as unknown as { activeDocument: { head: { children: Array<{ id?: string; textContent?: string }> } } }).activeDocument.head;

@@ -182,23 +182,27 @@ export function __setPlatformDesktop(desktop: boolean): void {
 }
 
 /** A file record the way FileView code reads it. */
+export class TFolder {
+  path: string;
+  constructor(path = "") {
+    this.path = path;
+  }
+}
 export class TFile {
   path: string;
   name: string;
   basename: string;
   extension: string;
+  /** The containing folder, as Obsidian sets it: "" for the vault root. */
+  parent: TFolder;
   constructor(path = "") {
     this.path = path;
     this.name = path.split("/").pop() ?? "";
     const dot = this.name.lastIndexOf(".");
     this.basename = dot > 0 ? this.name.slice(0, dot) : this.name;
     this.extension = dot > 0 ? this.name.slice(dot + 1) : "";
-  }
-}
-export class TFolder {
-  path: string;
-  constructor(path = "") {
-    this.path = path;
+    const slash = path.lastIndexOf("/");
+    this.parent = new TFolder(slash < 0 ? "" : path.slice(0, slash));
   }
 }
 
@@ -228,26 +232,67 @@ export class FileSystemAdapter {
 
 /** Menu items are recorded so a test can read titles and click them. */
 export class Menu {
-  items: Array<{ title: string; icon: string; click: () => void }> = [];
+  items: Array<{ title: string; icon: string; section: string; checked: boolean | null; click: () => void }> = [];
   addItem(cb: (item: Any) => void): Menu {
-    const rec: { title: string; icon: string; click: () => void } = { title: "", icon: "", click: () => undefined };
+    const rec: { title: string; icon: string; section: string; checked: boolean | null; click: () => void } = { title: "", icon: "", section: "", checked: null, click: () => undefined };
     const item: Any = {
       setTitle: (t: string) => ((rec.title = t), item),
       setIcon: (i: string) => ((rec.icon = i), item),
+      setSection: (s: string) => ((rec.section = s), item),
+      setChecked: (c: boolean | null) => ((rec.checked = c), item),
       onClick: (fn: () => void) => ((rec.click = fn), item),
     };
     cb(item);
     this.items.push(rec);
     return this;
   }
+  /** A separator is recorded as an item titled "---" so a test can see where the groups break. */
   addSeparator(): Menu {
+    this.items.push({ title: "---", icon: "", section: "", checked: null, click: () => undefined });
     return this;
   }
   showAtMouseEvent(): void {}
   showAtPosition(): void {}
 }
 
-export function setIcon(): void {}
+/** `Keymap.isModifier` as Obsidian defines it: Mod is Ctrl here (the mock is not a Mac). */
+export class Keymap {
+  static isModifier(evt: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean }, modifier: string): boolean {
+    switch (modifier) {
+      case "Mod":
+      case "Ctrl":
+        return evt.ctrlKey === true;
+      case "Meta":
+        return evt.metaKey === true;
+      case "Alt":
+        return evt.altKey === true;
+      case "Shift":
+        return evt.shiftKey === true;
+      default:
+        return false;
+    }
+  }
+}
+
+/** Key bindings are recorded so a test can press them. */
+export class Scope {
+  bindings: Array<{ modifiers: string[] | null; key: string | null; fn: (evt: Any) => unknown }> = [];
+  constructor(readonly parent?: Any) {}
+  register(modifiers: string[] | null, key: string | null, fn: (evt: Any) => unknown): Any {
+    const b = { modifiers, key, fn };
+    this.bindings.push(b);
+    return b;
+  }
+  unregister(): void {}
+}
+
+/** Icons and tooltips are recorded on the element so a test can read what the header says. */
+export function setIcon(el: Any, icon: string): void {
+  if (el && typeof el === "object") el.attrs["data-icon"] = icon;
+}
+export function setTooltip(el: Any, text: string): void {
+  if (el && typeof el === "object") el.attrs["aria-label"] = text;
+}
 export function addIcon(): void {}
 export function normalizePath(p: string): string {
   return p;
@@ -313,6 +358,8 @@ export class ItemView {
   setState(): Promise<void> {
     return Promise.resolve();
   }
+  scope: Any = null;
+  onPaneMenu(_menu: Any, _source: string): void {}
   /** Header actions are remembered so a test can tap them. */
   actions: Array<{ icon: string; title: string; el: Any }> = [];
   addAction(icon: string, title: string, cb: () => void): Any {

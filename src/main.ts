@@ -1,4 +1,4 @@
-import { type App, FileSystemAdapter, type Menu, Notice, Platform, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
+import { type App, FileSystemAdapter, type Menu, Notice, Platform, Plugin, type TAbstractFile, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
 import { StreamLanguage } from "@codemirror/language";
 import {
   COMMAND_NEW_FILE,
@@ -125,6 +125,12 @@ export default class NativeFileEditorPlugin extends Plugin {
   private readonly nfeRegistered = new Set<string>();
 
   override async onload(): Promise<void> {
+    // The two measurements the ledger asks for (check-notes §12), taken here
+    // so that no DevTools console is needed: the time onload takes, and the
+    // JS heap before and after it (Chromium's performance.memory; absent on
+    // other engines).
+    const startedAt = performance.now();
+    const heapBefore = heapMb();
     const timers: Timers = {
       setTimeout: (fn, ms) => activeWindow.setTimeout(fn, ms),
       clearTimeout: (id) => activeWindow.clearTimeout(id),
@@ -195,6 +201,20 @@ export default class NativeFileEditorPlugin extends Plugin {
         log,
         afterSave: (path) => void this.nfePalettes.reloadIfInside(path).catch((e: unknown) => log.error("palette", "reload after save failed", e)),
         onMissing: (path) => this.reconcileMissing(path),
+        setWordWrap: (on) => void this.saveSettings({ ...this.nfeSettings, wordWrap: on }),
+        setShowInvisibles: (on) => void this.saveSettings({ ...this.nfeSettings, showInvisibles: on }),
+        setTextDirection: (direction) => void this.saveSettings({ ...this.nfeSettings, textDirection: direction }),
+        // Obsidian's own rename dialog (fileManager.promptForFileRename is not in the public typings; guarded).
+        rename: (file) => {
+          const fm = this.app.fileManager as unknown as { promptForFileRename?: (f: TFile) => Promise<void> };
+          if (typeof fm.promptForFileRename === "function") void fm.promptForFileRename(file);
+          else log.info("view", "this Obsidian build has no fileManager.promptForFileRename; rename from the file explorer");
+        },
+        copy: {
+          exists: (path) => this.app.vault.getAbstractFileByPath(path) !== null,
+          // Through the vault, not the transport: the new file must be in Obsidian's index at once to be opened.
+          create: (path, bytes) => this.app.vault.createBinary(path, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer),
+        },
         ...(run ? { run } : {}),
       })
     );
@@ -245,25 +265,27 @@ export default class NativeFileEditorPlugin extends Plugin {
       `took ${decision.take.length} extensions; yielded ${decision.yielded.map((y) => `.${y.ext}->${y.viewType}`).join(", ") || "none"}; disabled ${decision.disabled.map((d) => `.${d}`).join(", ") || "none"}`
     );
     // Once the workspace is up, compare the plugin's files with the disk:
-    // a batch rename made outside Obsidian can leave ghosts in its index that
-    // only a plugin registering this many extensions makes visible. The same
-    // rename announces itself as a burst of "create" events for the new
-    // names, so a sweep follows each burst (the listener is registered after
-    // layout, when Obsidian has stopped firing "create" for every file it
-    // indexes at start).
+    // a batch rename made outside Obsidian can leave ghosts in its index, and
+    // can leave the new names out of it, and only a plugin registering this
+    // many extensions makes either visible. The part of the rename Obsidian
+    // did see arrives as a burst of "create" and "delete" events, so a sweep
+    // follows each burst (the listeners are registered after layout, when
+    // Obsidian has stopped firing "create" for every file it indexes at
+    // start).
+    log.info("plugin", `onload took ${Math.round(performance.now() - startedAt)} ms${heapBefore !== null ? `; heap ${heapBefore} MB before, ${heapMb() ?? "?"} MB after` : ""}`);
     this.app.workspace.onLayoutReady(() => {
       void this.sweepStale("after load");
       let pending: number | null = null;
-      this.registerEvent(
-        this.app.vault.on("create", (file) => {
-          if (!(file instanceof TFile) || !this.nfeRegistered.has(file.extension.toLowerCase())) return;
-          if (pending !== null) timers.clearTimeout(pending);
-          pending = timers.setTimeout(() => {
-            pending = null;
-            void this.sweepStale("after new files appeared");
-          }, 2000);
-        })
-      );
+      const afterBurst = (file: TAbstractFile) => {
+        if (!(file instanceof TFile) || !this.nfeRegistered.has(file.extension.toLowerCase())) return;
+        if (pending !== null) timers.clearTimeout(pending);
+        pending = timers.setTimeout(() => {
+          pending = null;
+          void this.sweepStale("after files changed");
+        }, 2000);
+      };
+      this.registerEvent(this.app.vault.on("create", afterBurst));
+      this.registerEvent(this.app.vault.on("delete", afterBurst));
     });
     if (decision.yielded.length > 0) {
       const key = decision.yielded.map((y) => `${y.ext}:${y.viewType}`).join(",");
@@ -355,14 +377,15 @@ export default class NativeFileEditorPlugin extends Plugin {
   }
 
   /**
-   * A file Obsidian lists but the disk lacks: Obsidian's adapter can re-check
-   * one path against the disk (`reconcileDeletion`, not in the public
-   * typings), which removes the stale index entry and fires the delete event
-   * the explorer listens to. Guarded; absent, the entry stays until Obsidian
-   * restarts, which is what happens today anyway.
+   * A file Obsidian lists but the disk lacks: Obsidian's adapter can drop one
+   * index entry (`reconcileDeletion(realPath, normalizedPath)`, not in the
+   * public typings; both arguments are the vault path here, which is what
+   * Obsidian's own `reconcileInternalFile` passes for an unmoved file), which
+   * fires the delete event the explorer listens to. Guarded; absent, the entry
+   * stays until Obsidian restarts, which is what happens today anyway.
    */
   private reconcileMissing(path: string): void {
-    const adapter = this.app.vault.adapter as unknown as { reconcileDeletion?: (normalizedPath: string, realPath: string) => Promise<void> | void };
+    const adapter = this.app.vault.adapter as unknown as { reconcileDeletion?: (realPath: string, normalizedPath: string) => Promise<void> | void };
     if (typeof adapter.reconcileDeletion !== "function") {
       this.nfeLog.info("view", "this Obsidian build has no adapter.reconcileDeletion; the stale entry stays until restart");
       return;
@@ -375,17 +398,42 @@ export default class NativeFileEditorPlugin extends Plugin {
   }
 
   /**
+   * The other direction: a file the disk has and Obsidian does not list, the
+   * result of a batch rename whose "create" events the recursive watcher lost
+   * (2026-09-07: 106 of 173 samples). `reconcileInternalFile(vaultPath)` is
+   * what Obsidian calls after its own writes: it stats the path and indexes
+   * it, firing "create". Guarded like its sibling; absent, the file appears
+   * after a restart.
+   */
+  private reconcileUnindexed(path: string): void {
+    const adapter = this.app.vault.adapter as unknown as { reconcileInternalFile?: (normalizedPath: string) => Promise<void> | void };
+    if (typeof adapter.reconcileInternalFile !== "function") {
+      this.nfeLog.info("vault", "this Obsidian build has no adapter.reconcileInternalFile; files Obsidian did not see appear after a restart");
+      return;
+    }
+    try {
+      void Promise.resolve(adapter.reconcileInternalFile(path)).catch((e: unknown) => this.nfeLog.error("vault", `reconcileInternalFile(${path}) failed`, e));
+    } catch (e) {
+      this.nfeLog.error("vault", `reconcileInternalFile(${path}) threw`, e);
+    }
+  }
+
+  /**
    * Every file Obsidian lists under one of this plugin's extensions, checked
    * against the disk one folder listing at a time; each ghost goes through
-   * `reconcileMissing`. Errors stay in the log: this is housekeeping.
+   * `reconcileMissing`, each file the disk has and the index lacks through
+   * `reconcileUnindexed`. Returns how many entries changed. Errors stay in the
+   * log: this is housekeeping.
    */
   async sweepStale(reason: string): Promise<number> {
     try {
       const report = await findStaleFiles(this.app.vault.getFiles(), this.nfeRegistered, (folder) => this.nfeTransport.listDir(folder));
       for (const path of report.missing) this.reconcileMissing(path);
+      for (const path of report.unindexed) this.reconcileUnindexed(path);
       const unlisted = report.unlisted.length > 0 ? `; ${report.unlisted.length} folder${report.unlisted.length === 1 ? "" : "s"} could not be listed` : "";
-      this.nfeLog.info("vault", `${reason}: ${report.checked} listed file${report.checked === 1 ? "" : "s"} checked against the disk; ${report.missing.length} stale${report.missing.length > 0 ? ` (${report.missing.join(", ")})` : ""}${unlisted}`);
-      return report.missing.length;
+      const unindexed = `; ${report.unindexed.length} on disk but not listed${report.unindexed.length > 0 ? ` (${report.unindexed.join(", ")})` : ""}`;
+      this.nfeLog.info("vault", `${reason}: ${report.checked} listed file${report.checked === 1 ? "" : "s"} checked against the disk; ${report.missing.length} stale${report.missing.length > 0 ? ` (${report.missing.join(", ")})` : ""}${unindexed}${unlisted}`);
+      return report.missing.length + report.unindexed.length;
     } catch (e) {
       this.nfeLog.error("vault", `stale sweep (${reason}) failed`, e);
       return 0;
@@ -419,10 +467,10 @@ export default class NativeFileEditorPlugin extends Plugin {
       this.nfeLog.info("claims", `reread took ${fresh.length} new extension${fresh.length === 1 ? "" : "s"}: ${fresh.map((e) => `.${e}`).join(", ")}`);
     }
     const report = await this.nfePalettes.load();
-    const stale = await this.sweepStale("reread");
+    const fixed = await this.sweepStale("reread");
     if (announce) {
       const n = report.palettes.length;
-      new Notice(`Native File Editor: languages reread${fresh.length > 0 ? ` (+${fresh.length} extensions)` : ""}; ${this.nfeSettings.customPalettes ? `${n} palette${n === 1 ? "" : "s"}` : "palettes off"}${report.skipped.length > 0 ? `; ${report.skipped.length} skipped (see the log)` : ""}${stale > 0 ? `; ${stale} stale file entr${stale === 1 ? "y" : "ies"} dropped` : ""}`);
+      new Notice(`Native File Editor: languages reread${fresh.length > 0 ? ` (+${fresh.length} extensions)` : ""}; ${this.nfeSettings.customPalettes ? `${n} palette${n === 1 ? "" : "s"}` : "palettes off"}${report.skipped.length > 0 ? `; ${report.skipped.length} skipped (see the log)` : ""}${fixed > 0 ? `; ${fixed} file entr${fixed === 1 ? "y" : "ies"} corrected` : ""}`);
     }
   }
 
@@ -503,6 +551,12 @@ export default class NativeFileEditorPlugin extends Plugin {
       new Notice(`Native File Editor could not create ${path}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+}
+
+/** Chromium's JS heap in MB, or null where `performance.memory` does not exist. */
+function heapMb(): number | null {
+  const mem = (performance as unknown as { memory?: { usedJSHeapSize?: number } }).memory;
+  return typeof mem?.usedJSHeapSize === "number" ? Math.round(mem.usedJSHeapSize / 1048576) : null;
 }
 
 function safeLocalStorage(): Storage | null {

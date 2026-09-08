@@ -17,9 +17,38 @@ export interface TextInfo {
   /**
    * True when the bytes were not valid in the detected encoding and the text
    * is a guess (windows-1251 or windows-1252). A guessed text is shown
-   * read-only, because writing it back would silently change bytes.
+   * read-only, because writing it back would silently change bytes. The user
+   * can confirm the guess (`confirmEncoding`), after which the same encoding
+   * is written back.
    */
   readonly lossy: boolean;
+}
+
+/** The user has looked at the text and says the guess is right: the same info, no longer a guess. */
+export function confirmEncoding(info: TextInfo): TextInfo {
+  return { ...info, lossy: false };
+}
+
+/** The info a UTF-8 copy of a file gets: its line ending, no BOM, nothing guessed. */
+export function utf8CopyInfo(info: TextInfo): TextInfo {
+  return { encoding: "utf-8", bom: false, eol: info.eol, lossy: false };
+}
+
+/**
+ * A character the target code page has no byte for. `line` and `column` are
+ * 1-based in the editor's text (line endings normalised, column in UTF-16
+ * code units), so the message can point at it and the editor can mark it.
+ */
+export class UnencodableError extends Error {
+  constructor(
+    readonly char: string,
+    readonly line: number,
+    readonly column: number,
+    readonly encoding: Encoding
+  ) {
+    super(`"${char}" on line ${line} has no byte in ${encoding}; remove it or save a UTF-8 copy.`);
+    this.name = "UnencodableError";
+  }
 }
 
 export interface DecodedText {
@@ -154,9 +183,59 @@ function encodeUtf16(text: string, littleEndian: boolean, bom: boolean): Uint8Ar
 }
 
 /**
- * Text back to bytes in the form the file had. Refuses a lossy decode: there
- * is no encoder for the single-byte code pages, and writing the guess would
- * rewrite bytes the user never touched.
+ * The platform has decoders for the single-byte code pages and no encoders;
+ * the reverse table is read from the decoder once per code page: the 256
+ * bytes, decoded, give the character each byte stands for. A byte the page
+ * leaves undefined decodes to U+FFFD and gets no entry.
+ */
+const singleByteTables = new Map<string, Map<string, number>>();
+
+function singleByteTable(encoding: "windows-1251" | "windows-1252"): Map<string, number> {
+  const cached = singleByteTables.get(encoding);
+  if (cached) return cached;
+  const bytes = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) bytes[i] = i;
+  const chars = new TextDecoder(encoding).decode(bytes);
+  const table = new Map<string, number>();
+  let byte = 0;
+  for (const ch of chars) {
+    if (ch !== "�" && !table.has(ch)) table.set(ch, byte);
+    byte++;
+  }
+  singleByteTables.set(encoding, table);
+  return table;
+}
+
+function encodeSingleByte(text: string, encoding: "windows-1251" | "windows-1252"): Uint8Array {
+  const table = singleByteTable(encoding);
+  const out = new Uint8Array(text.length);
+  let n = 0;
+  let line = 1;
+  let column = 1;
+  let prev = "";
+  for (const ch of text) {
+    const byte = table.get(ch);
+    if (byte === undefined) throw new UnencodableError(ch, line, column, encoding);
+    out[n++] = byte;
+    // Every line ending counts once: `\r`, `\n`, and `\r\n` as one; the
+    // `\n` of a `\r\n` is not a column either.
+    if (ch === "\r" || (ch === "\n" && prev !== "\r")) {
+      line++;
+      column = 1;
+    } else if (ch !== "\n") {
+      column += ch.length;
+    }
+    prev = ch;
+  }
+  return n === out.length ? out : out.subarray(0, n);
+}
+
+/**
+ * Text back to bytes in the form the file had. Refuses a lossy decode: writing
+ * a guess back unasked would rewrite bytes the user never touched; once the
+ * user has confirmed the guess (`confirmEncoding`) the single-byte code page
+ * is written, and a character it cannot hold stops the write with
+ * `UnencodableError` rather than becoming a question mark.
  */
 export function encodeText(text: string, info: TextInfo): Uint8Array {
   if (info.lossy) {
@@ -176,8 +255,9 @@ export function encodeText(text: string, info: TextInfo): Uint8Array {
       return encodeUtf16(withEol, true, info.bom);
     case "utf-16be":
       return encodeUtf16(withEol, false, info.bom);
-    default:
-      throw new Error(`No encoder for ${info.encoding}.`);
+    case "windows-1251":
+    case "windows-1252":
+      return encodeSingleByte(withEol, info.encoding);
   }
 }
 

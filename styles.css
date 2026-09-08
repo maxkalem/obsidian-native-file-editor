@@ -47,6 +47,23 @@
   color: var(--text-on-accent);
 }
 
+/* The "not saved" badge takes a click to the character; the mark in the editor. */
+.nfe-text-content .nfe-badge-problem {
+  cursor: pointer;
+}
+
+.nfe-text-content .nfe-editor .nfe-unencodable {
+  background-color: var(--background-modifier-error);
+  color: var(--text-on-accent);
+  border-radius: var(--radius-s);
+  text-decoration: underline wavy var(--text-error);
+}
+
+/* The tab title renames the file on a click, as a note's does. */
+.view-header-title.nfe-title-renamable {
+  cursor: text;
+}
+
 .nfe-text-content .nfe-mode-button {
   display: inline-flex;
   align-items: center;
@@ -133,8 +150,17 @@
   border-left-color: var(--text-normal);
 }
 
-.nfe-text-content .nfe-editor .cm-selectionBackground,
-.nfe-text-content .nfe-editor .cm-focused .cm-selectionBackground,
+/* Selection. CodeMirror's base theme paints the drawn selection itself, with
+   its light-theme colours (#d7d4f0 when focused) because no dark-theme facet
+   is set, through selectors five classes deep; the two rules below are six
+   and seven deep, as Obsidian's own Markdown editor does it, so the theme's
+   --text-selection wins in both light and dark. (Seen 2026-09-07: an opaque
+   lavender block over dark-theme text.) */
+.nfe-text-content .nfe-editor .cm-editor > .cm-scroller > .cm-selectionLayer > .cm-selectionBackground,
+.nfe-text-content .nfe-editor .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer > .cm-selectionBackground {
+  background-color: var(--text-selection);
+}
+
 .nfe-text-content .nfe-editor .cm-content ::selection {
   background-color: var(--text-selection);
   color: inherit;
@@ -179,10 +205,90 @@
   background-color: var(--text-highlight-bg);
 }
 
+/* Invisibles (Show invisibles): CodeMirror's own highlightWhitespace draws the
+   dots and arrows; the line-ending badge is this plugin's widget, small and
+   muted so it reads as a mark, not as text. It is not selectable or copied. */
+/* CodeMirror draws the space dots in a fixed #aaa, too bright on a dark theme;
+   the theme's faint text colour instead. The tab arrow is an SVG data URI and
+   keeps CodeMirror's grey. */
+.nfe-text-content .nfe-editor .cm-highlightSpace {
+  background-image: radial-gradient(circle at 50% 55%, var(--text-faint) 20%, transparent 5%);
+}
+
+.nfe-text-content .nfe-editor .nfe-eol {
+  display: inline-block;
+  margin-left: var(--size-2-1);
+  padding: 0 var(--size-2-1);
+  border-radius: var(--radius-s);
+  background-color: var(--text-faint);
+  color: var(--background-primary);
+  font-size: 0.65em;
+  line-height: 1.4;
+  vertical-align: middle;
+  user-select: none;
+  pointer-events: none;
+}
+
 .nfe-text-content .nfe-editor .cm-panels {
   background-color: var(--background-secondary);
   color: var(--text-normal);
   border-bottom: var(--border-width) solid var(--background-modifier-border);
+}
+
+/* The search panel (ui/searchPanel.ts): Obsidian's form colours, so it reads
+   in both themes; CodeMirror's own panel used its light base theme. */
+.nfe-text-content .nfe-editor .nfe-search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-1);
+  padding: var(--size-4-1) var(--size-4-2);
+}
+
+.nfe-text-content .nfe-editor .nfe-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-1);
+}
+
+.nfe-text-content .nfe-editor .nfe-search-field {
+  flex: 1 1 12em;
+  min-width: 8em;
+  height: var(--input-height);
+  padding: 0 var(--size-4-2);
+  border: var(--input-border-width) solid var(--background-modifier-border);
+  border-radius: var(--input-radius);
+  background-color: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+}
+
+.nfe-text-content .nfe-editor .nfe-search-field:focus {
+  border-color: var(--background-modifier-border-focus);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+  outline: none;
+}
+
+.nfe-text-content .nfe-editor .nfe-search-button {
+  height: var(--input-height);
+  padding: 0 var(--size-4-2);
+  font-size: var(--font-ui-small);
+  white-space: nowrap;
+}
+
+.nfe-text-content .nfe-editor .nfe-search-toggle.is-active {
+  color: var(--text-accent);
+  background-color: var(--background-modifier-active-hover);
+}
+
+.nfe-text-content .nfe-editor .nfe-search-close {
+  margin-left: auto;
+}
+
+/* Text direction "by line": each line follows its first strong character. */
+.nfe-text-content .nfe-editor .cm-content[data-nfe-dir="auto"] .cm-line {
+  unicode-bidi: plaintext;
 }
 
 /* Syntax tokens. Every token span carries two classes: Obsidian's own cm-*
@@ -219,7 +325,6 @@
   font-weight: var(--bold-weight);
 }
 
-.nfe-text-content .nfe-tok-list,
 .nfe-text-content .nfe-tok-quote,
 .nfe-text-content .nfe-tok-separator,
 .nfe-text-content .cm-quote {
@@ -277,7 +382,8 @@
   flex: 0 0 auto;
 }
 
-.nfe-text-content .nfe-run-head-button {
+/* The head's Run button is lit only while the output panel is open (a run always is). */
+.nfe-text-content .nfe-run-head-button.is-active {
   color: var(--text-accent);
 }
 

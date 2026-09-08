@@ -287,6 +287,13 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
       items: [
         { name: "Line numbers", control: { type: "toggle", key: "shared.lineNumbers" } },
         { name: "Word wrap", control: { type: "toggle", key: "shared.wordWrap" } },
+        {
+          name: "Text direction",
+          desc: "Auto reads each line by its first letter (an Arabic or Hebrew line runs right to left, the rest left to right); the two others force the whole document. Also in the pane's menu.",
+          control: { type: "dropdown", key: "shared.textDirection", options: { auto: "Auto, per line", ltr: "Left to right", rtl: "Right to left" } },
+        },
+        { name: "Shortcut hints on search buttons", desc: "\"Next (F3)\", \"Previous (Shift+F3)\" and so on in the search panel. Off shows the plain words; the tooltips keep the shortcuts.", control: { type: "toggle", key: "shared.searchHints" } },
+        { name: "Show invisibles", desc: "Spaces as dots, tabs as arrows and a line-ending badge at the end of every line. Also in the pane's header and its menu.", control: { type: "toggle", key: "shared.showInvisibles" } },
         { name: "Tab size", control: { type: "number", key: "shared.tabSize", min: 1, max: 16, step: 1 } },
         { name: "Tab inserts spaces", control: { type: "toggle", key: "shared.tabInsertsSpaces" } },
       ],
@@ -471,6 +478,12 @@ export function readSettingValue(key: string, deps: SettingsTabDeps): unknown {
       return s.lineNumbers;
     case "shared.wordWrap":
       return s.wordWrap;
+    case "shared.showInvisibles":
+      return s.showInvisibles;
+    case "shared.searchHints":
+      return s.searchHints;
+    case "shared.textDirection":
+      return s.textDirection;
     case "shared.tabSize":
       return s.tabSize;
     case "shared.tabInsertsSpaces":
@@ -526,6 +539,15 @@ export async function writeSettingValue(key: string, value: unknown, deps: Setti
         break;
       case "shared.wordWrap":
         if (typeof value === "boolean") s.wordWrap = value;
+        break;
+      case "shared.showInvisibles":
+        if (typeof value === "boolean") s.showInvisibles = value;
+        break;
+      case "shared.searchHints":
+        if (typeof value === "boolean") s.searchHints = value;
+        break;
+      case "shared.textDirection":
+        if (value === "auto" || value === "ltr" || value === "rtl") s.textDirection = value;
         break;
       case "shared.tabSize":
         if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 16) s.tabSize = value;

@@ -75,13 +75,15 @@ describe("keywordMode", () => {
 });
 
 describe("the generated Notepad++ tables", () => {
-  it("has 27 languages, each with extensions, a name and at least the comment syntax or one keyword set", () => {
-    expect(NPP_LANGUAGES).toHaveLength(27);
+  it("has 25 languages, each with extensions, a name and at least the comment syntax or one keyword set", () => {
+    // 27 until 2026-09-07: makefile and txt2tags have no keywords in Notepad++'s table and got modes of their own.
+    expect(NPP_LANGUAGES).toHaveLength(25);
+    expect(NPP_LANGUAGES.map((l) => l.id)).not.toContain("makefile");
+    expect(NPP_LANGUAGES.map((l) => l.id)).not.toContain("txt2tags");
     for (const l of NPP_LANGUAGES) {
       expect(l.extensions.length, l.id).toBeGreaterThan(0);
       expect(l.name.length, l.id).toBeGreaterThan(0);
-      // txt2tags is in Notepad++'s list with neither keywords nor comment syntax: it registers the extension and nothing more.
-      if (l.id !== "txt2tags") expect(l.sets.length > 0 || l.commentLine !== null || l.commentStart !== null, l.id).toBe(true);
+      expect(l.sets.length > 0 || l.commentLine !== null || l.commentStart !== null, l.id).toBe(true);
       for (const [role, words] of l.sets) {
         expect(["keyword", "builtin", "type", "constant", "property", "meta", "special"]).toContain(role);
         expect(words.trim().length).toBeGreaterThan(0);
@@ -123,5 +125,14 @@ describe("parseKeywordLanguage", () => {
     expect(parseKeywordLanguage({ name: "X", extensions: ["x"], commentStart: "/*" }, "f")).toMatchObject({ error: expect.stringContaining("go together") });
     expect(parseKeywordLanguage({ name: "X", extensions: ["x"], sets: [["colour", "a"]] }, "f")).toMatchObject({ error: expect.stringContaining("role") });
     expect(parseKeywordLanguage({ name: "X", extensions: ["x"], sets: [["keyword", 1]] }, "f")).toMatchObject({ error: expect.stringContaining("words") });
+    expect(parseKeywordLanguage({ name: "X", extensions: ["x"], commentLines: "::" }, "f")).toMatchObject({ error: expect.stringContaining("commentLines") });
+    expect(parseKeywordLanguage({ name: "X", extensions: ["x"], patterns: [{ regex: "(", token: "labelName" }] }, "f")).toMatchObject({ error: expect.stringContaining("not a valid regular expression") });
+    expect(parseKeywordLanguage({ name: "X", extensions: ["x"], patterns: [{ token: "labelName" }] }, "f")).toMatchObject({ error: expect.stringContaining("regex string") });
+  });
+
+  it("accepts commentLines and patterns, which a vault file may use as Batch does", () => {
+    const r = parseKeywordLanguage({ name: "X", extensions: ["x"], caseInsensitive: true, commentLine: "REM", commentLines: ["::"], patterns: [{ regex: ":\\w+", token: "labelName", sol: true }] }, "f");
+    expect(r).toMatchObject({ language: { commentLines: ["::"], patterns: [{ regex: ":\\w+", token: "labelName", sol: true }] } });
+    expect(parseKeywordLanguage({ name: "X", extensions: ["x"] }, "f")).not.toHaveProperty("language.commentLines");
   });
 });

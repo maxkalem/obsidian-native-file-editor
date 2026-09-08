@@ -39,6 +39,7 @@ Each one a separate decision (handoff §17), with its size in `main.js` from `np
 | `@replit/codemirror-lang-nix` 6.0.1 | Nix, `.nix` | MIT, Connor Brewster / Replit | 12 KB |
 | `@replit/codemirror-lang-solidity` 6.0.2 | Solidity, `.sol` (a stream parser, adapted like tier 2) | MIT, Sergei Chestakov / Replit | 8 KB |
 | `@fazelstudio/codemirror-lang-prisma` 0.2.0 | Prisma, `.prisma` | MIT, Zulfazli (fazel-studio) | 11 KB |
+| `@codincod/codemirror-lang-assembly` 0.3.0 | Assembly, `.s` `.asm` `.z80` (one grammar for 8080/Z80, NASM/MASM/FASM, GNU as in both syntaxes, 68000, ARM/AArch64, 6502, MIPS, RISC-V, PDP-8, IBM 360; replaces the legacy `gas` and `z80` modes since 2026-09-07) | MIT, reeven (codeberg.org/reeven) | 13 KB |
 
 Not bundled, and why: `cm6-graphql` depends on the `graphql` reference implementation and `graphql-language-service` (close to a megabyte) for schema-aware editing this plugin does not do; GraphQL files get this plugin's own keyword mode (`src/highlight/graphqlMode.ts`) instead.
 

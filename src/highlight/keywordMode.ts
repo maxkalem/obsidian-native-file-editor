@@ -27,6 +27,15 @@ export interface KeywordLanguage {
   readonly commentEnd: string | null;
   /** Each set: its role and its words, space-separated (one string is far smaller in the bundle than an array). */
   readonly sets: ReadonlyArray<readonly [role: KeywordRole, words: string]>;
+  /** Further line-comment markers (Batch: `::` beside `REM`). Optional; absent in Notepad++'s table, added by the converter's supplement or a vault file. */
+  readonly commentLines?: readonly string[];
+  /**
+   * Patterns the words cannot express, tried before words: a regular
+   * expression source (matched at the current position, `^` implied) and the
+   * lezer tag name it yields; `sol` limits it to the start of a line. Batch
+   * uses them for `:label` and `%VAR%`.
+   */
+  readonly patterns?: ReadonlyArray<{ readonly regex: string; readonly token: string; readonly sol?: boolean }>;
 }
 
 const TAG_BY_ROLE: Readonly<Record<KeywordRole, string>> = {
@@ -70,7 +79,12 @@ export function keywordMode(def: KeywordLanguage): StreamParser<KeywordState> {
       if (!words.has(key)) words.set(key, tag);
     }
   }
-  const line = def.commentLine ? new RegExp(`^${escapeRegExp(def.commentLine)}.*`) : null;
+  // A line marker that is a word (`REM`) ends at a word boundary and follows
+  // the language's case rule: `rem` in a batch file is a comment too
+  // (2026-09-08). A marker of symbols (`#`, `::`) matches as it is.
+  const lineMarkers = [def.commentLine, ...(def.commentLines ?? [])].filter((m): m is string => typeof m === "string" && m.length > 0);
+  const lines = lineMarkers.map((m) => new RegExp(`^${escapeRegExp(m)}${/\w$/.test(m) ? "\\b" : ""}.*`, def.caseInsensitive ? "i" : ""));
+  const patterns = (def.patterns ?? []).map((p) => ({ regex: new RegExp(`^(?:${p.regex})`), token: p.token, sol: p.sol === true }));
   const start = def.commentStart ? new RegExp(`^${escapeRegExp(def.commentStart)}`) : null;
   const end = def.commentEnd ? escapeRegExp(def.commentEnd) : null;
   const endRe = end ? new RegExp(`^[\\s\\S]*?${end}`) : null;
@@ -86,7 +100,11 @@ export function keywordMode(def: KeywordLanguage): StreamParser<KeywordState> {
         return "comment";
       }
       if (stream.eatSpace()) return null;
-      if (line && stream.match(line)) return "comment";
+      for (const l of lines) if (stream.match(l)) return "comment";
+      for (const p of patterns) {
+        if (p.sol && !/^\s*$/.test(stream.string.slice(0, stream.pos))) continue;
+        if (stream.match(p.regex)) return p.token;
+      }
       if (start && endRe && stream.match(start)) {
         if (stream.match(endRe)) return "comment";
         state.inComment = true;
@@ -145,6 +163,26 @@ export function parseKeywordLanguage(raw: unknown, fallbackId: string): { langua
       sets.push([s[0] as KeywordRole, words]);
     }
   }
+  const commentLines: string[] = [];
+  if (r.commentLines !== undefined) {
+    if (!Array.isArray(r.commentLines) || !r.commentLines.every((c) => typeof c === "string" && c.length > 0)) return { error: "commentLines must be a list of non-empty strings" };
+    commentLines.push(...(r.commentLines as string[]));
+  }
+  const patterns: Array<{ regex: string; token: string; sol?: boolean }> = [];
+  if (r.patterns !== undefined) {
+    if (!Array.isArray(r.patterns)) return { error: "patterns must be a list of { regex, token, sol? }" };
+    for (const p of r.patterns) {
+      if (typeof p !== "object" || p === null) return { error: "patterns must be a list of { regex, token, sol? }" };
+      const q = p as Record<string, unknown>;
+      if (typeof q.regex !== "string" || typeof q.token !== "string" || (q.sol !== undefined && typeof q.sol !== "boolean")) return { error: "a pattern needs a regex string and a token name; sol is optional" };
+      try {
+        new RegExp(q.regex);
+      } catch {
+        return { error: `pattern is not a valid regular expression: ${q.regex}` };
+      }
+      patterns.push({ regex: q.regex, token: q.token, ...(q.sol === true ? { sol: true } : {}) });
+    }
+  }
   return {
     language: {
       id: typeof r.id === "string" && r.id.length > 0 ? r.id : fallbackId,
@@ -155,6 +193,8 @@ export function parseKeywordLanguage(raw: unknown, fallbackId: string): { langua
       commentStart: commentStart || null,
       commentEnd: commentEnd || null,
       sets,
+      ...(commentLines.length > 0 ? { commentLines } : {}),
+      ...(patterns.length > 0 ? { patterns } : {}),
     },
   };
 }

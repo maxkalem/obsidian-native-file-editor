@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  UnencodableError,
+  confirmEncoding,
   decodeText,
   describeEncoding,
   describeLineEnding,
@@ -8,6 +10,7 @@ import {
   encodeText,
   guessSingleByteEncoding,
   normalizeLineEndings,
+  utf8CopyInfo,
 } from "../src/model/text/encoding";
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
@@ -134,6 +137,68 @@ describe("encodeText round trips", () => {
     const d = decodeText(new Uint8Array([0xcf, 0xf0, 0xe8]));
     expect(() => encodeText(d.text, d.info)).toThrow(/guess/);
   });
+
+  it("once the guess is confirmed, windows-1251 round-trips byte for byte, every defined byte included", () => {
+    // Every byte but 0x98 (undefined in windows-1251) in one file, plus CRLF.
+    const all: number[] = [];
+    for (let b = 1; b < 256; b++) if (b !== 0x98 && b !== 0x0a && b !== 0x0d) all.push(b);
+    // Enough Cyrillic letters after them for the guess to land on 1251 (the 0xC0-0xFF share must reach 60 %).
+    const bytes = new Uint8Array([...all, 0x0d, 0x0a, 0xcf, 0xf0, 0xe8, 0xe2, 0xb3, 0xf2, ...new Array<number>(40).fill(0xe0)]);
+    const d = decodeText(bytes);
+    expect(d.info).toMatchObject({ encoding: "windows-1251", lossy: true, eol: "\r\n" });
+    const confirmed = confirmEncoding(d.info);
+    expect(confirmed).toEqual({ encoding: "windows-1251", bom: false, eol: "\r\n", lossy: false });
+    expect(encodeText(d.text, confirmed)).toEqual(bytes);
+    // Edited text goes out in the same code page and line ending.
+    expect(encodeText("Привіт\nсвіт", confirmed)).toEqual(new Uint8Array([0xcf, 0xf0, 0xe8, 0xe2, 0xb3, 0xf2, 0x0d, 0x0a, 0xf1, 0xe2, 0xb3, 0xf2]));
+  });
+
+  it("windows-1252 round-trips too", () => {
+    const bytes = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x20, 0x80, 0x0a, 0x93, 0x71, 0x94]);
+    const d = decodeText(bytes);
+    expect(d.info.encoding).toBe("windows-1252");
+    expect(d.text).toBe("café €\n“q”");
+    expect(encodeText(d.text, confirmEncoding(d.info))).toEqual(bytes);
+  });
+
+  it("a character the code page lacks stops the write and names the line, never becomes a question mark", () => {
+    const info = confirmEncoding(decodeText(new Uint8Array([0xcf])).info);
+    let caught: unknown;
+    try {
+      encodeText("ok\nстоп 😀 тут\nend", info);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UnencodableError);
+    const err = caught as UnencodableError;
+    expect(err.char).toBe("😀");
+    expect(err.line).toBe(2);
+    expect(err.column).toBe(6);
+    expect(err.encoding).toBe("windows-1251");
+    expect(err.message).toBe('"😀" on line 2 has no byte in windows-1251; remove it or save a UTF-8 copy.');
+    // Lines are counted once per ending whatever its form.
+    expect(() => encodeText("a\nb\nā", { ...info, eol: "\r\n" })).toThrow(/line 3/);
+    expect(() => encodeText("a\nb\nā", { ...info, eol: "\r" })).toThrow(/line 3/);
+    let col: unknown;
+    try {
+      encodeText("ab\ncdē", { ...info, eol: "\r\n" });
+    } catch (e) {
+      col = e;
+    }
+    expect(col).toMatchObject({ line: 2, column: 3 });
+    // é is in 1252 and not in 1251; the Cyrillic letter the other way round; the euro sign is in both (0x80 and 0x88).
+    expect(() => encodeText("é", { ...info, encoding: "windows-1252" })).not.toThrow();
+    expect(() => encodeText("é", info)).toThrow(UnencodableError);
+    expect(() => encodeText("ї", { ...info, encoding: "windows-1252" })).toThrow(UnencodableError);
+    expect(encodeText("€", info)).toEqual(new Uint8Array([0x88]));
+    expect(encodeText("€", { ...info, encoding: "windows-1252" })).toEqual(new Uint8Array([0x80]));
+  });
+
+  it("the UTF-8 copy keeps the line ending and drops BOM and guess", () => {
+    const d = decodeText(new Uint8Array([0xcf, 0xf0, 0x0d, 0x0a, 0xe8]));
+    expect(utf8CopyInfo(d.info)).toEqual({ encoding: "utf-8", bom: false, eol: "\r\n", lossy: false });
+    expect(new TextDecoder().decode(encodeText(d.text, utf8CopyInfo(d.info)))).toBe("Пр\r\nи");
+  });
 });
 
 describe("describeEncoding", () => {
@@ -142,5 +207,6 @@ describe("describeEncoding", () => {
     expect(describeEncoding({ encoding: "utf-8", bom: true, eol: "\n", lossy: false })).toBe("UTF-8 with BOM");
     expect(describeEncoding({ encoding: "utf-16le", bom: true, eol: "\n", lossy: false })).toBe("UTF-16 LE with BOM");
     expect(describeEncoding({ encoding: "windows-1251", bom: false, eol: "\n", lossy: true })).toBe("windows-1251 (guess)");
+    expect(describeEncoding({ encoding: "windows-1251", bom: false, eol: "\n", lossy: false })).toBe("windows-1251");
   });
 });
