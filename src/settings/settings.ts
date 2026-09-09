@@ -22,6 +22,13 @@ export interface SharedSettings {
   searchHints: boolean;
   /** Text direction: `auto` decides per line from its first strong character (Arabic and Hebrew lines read right to left), `ltr`/`rtl` force the whole document. */
   textDirection: "auto" | "ltr" | "rtl";
+  /**
+   * What Insert ▸ Date / Date and time in the context menu write, in moment.js
+   * syntax as Obsidian's Templates plugin uses it. Empty means: the Templates
+   * plugin's own format when it has one, else `YYYY-MM-DD` and `HH:mm:ss`.
+   */
+  dateFormat: string;
+  timeFormat: string;
   tabSize: number;
   tabInsertsSpaces: boolean;
   /**
@@ -48,6 +55,8 @@ export const DEFAULT_SETTINGS: SharedSettings = {
   showInvisibles: false,
   searchHints: true,
   textDirection: "auto",
+  dateFormat: "",
+  timeFormat: "",
   tabSize: 4,
   tabInsertsSpaces: false,
   paletteFolder: "",
@@ -94,6 +103,8 @@ export function normalizeSettings(raw: unknown): SharedSettings {
   if (typeof raw.showInvisibles === "boolean") out.showInvisibles = raw.showInvisibles;
   if (typeof raw.searchHints === "boolean") out.searchHints = raw.searchHints;
   if (raw.textDirection === "auto" || raw.textDirection === "ltr" || raw.textDirection === "rtl") out.textDirection = raw.textDirection;
+  if (typeof raw.dateFormat === "string") out.dateFormat = raw.dateFormat.trim();
+  if (typeof raw.timeFormat === "string") out.timeFormat = raw.timeFormat.trim();
   if (typeof raw.tabSize === "number" && Number.isInteger(raw.tabSize) && raw.tabSize >= 1 && raw.tabSize <= 16) {
     out.tabSize = raw.tabSize;
   }

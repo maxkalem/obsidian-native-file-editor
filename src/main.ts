@@ -1,4 +1,4 @@
-import { type App, FileSystemAdapter, type Menu, Notice, Platform, Plugin, type TAbstractFile, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
+import { type App, FileSystemAdapter, type Menu, Notice, Platform, Plugin, type TAbstractFile, TFile, TFolder, type WorkspaceLeaf, moment } from "obsidian";
 import { StreamLanguage } from "@codemirror/language";
 import {
   COMMAND_NEW_FILE,
@@ -207,6 +207,14 @@ export default class NativeFileEditorPlugin extends Plugin {
         setTextDirection: (direction) => void this.saveSettings({ ...this.nfeSettings, textDirection: direction }),
         regexHelp: () => new RegexHelpModal(this.app).open(),
         deleteFile: (file) => void this.app.fileManager.promptForDeletion(file),
+        // "Search the web" in the context menu: Obsidian routes window.open of
+        // an http(s) address to the system browser on every platform. The
+        // plugin itself sends nothing; the one line in the log says when.
+        dateTime: () => this.dateTimeNow(),
+        openExternal: (url) => {
+          log.info("view", `opening the browser for a web search (${url.length} chars)`);
+          window.open(url);
+        },
         // Obsidian's own rename dialog (fileManager.promptForFileRename is not in the public typings; guarded).
         rename: (file) => {
           const fm = this.app.fileManager as unknown as { promptForFileRename?: (f: TFile) => Promise<void> };
@@ -531,11 +539,27 @@ export default class NativeFileEditorPlugin extends Plugin {
     return resolvePluginFolder(this.nfeSettings.languageFolder, this.app.vault.configDir, PLUGIN_ID, "languages");
   }
 
+  /**
+   * Insert ▸ Date / Date and time: the user's formats, else the Templates core
+   * plugin's (Obsidian has no global date format; Templates and Daily notes
+   * each keep their own, read here through the undocumented
+   * `internalPlugins`, guarded), else `YYYY-MM-DD` and `HH:mm:ss`.
+   */
+  dateTimeNow(): { date: string; dateTime: string } {
+    const s = this.nfeSettings;
+    const templates = (this.app as unknown as { internalPlugins?: { plugins?: { templates?: { instance?: { options?: { dateFormat?: unknown; timeFormat?: unknown } } } } } }).internalPlugins?.plugins?.templates?.instance?.options;
+    const pick = (own: string, theirs: unknown, fallback: string): string => (own.length > 0 ? own : typeof theirs === "string" && theirs.trim().length > 0 ? theirs.trim() : fallback);
+    const dateFormat = pick(s.dateFormat, templates?.dateFormat, "YYYY-MM-DD");
+    const timeFormat = pick(s.timeFormat, templates?.timeFormat, "HH:mm:ss");
+    const now = moment();
+    return { date: now.format(dateFormat), dateTime: `${now.format(dateFormat)} ${now.format(timeFormat)}` };
+  }
+
   /** The dialog, then the file, then the pane: an empty file in the editor. */
   openNewFileModal(folder: string): void {
     new NewFileModal(this.app, {
       folder,
-      initialExtension: this.nfeDevice.get().lastNewFileExtension,
+      lastExtension: this.nfeDevice.get().lastNewFileExtension,
       exists: (path) => this.app.vault.getAbstractFileByPath(path) !== null,
       onCreate: (choice) => void this.createAndOpen(choice.path, choice.extension),
     }).open();
@@ -544,8 +568,14 @@ export default class NativeFileEditorPlugin extends Plugin {
   async createAndOpen(path: string, extension: string): Promise<void> {
     try {
       const file = await this.app.vault.create(path, "");
-      this.nfeDevice.update({ lastNewFileExtension: extension });
+      if (extension.length > 0) this.nfeDevice.update({ lastNewFileExtension: extension });
       this.nfeLog.info("new-file", path);
+      // A type no view opens is created and left alone: `openFile` would hand
+      // it to the operating system ("Select an app to open this .zzz file").
+      if (extension.length === 0 || !(extension.toLowerCase() in readOwnedExtensions(this.app))) {
+        new Notice(`Created ${path}. No plugin opens ${extension.length > 0 ? `.${extension}` : "a file without an extension"}; it is in the file explorer.`);
+        return;
+      }
       const leaf = this.app.workspace.getLeaf(false);
       await leaf.openFile(file);
       const view = leaf.view;

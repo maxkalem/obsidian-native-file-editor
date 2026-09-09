@@ -43,6 +43,8 @@ function fakeEl(tag = "div", cls = "", text = ""): Any {
     focus: () => undefined,
     disabled: false,
     hidden: false,
+    value: "",
+    placeholder: "",
     children: [] as Any[],
     parent: null as Any,
     get parentElement() {
@@ -89,7 +91,12 @@ function fakeEl(tag = "div", cls = "", text = ""): Any {
       el.textContent = "";
       return el;
     },
-    createEl: (t: string, o?: Any) => adopt(el, fakeEl(t, o?.cls ?? "", o?.text ?? "")),
+    createEl: (t: string, o?: Any) => {
+      const child = adopt(el, fakeEl(t, o?.cls ?? "", o?.text ?? ""));
+      if (typeof o?.placeholder === "string") child.placeholder = o.placeholder;
+      if (typeof o?.type === "string") child.type = o.type;
+      return child;
+    },
     createDiv: (o?: Any) => adopt(el, fakeEl("div", o?.cls ?? "", o?.text ?? "")),
     createSpan: (o?: Any) => adopt(el, fakeEl("span", o?.cls ?? "", o?.text ?? "")),
     appendChild: (child: Any) => adopt(el, child),
@@ -234,28 +241,47 @@ export class FileSystemAdapter {
 }
 
 /** Menu items are recorded so a test can read titles and click them. */
+export interface MockMenuItem {
+  title: string;
+  icon: string;
+  section: string;
+  checked: boolean | null;
+  click: () => void;
+  /** Set when the code asked for `setSubmenu` (Obsidian's undocumented nested menu); the mock hands one out by default. */
+  submenu: Menu | null;
+  label: boolean;
+}
+
+export const __menuOptions = { submenus: true };
+
 export class Menu {
-  items: Array<{ title: string; icon: string; section: string; checked: boolean | null; click: () => void }> = [];
+  items: MockMenuItem[] = [];
+  shownAt: unknown[] = [];
   addItem(cb: (item: Any) => void): Menu {
-    const rec: { title: string; icon: string; section: string; checked: boolean | null; click: () => void } = { title: "", icon: "", section: "", checked: null, click: () => undefined };
+    const rec: MockMenuItem = { title: "", icon: "", section: "", checked: null, click: () => undefined, submenu: null, label: false };
     const item: Any = {
       setTitle: (t: string) => ((rec.title = t), item),
       setIcon: (i: string) => ((rec.icon = i), item),
       setSection: (s: string) => ((rec.section = s), item),
       setChecked: (c: boolean | null) => ((rec.checked = c), item),
       setWarning: () => item,
+      setDisabled: () => item,
+      setIsLabel: (on: boolean) => ((rec.label = on), item),
       onClick: (fn: () => void) => ((rec.click = fn), item),
     };
+    if (__menuOptions.submenus) item.setSubmenu = () => (rec.submenu = new Menu());
     cb(item);
     this.items.push(rec);
     return this;
   }
   /** A separator is recorded as an item titled "---" so a test can see where the groups break. */
   addSeparator(): Menu {
-    this.items.push({ title: "---", icon: "", section: "", checked: null, click: () => undefined });
+    this.items.push({ title: "---", icon: "", section: "", checked: null, click: () => undefined, submenu: null, label: false });
     return this;
   }
-  showAtMouseEvent(): void {}
+  showAtMouseEvent(evt: unknown): void {
+    this.shownAt.push(evt);
+  }
   showAtPosition(): void {}
 }
 
@@ -291,6 +317,9 @@ export class Scope {
 }
 
 /** Icons and tooltips are recorded on the element so a test can read what the header says. */
+/** The real moment, as Obsidian ships it (a dependency of the `obsidian` package). */
+export { default as moment } from "moment";
+
 export function setIcon(el: Any, icon: string): void {
   if (el && typeof el === "object") el.attrs["data-icon"] = icon;
 }

@@ -30,11 +30,23 @@ interface ButtonSpec {
   readonly run: (view: EditorView) => boolean;
   /** A sentence after the shortcut in the tooltip, when the label alone does not say what happens. */
   readonly hint?: string;
+  /**
+   * Where the focus goes afterwards: back to the field (the default, so the
+   * next Enter keeps stepping) or into the text, for the one command whose
+   * point is what is typed next.
+   */
+  readonly focus?: "field" | "editor";
 }
 
 const NEXT: ButtonSpec = { label: "Next", shortcut: "F3", run: findNext };
 const PREVIOUS: ButtonSpec = { label: "Previous", shortcut: "Shift+F3", run: findPrevious };
-const ALL: ButtonSpec = { label: "Select all", shortcut: "Alt+Enter", run: selectMatches, hint: "every match becomes a cursor; what you type then changes all of them" };
+const ALL: ButtonSpec = {
+  label: "Select all",
+  shortcut: "Alt+Enter",
+  run: selectMatches,
+  hint: "every match becomes a cursor and the text takes the focus; what you type then changes all of them (Escape: one cursor)",
+  focus: "editor",
+};
 const REPLACE: ButtonSpec = { label: "Replace", shortcut: "Enter", run: replaceNext };
 const REPLACE_ALL: ButtonSpec = { label: "Replace all", shortcut: `${MOD}+Alt+Enter`, run: replaceAll };
 
@@ -64,7 +76,7 @@ export function createSearchPanel(view: EditorView, deps: SearchPanelDeps): Pane
     b.addEventListener("click", () => {
       spec.run(view);
       view.focus();
-      findInput.focus();
+      if (spec.focus !== "editor") findInput.focus();
     });
     buttons.push({ el: b, spec });
     return b;
@@ -160,7 +172,17 @@ export function createSearchPanel(view: EditorView, deps: SearchPanelDeps): Pane
       }
     });
   };
-  keys(findInput, (evt) => (evt.altKey ? selectMatches(view) : evt.shiftKey ? findPrevious(view) : findNext(view)));
+  // Alt+Enter and Mod+Alt+Enter are also taken by the view's own Scope while
+  // the panel is open (TextView.nfeKeyAction), because Obsidian binds both to
+  // link commands and its keymap runs before this listener.
+  keys(findInput, (evt) => {
+    if (evt.altKey) {
+      const done = selectMatches(view);
+      view.focus();
+      return done;
+    }
+    return evt.shiftKey ? findPrevious(view) : findNext(view);
+  });
   if (replaceInput) keys(replaceInput, (evt) => ((evt.ctrlKey || evt.metaKey) && evt.altKey ? replaceAll(view) : replaceNext(view)));
 
   return {

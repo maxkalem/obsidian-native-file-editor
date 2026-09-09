@@ -6,6 +6,7 @@ import {
   __findAllByClass,
   __findByClass,
   __fire,
+  __menuOptions,
   __modalInstances,
   __notices,
   __openedModals,
@@ -84,6 +85,63 @@ class FakeEditor implements EditorHandle {
   problems: Array<{ line: number; column: number; length: number } | null> = [];
   markProblem(p: { line: number; column: number; length: number } | null): void {
     this.problems.push(p);
+  }
+  /** Everything the context menu and the Scope can ask for, recorded by name. */
+  actions: string[] = [];
+  selected = "";
+  lineDir: "ltr" | "rtl" | null = null;
+  selectAllMatches(): void {
+    this.actions.push("selectAllMatches");
+    this.focused = true;
+  }
+  replaceAllMatches(): void {
+    this.actions.push("replaceAllMatches");
+  }
+  selectNextOccurrence(): void {
+    this.actions.push("nextOccurrence");
+  }
+  selectAllOccurrences(): void {
+    this.actions.push("allOccurrences");
+  }
+  selection(): { text: string; empty: boolean } {
+    return { text: this.selected, empty: this.selected.length === 0 };
+  }
+  async cut(): Promise<void> {
+    this.actions.push("cut");
+  }
+  async copy(): Promise<void> {
+    this.actions.push("copy");
+  }
+  async paste(): Promise<void> {
+    this.actions.push("paste");
+  }
+  selectAll(): void {
+    this.actions.push("selectAll");
+  }
+  changeCase(kind: string): void {
+    this.actions.push(`case:${kind}`);
+  }
+  hasComments = true;
+  toggleLineComment(): boolean {
+    this.actions.push("lineComment");
+    return this.hasComments;
+  }
+  toggleBlockComment(): boolean {
+    this.actions.push("blockComment");
+    return this.hasComments;
+  }
+  startCompletion(): void {
+    this.actions.push("completion");
+  }
+  insertText(text: string): void {
+    this.actions.push(`insert:${text}`);
+  }
+  setLineDirection(d: "ltr" | "rtl" | null): void {
+    this.lineDir = d;
+    this.actions.push(`lineDir:${d}`);
+  }
+  lineDirection(): "ltr" | "rtl" | null {
+    return this.lineDir;
   }
   /** The test types: change the text and tell the view. */
   type(t: string): void {
@@ -329,6 +387,116 @@ describe("TextView", () => {
     const fn = (h.view.scope as unknown as { bindings: Array<{ fn: (evt: unknown) => unknown }> }).bindings[0]!.fn;
     expect(fn({ code: "F2", key: "F2", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, preventDefault: () => undefined })).toBe(false);
     expect(h.renamed.map((f) => f.path)).toEqual(["a.txt"]);
+  });
+
+  it("Alt+Enter and Mod+Alt+Enter belong to the pane while the search panel is open (Obsidian's link hotkeys consume them otherwise); Ctrl+Space and Ctrl+/ in the editor", async () => {
+    const h = harness();
+    h.transport.files.set("a.txt", utf8("x"));
+    await h.view.__load(new TFile("a.txt"));
+    const fn = (h.view.scope as unknown as { bindings: Array<{ fn: (evt: unknown) => unknown }> }).bindings[0]!.fn;
+    const press = (code: string, mods: { ctrl?: boolean; shift?: boolean; alt?: boolean } = {}) =>
+      fn({ code, key: code, ctrlKey: mods.ctrl === true, metaKey: false, altKey: mods.alt === true, shiftKey: mods.shift === true, preventDefault: () => undefined });
+    // Panel closed: the Alt chords are not this pane's.
+    expect(press("Enter", { alt: true })).toBeUndefined();
+    expect(press("Enter", { ctrl: true, alt: true })).toBeUndefined();
+    h.view.openSearch();
+    // Preview: Select all works, Replace all has nothing to replace into.
+    expect(press("Enter", { alt: true })).toBe(false);
+    expect(press("NumpadEnter", { alt: true })).toBe(false);
+    expect(press("Enter", { ctrl: true, alt: true })).toBeUndefined();
+    expect(press("Enter", { alt: true, shift: true })).toBeUndefined();
+    expect(h.lastEditor().actions).toEqual(["selectAllMatches", "selectAllMatches"]);
+    expect(h.lastEditor().focused).toBe(true);
+    // Completion and the comment toggle are the editor's only.
+    expect(press("Space", { ctrl: true })).toBeUndefined();
+    expect(press("Slash", { ctrl: true })).toBeUndefined();
+    await h.view.setMode("edit");
+    h.view.openSearch();
+    expect(press("Enter", { ctrl: true, alt: true })).toBe(false);
+    expect(press("Space", { ctrl: true })).toBe(false);
+    expect(press("Slash", { ctrl: true })).toBe(false);
+    expect(press("KeyD", { ctrl: true })).toBe(false);
+    expect(press("KeyL", { ctrl: true, shift: true })).toBe(false);
+    expect(press("Space")).toBeUndefined();
+    expect(press("KeyD", { ctrl: true, shift: true })).toBeUndefined();
+    expect(press("KeyL", { ctrl: true })).toBeUndefined();
+    expect(h.lastEditor().actions).toEqual(["replaceAllMatches", "completion", "lineComment", "nextOccurrence", "allOccurrences"]);
+    // A language without a comment syntax says so instead of doing nothing.
+    h.lastEditor().hasComments = false;
+    press("Slash", { ctrl: true });
+    expect(__notices.at(-1)).toBe("No line comment is known for plain text.");
+  });
+
+  it("the context menu of the text: clipboard and Select all always; Format, Comment, completion and Insert in the editor only; this line's direction with the current one checked; a web search for the selection", async () => {
+    const h = harness();
+    h.transport.files.set("a.txt", utf8("hello world\nsecond"));
+    await h.view.__load(new TFile("a.txt"));
+    const titles = (menu: Menu) => menu.items.map((i) => (i.submenu ? `${i.title} ▸ ${i.submenu.items.map((s) => s.title).join(" | ")}` : i.title));
+    // Preview, nothing selected: no Cut/Copy/Paste, no editing groups, no web search.
+    let menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, h.lastEditor(), { text: "", empty: true });
+    expect(titles(menu)).toEqual(["Select all", "---", "This line ▸ Direction by content | Left to right | Right to left"]);
+    expect(menu.items[2]?.submenu?.items.map((i) => i.checked)).toEqual([true, false, false]);
+    // Preview with a selection: Copy and the web search, still no Paste.
+    menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, h.lastEditor(), { text: "hello world", empty: false });
+    expect(titles(menu)).toEqual(["Copy", "Select all", "---", "This line ▸ Direction by content | Left to right | Right to left"]);
+    // Editor with a selection: everything, and the web search when the plugin can open a browser.
+    await h.view.setMode("edit");
+    const ed = h.lastEditor();
+    ed.lineDir = "rtl";
+    const opened: string[] = [];
+    (h.view as unknown as { nfeDeps: { openExternal?: (u: string) => void } }).nfeDeps = { ...(h.view as unknown as { nfeDeps: object }).nfeDeps, openExternal: (u) => void opened.push(u) };
+    menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, ed, { text: "hello world, a long selection that the menu shortens", empty: false });
+    expect(titles(menu)).toEqual([
+      "Cut",
+      "Copy",
+      "Paste",
+      "Select all",
+      "---",
+      "Format ▸ UPPERCASE | lowercase | Title Case | Sentence case | iNVERT cASE",
+      "Comment ▸ Toggle line comment (Ctrl+/) | Toggle block comment (Alt+A)",
+      "Word completion (Ctrl+Space)",
+      expect.stringMatching(/^Insert ▸ Date {2}\d{4}-\d{2}-\d{2} \| Date and time {2}\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/),
+      "This line ▸ Direction by content | Left to right | Right to left",
+      "---",
+      'Search the web for "hello world, a long selection…"',
+    ]);
+    const direction = menu.items.find((i) => i.title === "This line")!.submenu!;
+    expect(direction.items.map((i) => i.checked)).toEqual([false, false, true]);
+    direction.items[1]?.click();
+    menu.items.find((i) => i.title === "Format")!.submenu!.items[0]?.click();
+    menu.items.find((i) => i.title === "Insert")!.submenu!.items[0]?.click();
+    menu.items.find((i) => i.title === "Comment")!.submenu!.items[1]?.click();
+    menu.items[0]?.click();
+    menu.items.at(-1)?.click();
+    expect(ed.actions).toEqual(["lineDir:ltr", "case:upper", expect.stringMatching(/^insert:\d{4}-\d{2}-\d{2}$/), "blockComment", "cut"]);
+    expect(opened).toEqual(["https://www.google.com/search?q=hello%20world%2C%20a%20long%20selection%20that%20the%20menu%20shortens"]);
+    // Where Obsidian has no setSubmenu, a group is a label followed by its items in the same menu.
+    __menuOptions.submenus = false;
+    try {
+      menu = new Menu();
+      h.view.nfeFillContextMenu(menu as never, ed, { text: "", empty: true });
+      const format = menu.items.findIndex((i) => i.title === "Format");
+      expect(menu.items[format]?.label).toBe(true);
+      expect(menu.items.slice(format + 1, format + 6).map((i) => i.title)).toEqual(["UPPERCASE", "lowercase", "Title Case", "Sentence case", "iNVERT cASE"]);
+    } finally {
+      __menuOptions.submenus = true;
+    }
+    // A right click hands the event to Obsidian's menu at the mouse.
+    const shown: unknown[] = [];
+    const evt = { clientX: 1, clientY: 2 } as unknown as MouseEvent;
+    const original = Menu.prototype.showAtMouseEvent;
+    Menu.prototype.showAtMouseEvent = function (e: unknown) {
+      shown.push(e);
+    };
+    try {
+      h.view.nfeShowContextMenu(evt, { text: "", empty: true });
+    } finally {
+      Menu.prototype.showAtMouseEvent = original;
+    }
+    expect(shown).toEqual([evt]);
   });
 
   it("the pane menu carries Edit/Preview, Search and a checked Word wrap that switches live and is stored", async () => {

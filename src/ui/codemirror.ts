@@ -1,7 +1,8 @@
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { autocompletion, completeAnyWord, startCompletion } from "@codemirror/autocomplete";
+import { defaultKeymap, history, historyKeymap, indentWithTab, selectAll, toggleBlockComment, toggleComment } from "@codemirror/commands";
 import { bracketMatching, codeFolding, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
-import { closeSearchPanel, findNext, findPrevious, highlightSelectionMatches, openSearchPanel, search, searchKeymap, searchPanelOpen } from "@codemirror/search";
-import { Compartment, EditorState, type Extension, type Range, StateEffect, StateField } from "@codemirror/state";
+import { closeSearchPanel, findNext, findPrevious, highlightSelectionMatches, openSearchPanel, replaceAll, search, searchKeymap, searchPanelOpen, selectMatches, selectNextOccurrence } from "@codemirror/search";
+import { Compartment, EditorSelection, EditorState, type Extension, type Range, StateEffect, StateField } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -17,11 +18,13 @@ import {
   highlightWhitespace,
   keymap,
   lineNumbers,
-  rectangularSelection,
 } from "@codemirror/view";
+import { changeCase } from "../core/editText";
 import { OBSIDIAN_SCHEME_CLASS, nfeHighlighter } from "../highlight/highlighter";
 import { forkLineHighlighter } from "../highlight/obsidianFork";
-import type { EditorFactory, EditorHandle, EditorOptions } from "./editor";
+import type { EditorFactory, EditorHandle, EditorOptions, LineDirection, SelectionInfo } from "./editor";
+import { columnKeymap, columnMode, selectAllOccurrences } from "./columnMode";
+import { conflictTints, diffLineTints } from "./lineTints";
 import { createSearchPanel } from "./searchPanel";
 
 /** The gutter marker: a triangle pointing down when open, right when folded. */
@@ -136,6 +139,87 @@ const problemField = StateField.define<DecorationSet>({
 });
 
 /**
+ * A direction forced on single lines from the context menu ("Left to right" /
+ * "Right to left" for this line, as Obsidian's editor offers): a line
+ * decoration with a class styles.css turns into `direction` and
+ * `unicode-bidi: isolate`, which beats the per-line `plaintext` of the `auto`
+ * setting. CodeMirror reads the computed direction back for cursor motion.
+ * The marks move with the text and end with the editor; nothing is written
+ * into the file.
+ */
+const setLineDirectionEffect = StateEffect.define<{ from: number; to: number; direction: LineDirection }>();
+const lineDirectionMarks = {
+  ltr: Decoration.line({ class: "nfe-line-ltr" }),
+  rtl: Decoration.line({ class: "nfe-line-rtl" }),
+};
+const lineDirectionField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, tr) {
+    value = value.map(tr.changes);
+    for (const e of tr.effects) {
+      if (!e.is(setLineDirectionEffect)) continue;
+      const { from, to, direction } = e.value;
+      const first = tr.state.doc.lineAt(from);
+      const last = tr.state.doc.lineAt(to);
+      const add: Range<Decoration>[] = [];
+      if (direction) {
+        for (let n = first.number; n <= last.number; n++) add.push(lineDirectionMarks[direction].range(tr.state.doc.line(n).from));
+      }
+      value = value.update({ filter: (pos) => pos < first.from || pos > last.from, add });
+    }
+    return value;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+/**
+ * Completion on request only (Ctrl+Space and the context menu): the words of
+ * this document through `completeAnyWord`, registered as language data for
+ * every language so the sources a grammar brings are offered as well. Nothing
+ * pops up while typing; a code file is not a form.
+ */
+function completion(): Extension {
+  return [autocompletion({ activateOnTyping: false }), EditorState.languageData.of(() => [{ autocomplete: completeAnyWord }])];
+}
+
+function selectionInfo(state: EditorState): SelectionInfo {
+  const parts = state.selection.ranges.filter((r) => !r.empty).map((r) => state.sliceDoc(r.from, r.to));
+  return { text: parts.join(state.lineBreak), empty: parts.length === 0 };
+}
+
+/**
+ * A right click outside the selection puts the cursor there first, as every
+ * editor does, then the view builds its menu from what is selected.
+ */
+function contextMenu(options: EditorOptions): Extension {
+  const open = options.onContextMenu;
+  if (!open) return [];
+  return EditorView.domEventHandlers({
+    contextmenu(evt, view) {
+      const pos = view.posAtCoords({ x: evt.clientX, y: evt.clientY });
+      if (pos !== null && !view.state.selection.ranges.some((r) => r.from <= pos && pos <= r.to)) view.dispatch({ selection: { anchor: pos } });
+      open(evt, selectionInfo(view.state));
+      return true;
+    },
+  });
+}
+
+/**
+ * `@codemirror/commands` resolves its own nested `@codemirror/state` typings
+ * (npm puts 6.7 under it beside the 6.5 Obsidian pins), so a StateCommand does
+ * not accept the view by type. At runtime both are Obsidian's one module.
+ */
+function runStateCommand(command: unknown, view: EditorView): boolean {
+  return (command as (target: EditorView) => boolean)(view);
+}
+
+/** A clipboard when the platform has one; the menu items do nothing quietly otherwise. */
+function clipboard(): { writeText(text: string): Promise<void>; readText(): Promise<string> } | null {
+  const c = (globalThis as { navigator?: { clipboard?: { writeText?: unknown; readText?: unknown } } }).navigator?.clipboard;
+  return c && typeof c.writeText === "function" && typeof c.readText === "function" ? (c as { writeText(text: string): Promise<void>; readText(): Promise<string> }) : null;
+}
+
+/**
  * The plugin's own extension set on the CodeMirror core Obsidian provides.
  * Obsidian's Markdown-specific extensions are not attached, and no theme object
  * is used anywhere: the editor root carries Obsidian's own `cm-s-obsidian`
@@ -152,10 +236,14 @@ export function buildExtensions(options: EditorOptions, wrap: Compartment = new 
     EditorState.allowMultipleSelections.of(true),
     indentOnInput(),
     bracketMatching(),
-    rectangularSelection(),
+    columnMode(),
     highlightSelectionMatches(),
     search({ top: true, createPanel: (view) => createSearchPanel(view, { hints: options.searchHints, readOnly: options.readOnly, help: options.regexHelp }) }),
     problemField,
+    lineDirectionField,
+    conflictTints,
+    ...(options.languageName === "Diff" ? [diffLineTints()] : []),
+    contextMenu(options),
     syntaxHighlighting(nfeHighlighter),
     codeFolding({ placeholderDOM: foldPlaceholder }),
     // Obsidian's fork colours stream-mode tokens with its own decorator, which
@@ -165,7 +253,7 @@ export function buildExtensions(options: EditorOptions, wrap: Compartment = new 
     EditorView.editorAttributes.of({ class: OBSIDIAN_SCHEME_CLASS }),
     EditorState.tabSize.of(options.tabSize),
     indentUnit.of(options.tabInsertsSpaces ? " ".repeat(options.tabSize) : "\t"),
-    keymap.of([...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
+    keymap.of([...columnKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) options.onChange();
       // The panel is state, not DOM: the head's search button follows it here.
@@ -182,7 +270,7 @@ export function buildExtensions(options: EditorOptions, wrap: Compartment = new 
   ];
   if (options.language !== null) ext.push(options.language);
   // The active-line highlight follows the caret; a read-only view has none.
-  if (!options.readOnly) ext.push(highlightActiveLine());
+  if (!options.readOnly) ext.push(highlightActiveLine(), completion());
   if (options.lineNumbers) ext.push(lineNumbers(), foldGutter({ markerDOM: foldMarker }));
   if (options.lineNumbers && !options.readOnly) ext.push(highlightActiveLineGutter());
   if (options.readOnly) ext.push(EditorState.readOnly.of(true), EditorView.editable.of(false));
@@ -213,6 +301,85 @@ export const codeMirrorFactory: EditorFactory = {
       isSearchOpen: () => searchPanelOpen(view.state),
       findNext: () => void findNext(view),
       findPrevious: () => void findPrevious(view),
+      selectAllMatches: () => {
+        selectMatches(view);
+        view.focus();
+      },
+      replaceAllMatches: () => {
+        if (!options.readOnly) replaceAll(view);
+      },
+      selectNextOccurrence: () => {
+        selectNextOccurrence(view);
+        view.focus();
+      },
+      selectAllOccurrences: () => {
+        selectAllOccurrences(view);
+        view.focus();
+      },
+      selection: () => selectionInfo(view.state),
+      copy: async () => {
+        const { text, empty } = selectionInfo(view.state);
+        if (!empty) await clipboard()?.writeText(text);
+      },
+      cut: async () => {
+        if (options.readOnly) return;
+        const { text, empty } = selectionInfo(view.state);
+        if (empty) return;
+        await clipboard()?.writeText(text);
+        view.dispatch(view.state.replaceSelection(""));
+        view.focus();
+      },
+      paste: async () => {
+        if (options.readOnly) return;
+        const text = await clipboard()?.readText();
+        if (text) view.dispatch(view.state.replaceSelection(text));
+        view.focus();
+      },
+      selectAll: () => {
+        runStateCommand(selectAll, view);
+        view.focus();
+      },
+      changeCase: (kind) => {
+        if (options.readOnly) return;
+        view.dispatch(
+          view.state.changeByRange((range) => {
+            let { from, to } = range;
+            if (range.empty) {
+              const word = view.state.wordAt(range.head);
+              if (!word) return { range };
+              from = word.from;
+              to = word.to;
+            }
+            const text = changeCase(view.state.sliceDoc(from, to), kind);
+            return { changes: { from, to, insert: text }, range: EditorSelection.range(from, from + text.length) };
+          })
+        );
+        view.focus();
+      },
+      toggleLineComment: () => !options.readOnly && runStateCommand(toggleComment, view),
+      toggleBlockComment: () => !options.readOnly && runStateCommand(toggleBlockComment, view),
+      startCompletion: () => {
+        if (options.readOnly) return;
+        view.focus();
+        startCompletion(view);
+      },
+      insertText: (text) => {
+        if (options.readOnly) return;
+        view.dispatch(view.state.replaceSelection(text));
+        view.focus();
+      },
+      setLineDirection: (direction) => {
+        const { from, to } = view.state.selection.main;
+        view.dispatch({ effects: setLineDirectionEffect.of({ from, to, direction }) });
+      },
+      lineDirection: () => {
+        const line = view.state.doc.lineAt(view.state.selection.main.head);
+        let found: LineDirection = null;
+        view.state.field(lineDirectionField).between(line.from, line.from, (_from, _to, value) => {
+          found = value.spec.class === "nfe-line-rtl" ? "rtl" : value.spec.class === "nfe-line-ltr" ? "ltr" : null;
+        });
+        return found;
+      },
       setWordWrap: (on: boolean) => {
         view.dispatch({ effects: wrap.reconfigure(on ? EditorView.lineWrapping : []) });
       },

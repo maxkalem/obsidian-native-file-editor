@@ -19,11 +19,35 @@ interface MhtmlState {
   inComment: boolean;
   /** Inside a tag, after the name: attributes until `>`. */
   inTag: boolean;
+  /** The archive's declared boundary, once the header naming it has been read; null until then. */
+  boundary: string | null;
+}
+
+/**
+ * Whether a line is a part boundary, and whether it is the closing one. With
+ * the declared boundary known the test is exact: Chrome's boundaries end in
+ * `----` themselves (`------MultipartBoundary--…----`), so "ends with --" would
+ * take every opening boundary for the closing one and leave every part's
+ * headers, and the HTML behind them, uncoloured (seen 2026-09-09). Without it
+ * (no header yet) the old heuristic stands.
+ */
+function boundaryKind(line: string, boundary: string | null): "open" | "close" | null {
+  const t = line.trim();
+  if (!t.startsWith("--")) return null;
+  if (boundary !== null) return t === `--${boundary}` ? "open" : t === `--${boundary}--` ? "close" : null;
+  return t.endsWith("--") ? "close" : "open";
+}
+
+/** The declared boundary, from whichever header line carries it. */
+function noteBoundary(line: string, state: MhtmlState): void {
+  if (state.boundary !== null) return;
+  const m = /boundary="?([^"\s;]+)"?/i.exec(line);
+  if (m) state.boundary = m[1] ?? null;
 }
 
 export const mhtmlMode: StreamParser<MhtmlState> = {
   name: "mhtml",
-  startState: () => ({ inHeaders: true, htmlPart: false, inComment: false, inTag: false }),
+  startState: () => ({ inHeaders: true, htmlPart: false, inComment: false, inTag: false, boundary: null }),
   copyState: (s) => ({ ...s }),
   // The empty line that ends a header block never reaches `token`.
   blankLine(state) {
@@ -31,9 +55,11 @@ export const mhtmlMode: StreamParser<MhtmlState> = {
   },
   token(stream, state) {
     if (stream.sol()) {
-      if (stream.match(/^--[^\s]+/)) {
-        // A boundary line opens the next part's headers; a closing boundary ends the archive.
-        state.inHeaders = !stream.string.endsWith("--");
+      const kind = boundaryKind(stream.string, state.boundary);
+      if (kind !== null) {
+        // A boundary line opens the next part's headers; the closing boundary ends the archive.
+        stream.skipToEnd();
+        state.inHeaders = kind === "open";
         state.htmlPart = false;
         state.inComment = false;
         state.inTag = false;
@@ -47,10 +73,12 @@ export const mhtmlMode: StreamParser<MhtmlState> = {
         }
         if (stream.match(/^[A-Za-z][\w-]*(?=:)/)) {
           if (/^content-type$/i.test(stream.current()) && /text\/html/i.test(stream.string)) state.htmlPart = true;
+          noteBoundary(stream.string, state);
           return "propertyName";
         }
         if (stream.match(/^\s+\S/)) {
-          // A folded header continuation.
+          // A folded header continuation (Chrome puts `boundary="…"` on one).
+          noteBoundary(stream.string, state);
           stream.skipToEnd();
           return "string";
         }

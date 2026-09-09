@@ -106,61 +106,109 @@ function rewriteCssUrls(css: string, base: string | null, lookup: (url: string) 
   });
 }
 
-/** `@import "x.css"` and `@import url(x.css)` both go through `rewriteCssUrls`; the bare string form is turned into url() first. */
-function rewriteCssImports(css: string, base: string | null, lookup: (url: string) => string | null): string {
-  const withUrl = css.replace(/@import\s+(["'])([^"']+)\1/gi, (_m, q: string, ref: string) => `@import url(${q}${ref}${q})`);
-  return rewriteCssUrls(withUrl, base, lookup);
+/**
+ * `@import "x.css"` and `@import url(x.css)` of a stylesheet the archive
+ * holds become that stylesheet's text in place (its own references resolved
+ * first); an import the archive lacks stays as it is and is refused by the
+ * policy. Text, not a `data:` URI, because a stylesheet LOAD of any kind is
+ * refused inside Obsidian (see `pageDocument`).
+ */
+function rewriteCssImports(css: string, base: string | null, lookup: (url: string) => string | null, cssText: (url: string) => string | null): string {
+  const inlined = css.replace(/@import\s+(?:url\(\s*(["']?)([^"')]+)\1\s*\)|(["'])([^"']+)\3)\s*([^;]*);/gi, (whole, _q1: string, u1: string | undefined, _q2: string, u2: string | undefined, media: string) => {
+    const ref = (u1 ?? u2 ?? "").trim();
+    const text = cssText(absolute(ref, base));
+    if (text === null) return whole;
+    const m = media.trim();
+    return m.length > 0 ? `@media ${m} {\n${text}\n}` : text;
+  });
+  return rewriteCssUrls(inlined, base, lookup);
 }
 
 /**
- * The page with every archived resource inlined: `src`, `href`, `poster`,
- * `data` and `srcset` attributes, `style` attributes, `<style>` blocks and
- * the stylesheets themselves (their own `url()` and `@import` references
- * resolved against their own location) all point at `data:` URIs built from
- * the parts. A reference the archive does not hold is left as it is and
- * stays blank in the frame (no network). Null when there is no HTML part.
+ * The page with every archived resource inlined so that the frame needs
+ * nothing from anywhere: images, fonts and media as `data:` URIs in `src`,
+ * `href`, `poster`, `data`, `srcset`, `style` attributes and `url()` inside
+ * styles; stylesheets as `<style>` blocks (a `<link rel=stylesheet>` to a
+ * part becomes one, an `@import` of a part becomes its text); a frame whose
+ * source is an archived `text/html` part gets that part as a `data:` document
+ * of its own, carrying the same policy (`pageDocument`), so nothing nested
+ * reaches the network either. A reference the archive does not hold is left
+ * as it is and stays blank in the frame. Null when there is no HTML part.
  */
 export function renderMhtml(text: string): string | null {
   const parts = parseMhtml(text);
   const htmlPart = parts.find((p) => p.type === "text/html");
   if (!htmlPart) return null;
+  return renderPart(htmlPart, parts.filter((p) => p !== htmlPart), new Set());
+}
+
+function renderPart(htmlPart: MhtmlPart, resources: readonly MhtmlPart[], framing: Set<MhtmlPart>): string {
   const html = new TextDecoder("utf-8").decode(htmlPart.bytes);
-  const resources = parts.filter((p) => p !== htmlPart);
   if (resources.length === 0) return html;
 
-  // Resolution is memoised per part: a stylesheet's data: URI depends on the
-  // parts it references, so a stylesheet is rewritten before it is encoded.
   const byKey = new Map<string, MhtmlPart>();
   for (const p of resources) {
     if (p.location) byKey.set(p.location, p);
     if (p.id) byKey.set(`cid:${p.id}`, p);
   }
+  const partFor = (url: string): MhtmlPart | null => byKey.get(url) ?? byKey.get(url.replace(/#.*$/, "")) ?? null;
+
+  // A stylesheet's text with its own imports and url() resolved; memoised, cycles cut.
+  const cssCache = new Map<MhtmlPart, string>();
+  const cssInProgress = new Set<MhtmlPart>();
+  const cssOf = (p: MhtmlPart): string => {
+    const done = cssCache.get(p);
+    if (done !== undefined) return done;
+    if (cssInProgress.has(p)) return "";
+    cssInProgress.add(p);
+    const out = rewriteCssImports(new TextDecoder("utf-8").decode(p.bytes), p.location, lookup, cssText);
+    cssInProgress.delete(p);
+    cssCache.set(p, out);
+    return out;
+  };
+  const cssText = (url: string): string | null => {
+    const p = partFor(url);
+    return p && p.type === "text/css" ? cssOf(p) : null;
+  };
+  // Anything else as a data: URI; a nested page as a data: document with the policy inside.
   const encoded = new Map<MhtmlPart, string>();
-  const inProgress = new Set<MhtmlPart>();
-  const dataUri = (p: MhtmlPart): string => {
+  const lookup = (url: string): string | null => {
+    const p = partFor(url);
+    if (!p) return null;
     const done = encoded.get(p);
     if (done) return done;
-    let bytes = p.bytes;
-    if (p.type === "text/css" && !inProgress.has(p)) {
-      inProgress.add(p);
-      const css = new TextDecoder("utf-8").decode(p.bytes);
-      bytes = utf8Bytes(rewriteCssImports(css, p.location, lookup));
-      inProgress.delete(p);
+    let uri: string;
+    if (p.type === "text/html") {
+      if (framing.has(p)) return null;
+      const nested = new Set(framing);
+      nested.add(htmlPart);
+      uri = `data:text/html;base64,${toBase64(utf8Bytes(pageDocument(renderPart(p, resources.filter((r) => r !== p), nested))))}`;
+    } else if (p.type === "text/css") {
+      uri = `data:text/css;base64,${toBase64(utf8Bytes(cssOf(p)))}`;
+    } else {
+      uri = `data:${p.type};base64,${toBase64(p.bytes)}`;
     }
-    const uri = `data:${p.type};base64,${toBase64(bytes)}`;
     encoded.set(p, uri);
     return uri;
-  };
-  const lookup = (url: string): string | null => {
-    const p = byKey.get(url) ?? byKey.get(url.replace(/#.*$/, ""));
-    return p ? dataUri(p) : null;
   };
   const base = htmlPart.location;
 
   // An attribute value is everything up to its own closing quote; the other quote may appear inside (url('…') in a style).
   const attr = (name: string) => new RegExp(`(\\s(?:${name})\\s*=\\s*)(?:"([^"]*)"|'([^']*)')`, "gi");
   const quoted = (dq: string | undefined, value: string) => (dq !== undefined ? `"${value}"` : `'${value}'`);
-  let out = html.replace(attr("src|href|poster|data"), (whole, lead: string, dq: string | undefined, sq: string | undefined) => {
+  // Stylesheet links first: a <link rel=stylesheet> to an archived stylesheet becomes a <style> block.
+  let out = html.replace(/<link\b[^>]*>/gi, (tag) => {
+    if (!/\brel\s*=\s*["']?[^"'>]*stylesheet/i.test(tag)) return tag;
+    const href = /\shref\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag);
+    const ref = (href?.[1] ?? href?.[2] ?? "").trim();
+    if (!ref) return tag;
+    const css = cssText(absolute(ref, base));
+    if (css === null) return tag;
+    const media = /\smedia\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag);
+    const m = (media?.[1] ?? media?.[2] ?? "").trim();
+    return m.length > 0 ? `<style media="${m}">${css}</style>` : `<style>${css}</style>`;
+  });
+  out = out.replace(attr("src|href|poster|data"), (whole, lead: string, dq: string | undefined, sq: string | undefined) => {
     const ref = dq ?? sq ?? "";
     const data = lookup(absolute(ref.trim(), base));
     return data ? `${lead}${quoted(dq, data)}` : whole;
@@ -182,27 +230,34 @@ export function renderMhtml(text: string): string | null {
     return changed ? `${lead}${quoted(dq, rewritten)}` : whole;
   });
   out = out.replace(attr("style"), (_whole, lead: string, dq: string | undefined, sq: string | undefined) => `${lead}${quoted(dq, rewriteCssUrls(dq ?? sq ?? "", base, lookup))}`);
-  out = out.replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (_whole, open: string, css: string, close: string) => `${open}${rewriteCssImports(css, base, lookup)}${close}`);
+  out = out.replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (_whole, open: string, css: string, close: string) => `${open}${rewriteCssImports(css, base, lookup, cssText)}${close}`);
   return out;
 }
 
 /**
  * The document handed to the sandboxed iframe: the page with a policy that
  * lets nothing load from anywhere (spec §2 rule 1: no network, ever): inline
- * scripts and styles, `data:` scripts and stylesheets (what `renderMhtml`
- * makes of an archive's parts), `data:`/`blob:` images and media, `data:`
- * fonts. A `<script src>` or `fetch` to any URL is refused by the browser; `eval` is
- * allowed because the frame's origin is opaque and there is nothing to reach.
- * The frame itself (RunPanel.showPage) grants scripts and nothing else.
+ * scripts and styles, `data:` scripts, `data:`/`blob:` images and media,
+ * `data:` fonts, `data:` frames (an archive's nested pages, each carrying
+ * this policy again). A `<script src>` or `fetch` to any URL is refused by
+ * the browser; `eval` is allowed because the frame's origin is opaque and
+ * there is nothing to reach. The frame itself (RunPanel.showPage) grants
+ * scripts and nothing else.
+ *
+ * Stylesheets are never loaded, only inlined: an `about:srcdoc` document
+ * inherits its parent's policy, and Obsidian's own `index.html` carries
+ * `style-src 'unsafe-inline' 'self' https://fonts.googleapis.com`, which
+ * refuses a `data:` stylesheet whatever this meta says (two policies
+ * intersect). Found 2026-09-09 in `obsidian.asar`; until then the blank
+ * html5up archive was blamed on the page's own meta, which it never had.
  */
-export const PAGE_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' data:; style-src 'unsafe-inline' data:; img-src data: blob:; media-src data: blob:; font-src data:;";
+export const PAGE_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' data:; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; frame-src data:;";
 
 export function pageDocument(html: string): string {
   const csp = `<meta http-equiv="Content-Security-Policy" content="${PAGE_CSP}">`;
-  // The page's own policy would ALSO apply (two meta policies intersect):
-  // html5up's `style-src 'self' https://fonts.googleapis.com` refused the
-  // data: stylesheets the archive was rewritten to (2026-09-08). Offline in a
-  // sandbox, the plugin's policy is the one that matters; the page's is dropped.
+  // The page's own policy would ALSO apply (two meta policies intersect);
+  // offline in a sandbox, the plugin's policy is the one that matters, so
+  // the page's is dropped.
   html = html.replace(/<meta\s+[^>]*http-equiv\s*=\s*["']?content-security-policy["']?[^>]*>/gi, "");
   if (/<head[\s>]/i.test(html)) return html.replace(/<head([^>]*)>/i, (m) => `${m}${csp}`);
   if (/<html[\s>]/i.test(html)) return html.replace(/<html([^>]*)>/i, (m) => `${m}<head>${csp}</head>`);

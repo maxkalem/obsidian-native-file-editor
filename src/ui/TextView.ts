@@ -1,6 +1,7 @@
-import { FileView, Keymap, type Menu, Notice, Scope, type TFile, type WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
+import { FileView, Keymap, Menu, type MenuItem, Notice, Scope, type TFile, type WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
 import { AUTOSAVE_DELAY_MS, VIEW_TYPE_TEXT } from "../constants";
 import { Autosave, type Timers } from "../core/autosave";
+import { type CaseKind, formatDate, formatDateTime, menuExcerpt, webSearchUrl } from "../core/editText";
 import type { Logger } from "../core/log";
 import { type ViewMode, decideOpenMode } from "../core/openMode";
 import { OBSIDIAN_SCHEME_CLASS } from "../highlight/highlighter";
@@ -24,7 +25,7 @@ import type { RunnerDef } from "../run/runners";
 import type { DeviceLocalStore } from "../settings/DeviceLocalStore";
 import type { SharedSettings } from "../settings/settings";
 import { LargeFileModal, formatBytes } from "./LargeFileModal";
-import type { EditorFactory, EditorHandle } from "./editor";
+import type { EditorFactory, EditorHandle, LineDirection, SelectionInfo } from "./editor";
 
 /**
  * What the view needs to run the file it shows (ADR-004). Absent on mobile and
@@ -70,6 +71,10 @@ export interface TextViewDeps {
   readonly regexHelp?: () => void;
   /** Obsidian's delete dialog for the file (pane menu). */
   readonly deleteFile?: (file: TFile) => void;
+  /** Opens a web address in the system browser ("Search the web" in the context menu). Absent, the item is not offered. */
+  readonly openExternal?: (url: string) => void;
+  /** The date and the date-and-time as Insert writes them now, in the user's formats. Absent, the fixed ISO-like forms. */
+  readonly dateTime?: () => { date: string; dateTime: string };
   /**
    * The read-only modal's "Create UTF-8 copy": whether a vault path is taken,
    * and the write that makes Obsidian index the new file at once. The view
@@ -87,6 +92,23 @@ export interface TextViewDeps {
  * of that write rather than an external change.
  */
 const SELF_WRITE_ECHO_MS = 1500;
+
+/**
+ * A group of the context menu as a submenu. `MenuItem.setSubmenu` is what
+ * Obsidian's own editor menu uses for "Format ▸" and "Insert ▸", but it is
+ * not in the public typings, so it is probed; where it is missing the group
+ * becomes a label followed by its items in the same menu.
+ */
+function nfeSubmenu(menu: Menu, title: string, icon: string, fill: (target: Menu) => void): void {
+  let sub: Menu | null = null;
+  menu.addItem((item) => {
+    item.setTitle(title).setIcon(icon);
+    const make = (item as MenuItem & { setSubmenu?: () => Menu }).setSubmenu;
+    if (typeof make === "function") sub = make.call(item);
+    else item.setIsLabel(true);
+  });
+  fill(sub ?? menu);
+}
 
 /**
  * One pane for every text and code file: a preview that renders in under a
@@ -107,6 +129,8 @@ export class TextView extends FileView {
   private nfeMode: ViewMode = "preview";
   private nfeLarge = false;
   private nfeEditor: EditorHandle | null = null;
+  /** Whether the current editor refuses changes: the preview, or a decode by guess. */
+  private nfeEditorReadOnly = true;
   private nfeAutosave: Autosave | null = null;
   private nfeLastWriteAt = 0;
   private nfeLoadedPath: string | null = null;
@@ -423,8 +447,31 @@ export class TextView extends FileView {
   nfeKeyAction(evt: KeyboardEvent): (() => void) | null {
     const mod = Keymap.isModifier(evt, "Mod");
     const shift = evt.shiftKey;
-    if (evt.altKey) return null;
+    if (evt.altKey) {
+      // The search panel's two Alt chords. Obsidian binds Alt+Enter and
+      // Mod+Alt+Enter to link commands, and its hotkey handler consumes the
+      // key even when the command declines (app.js: executeCommand returns
+      // true unless the callback throws), so the panel's own listener never
+      // saw them (2026-09-09). Taken here only while the panel is open.
+      if ((evt.code === "Enter" || evt.code === "NumpadEnter") && !shift && this.searchOpen) {
+        if (mod) return this.nfeEditorReadOnly ? null : () => this.nfeEditor?.replaceAllMatches();
+        return () => this.nfeEditor?.selectAllMatches();
+      }
+      return null;
+    }
     switch (evt.code) {
+      case "Space":
+        // Completion on request, as Notepad++ has it; Obsidian has no default on Ctrl+Space.
+        return mod && !shift && !this.nfeEditorReadOnly ? () => this.nfeEditor?.startCompletion() : null;
+      case "KeyD":
+        // CodeMirror's "select next occurrence"; Obsidian's Mod+D (delete paragraph) would consume it first.
+        return mod && !shift ? () => this.nfeEditor?.selectNextOccurrence() : null;
+      case "KeyL":
+        // Every occurrence. CodeMirror's own Mod+Shift+L refuses once there is more than one range (the state after Ctrl+D); the plugin's does not.
+        return mod && shift ? () => this.nfeEditor?.selectAllOccurrences() : null;
+      case "Slash":
+        // CodeMirror's own Mod+/ never arrives: Obsidian's "Toggle comment" hotkey consumes it first (see the Alt chords above).
+        return mod && !shift && !this.nfeEditorReadOnly ? () => this.nfeToggleLineComment() : null;
       case "KeyF":
         return mod && !shift ? () => this.openSearch() : null;
       case "KeyH":
@@ -603,6 +650,90 @@ export class TextView extends FileView {
   }
 
   /**
+   * The context menu of the text (a right click, a long press on the phone),
+   * in the shape of Obsidian's editor menu: clipboard, then the groups
+   * Notepad++ has (case, comment, completion, insert), the direction of this
+   * line as Obsidian offers it, and a web search for the selection. What
+   * cannot apply is left out rather than greyed: a preview has no Paste.
+   */
+  nfeShowContextMenu(evt: MouseEvent, selection: SelectionInfo): void {
+    const ed = this.nfeEditor;
+    if (!ed) return;
+    const menu = new Menu();
+    this.nfeFillContextMenu(menu, ed, selection);
+    menu.showAtMouseEvent(evt);
+  }
+
+  nfeFillContextMenu(menu: Menu, ed: EditorHandle, selection: SelectionInfo): void {
+    const editable = !this.nfeEditorReadOnly;
+    const item = (title: string, icon: string, click: () => void, checked: boolean | null = null): void => {
+      menu.addItem((i) => {
+        i.setTitle(title).setIcon(icon).onClick(click);
+        if (checked !== null) i.setChecked(checked);
+      });
+    };
+    if (editable && !selection.empty) item("Cut", "scissors", () => void ed.cut());
+    if (!selection.empty) item("Copy", "copy", () => void ed.copy());
+    if (editable) item("Paste", "clipboard-paste", () => void ed.paste());
+    item("Select all", "text-select", () => ed.selectAll());
+    menu.addSeparator();
+    if (editable) {
+      nfeSubmenu(menu, "Format", "case-sensitive", (sub) => {
+        const cases: Array<[CaseKind, string, string]> = [
+          ["upper", "UPPERCASE", "case-upper"],
+          ["lower", "lowercase", "case-lower"],
+          ["title", "Title Case", "case-sensitive"],
+          ["sentence", "Sentence case", "case-sensitive"],
+          ["invert", "iNVERT cASE", "case-sensitive"],
+        ];
+        for (const [kind, title, icon] of cases) sub.addItem((i) => i.setTitle(title).setIcon(icon).onClick(() => ed.changeCase(kind)));
+      });
+      nfeSubmenu(menu, "Comment", "message-square-code", (sub) => {
+        sub.addItem((i) => i.setTitle("Toggle line comment (Ctrl+/)").setIcon("message-square-code").onClick(() => this.nfeToggleLineComment()));
+        sub.addItem((i) => i.setTitle("Toggle block comment (Alt+A)").setIcon("message-square-code").onClick(() => this.nfeToggleBlockComment()));
+      });
+      item("Word completion (Ctrl+Space)", "list", () => ed.startCompletion());
+      nfeSubmenu(menu, "Insert", "calendar-plus", (sub) => {
+        const stamp = () => this.nfeDeps.dateTime?.() ?? { date: formatDate(new Date(this.nfeDeps.now())), dateTime: formatDateTime(new Date(this.nfeDeps.now())) };
+        const now = stamp();
+        sub.addItem((i) => i.setTitle(`Date  ${now.date}`).setIcon("calendar").onClick(() => ed.insertText(stamp().date)));
+        sub.addItem((i) => i.setTitle(`Date and time  ${now.dateTime}`).setIcon("clock").onClick(() => ed.insertText(stamp().dateTime)));
+      });
+    }
+    const current = ed.lineDirection();
+    nfeSubmenu(menu, "This line", "pilcrow", (sub) => {
+      const directions: Array<[LineDirection, string, string]> = [
+        [null, "Direction by content", "languages"],
+        ["ltr", "Left to right", "pilcrow-left"],
+        ["rtl", "Right to left", "pilcrow-right"],
+      ];
+      for (const [value, title, icon] of directions) {
+        sub.addItem((i) =>
+          i
+            .setTitle(title)
+            .setIcon(icon)
+            .setChecked(current === value)
+            .onClick(() => ed.setLineDirection(value))
+        );
+      }
+    });
+    const open = this.nfeDeps.openExternal;
+    if (open && !selection.empty) {
+      menu.addSeparator();
+      item(`Search the web for "${menuExcerpt(selection.text)}"`, "globe", () => open(webSearchUrl(selection.text)));
+    }
+  }
+
+  /** The language's comment syntax on the selection; a language without one says so instead of doing nothing. */
+  nfeToggleLineComment(): void {
+    if (this.nfeEditor && !this.nfeEditor.toggleLineComment()) new Notice(`No line comment is known for ${this.nfeLanguage?.entry.name ?? "plain text"}.`);
+  }
+
+  nfeToggleBlockComment(): void {
+    if (this.nfeEditor && !this.nfeEditor.toggleBlockComment()) new Notice(`No block comment is known for ${this.nfeLanguage?.entry.name ?? "plain text"}.`);
+  }
+
+  /**
    * Switching to edit on a large file goes through the warning modal unless
    * `force` says the user already answered it.
    */
@@ -658,6 +789,7 @@ export class TextView extends FileView {
     if (!this.nfeDoc) return;
     const s = this.nfeDeps.settings();
     const readOnly = mode === "preview" || this.nfeDoc.info.lossy;
+    this.nfeEditorReadOnly = readOnly;
     const host = this.nfeBodyEl.createDiv({ cls: "nfe-editor" });
     host.addClass(OBSIDIAN_SCHEME_CLASS);
     if (readOnly) host.addClass("nfe-readonly");
@@ -686,17 +818,18 @@ export class TextView extends FileView {
         if (!readOnly) this.nfeAutosave?.schedule();
       },
       onSearchToggle: () => this.nfeSyncActions(),
+      onContextMenu: (evt: MouseEvent, selection: SelectionInfo) => this.nfeShowContextMenu(evt, selection),
     };
     const started = this.nfeDeps.now();
     try {
-      this.nfeEditor = this.nfeDeps.editorFactory.create(host, { ...options, language: this.nfeLanguage?.support ?? null });
+      this.nfeEditor = this.nfeDeps.editorFactory.create(host, { ...options, language: this.nfeLanguage?.support ?? null, languageName: this.nfeLanguage?.entry.name ?? null });
     } catch (e) {
       // The language extension is the only part that varies per file; try
       // once more without it before giving up on the view.
       this.nfeDeps.log.error("editor", `building the ${mode} view with ${this.nfeLanguage?.entry.name ?? "no language"} failed; retrying as plain text`, e);
       host.empty();
       this.nfeLanguage = null;
-      this.nfeEditor = this.nfeDeps.editorFactory.create(host, { ...options, language: null });
+      this.nfeEditor = this.nfeDeps.editorFactory.create(host, { ...options, language: null, languageName: null });
       new Notice("Native File Editor: highlighting failed for this file; shown as plain text. Details are in the plugin log.");
     }
     if (!readOnly) this.nfeEditor.focus();

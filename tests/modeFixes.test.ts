@@ -220,6 +220,16 @@ describe("own modes for Notepad++'s hand-written lexers", () => {
     expect(m.get("&amp;")).toContain("cm-atom");
     expect(m.get("<!-- c -->")).toContain("nfe-tok-comment");
     expect(m.get("iVBORw0KGgo=")).toBeNull();
+    // Chrome's boundary ends in ---- itself: it must open a part, not close the archive (2026-09-09: every part plain).
+    const chrome = classesOf(
+      "mhtml",
+      'From: <Saved by Blink>\nMIME-Version: 1.0\nContent-Type: multipart/related;\n\ttype="text/html";\n\tboundary="----MultipartBoundary--abc----"\n\n------MultipartBoundary--abc----\nContent-Type: text/html\nContent-Location: https://x/\n\n<div id=3D"w">t</div>\n------MultipartBoundary--abc------\n'
+    );
+    expect(chrome.get("------MultipartBoundary--abc----")).toContain("cm-meta");
+    expect(chrome.get("Content-Location")).toContain("cm-property");
+    expect(chrome.get("<div")).toContain("cm-tag");
+    expect(chrome.get("=3D")).toContain("cm-string-2");
+    expect(chrome.get("------MultipartBoundary--abc------")).toContain("cm-meta");
   });
 
   it("hex records: count, address, type and checksum coloured by position; a broken line is invalid", () => {

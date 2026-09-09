@@ -84,7 +84,12 @@ describe("RunPanel", () => {
     expect(select.children.map((o: { textContent: string }) => o.textContent)).toEqual(["Sandbox (Web Worker)", "Node"]);
     expect(select.hasClass("nfe-hidden")).toBe(false);
     expect(__findByClass(panel.rootEl, "nfe-run-output")).not.toBeNull();
-    expect(__findAllByClass(panel.rootEl, "nfe-run-tool").map((b) => b.textContent)).toEqual(["Clear", "Copy", "Close"]);
+    expect(__findAllByClass(panel.rootEl, "nfe-run-tool").map((b) => b.textContent)).toEqual(["Clear", "Copy"]);
+    // Close is an icon square (the search panel's x), not a word.
+    const close = __findByClass(panel.rootEl, "nfe-run-close");
+    expect(close.textContent).toBe("");
+    expect(close.hasClass("clickable-icon")).toBe(true);
+    expect(close.getAttribute("aria-label")).toBe("Close the output panel");
     const one = makePanel([RUNNERS[1]!]);
     expect(__findByClass(one.rootEl, "nfe-run-select").hasClass("nfe-hidden")).toBe(true);
     const none = makePanel([]);
@@ -163,7 +168,7 @@ describe("RunPanel", () => {
     started[1]?.resolve(result());
     await run;
     expect(__textOf(__findByClass(panel.rootEl, "nfe-run-output"))).toBe("second\n");
-    __fire(tools[2]!, "click");
+    __fire(__findByClass(panel.rootEl, "nfe-run-close"), "click");
     expect(closed).toBe(1);
     const parent = (panel.rootEl as unknown as { parent: { children: unknown[] } }).parent;
     panel.destroy();

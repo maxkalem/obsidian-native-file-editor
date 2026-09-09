@@ -1,3 +1,4 @@
+import { setIcon } from "obsidian";
 import type { Timers } from "../core/autosave";
 import type { ExecuteHandle } from "./execute";
 import type { RunOutput } from "./runner";
@@ -119,8 +120,11 @@ export class RunPanel {
       const copy = head.createEl("button", { cls: "nfe-run-tool", text: "Copy" });
       copy.addEventListener("click", () => deps.copy?.(this.text));
     }
-    const close = head.createEl("button", { cls: "nfe-run-tool nfe-run-close", text: "Close" });
+    // A square icon, not a word: the same x the search panel closes with (USER, 2026-09-09).
+    const close = head.createEl("button", { cls: "clickable-icon nfe-run-close" });
+    setIcon(close, "x");
     close.setAttribute("aria-label", "Close the output panel");
+    close.setAttribute("data-tooltip-position", "top");
     close.addEventListener("click", () => deps.onClose());
     this.wrapEl = this.rootEl.createDiv({ cls: "nfe-run-output-wrap" });
     this.outputEl = this.wrapEl.createEl("pre", { cls: "nfe-run-output" });

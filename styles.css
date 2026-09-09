@@ -291,6 +291,56 @@
   unicode-bidi: plaintext;
 }
 
+/* A direction forced on one line from the context menu ("This line"). Four
+   classes so it beats the per-line plaintext rule above and the document's
+   dir attribute; isolate, not plaintext, so the direction is the one set. */
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-line-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+}
+
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-line-rtl {
+  direction: rtl;
+  unicode-bidi: isolate;
+  text-align: right;
+}
+
+/* Column mode: the phantom spaces a caret past a short line's end stands
+   behind (Notepad++'s virtual space). Drawn, not in the document; the first
+   keystroke turns them into real spaces. */
+.nfe-text-content .nfe-editor .nfe-virtual-space {
+  white-space: pre;
+  pointer-events: none;
+}
+
+/* The completion list (Ctrl+Space). CodeMirror's base theme paints its
+   tooltips light because no dark facet is set (see the selection note above);
+   these rules are one class deeper than the base theme's and use the theme's
+   own colours, so the list reads in both schemes. */
+.nfe-text-content .nfe-editor .cm-tooltip {
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
+}
+
+.nfe-text-content .nfe-editor .cm-tooltip.cm-tooltip-autocomplete > ul {
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+}
+
+.nfe-text-content .nfe-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.nfe-text-content .nfe-editor .cm-tooltip.cm-tooltip-autocomplete .cm-completionMatchedText {
+  color: var(--text-accent);
+  text-decoration: none;
+}
+
 /* Syntax tokens. Every token span carries two classes: Obsidian's own cm-*
    name (cm-keyword, cm-string, ...) and this plugin's stable nfe-tok-* name.
    Obsidian's stylesheet colours the cm-* classes globally (read from app.css:
@@ -349,6 +399,22 @@
   color: var(--text-muted);
 }
 
+/* A pattern is the button: a click copies it. */
+.nfe-modal.nfe-regex-help .nfe-regex-copy {
+  cursor: pointer;
+}
+
+.nfe-modal.nfe-regex-help .nfe-regex-copy:hover {
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+
+.nfe-modal.nfe-regex-help h4 {
+  margin: var(--size-4-3) 0 var(--size-4-1);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
 .nfe-text-content .nfe-editor .nfe-search-help {
   color: var(--text-muted);
 }
@@ -387,6 +453,64 @@
 .nfe-text-content .nfe-tok-deleted,
 .nfe-text-content .cm-negative {
   color: var(--color-red);
+}
+
+/* Diff and conflict rows, Native Git Bridge's palette (its styles.css, the
+   diff pane's --ngb-diff-* and the conflict pane's --ngb-conf-*): the line
+   takes a translucent tint and the text keeps the normal colour, as a diff
+   reads in that plugin. Four classes so the tint beats the active line. */
+.nfe-text-content .nfe-editor {
+  --nfe-diff-del-bg: rgba(255, 71, 80, 0.25);
+  --nfe-diff-ins-bg: rgba(104, 211, 104, 0.25);
+  --nfe-conf-ours-bg: rgba(8, 185, 78, 0.12);
+  --nfe-conf-theirs-bg: rgba(8, 109, 221, 0.12);
+  --nfe-conf-base-bg: rgba(128, 128, 128, 0.12);
+}
+
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-diff-ins {
+  background-color: var(--nfe-diff-ins-bg);
+}
+
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-diff-del {
+  background-color: var(--nfe-diff-del-bg);
+}
+
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-diff-hunk,
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-diff-header {
+  color: var(--text-faint);
+}
+
+.nfe-text-content .nfe-editor .cm-line.nfe-diff-ins .nfe-tok-inserted,
+.nfe-text-content .nfe-editor .cm-line.nfe-diff-del .nfe-tok-deleted {
+  color: inherit;
+}
+
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-conf-ours,
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-conf-ours-head {
+  background-color: var(--nfe-conf-ours-bg);
+}
+
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-conf-theirs,
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-conf-theirs-head {
+  background-color: var(--nfe-conf-theirs-bg);
+}
+
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-conf-base {
+  background-color: var(--nfe-conf-base-bg);
+}
+
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-conf-ours-head {
+  border-left: 3px solid var(--color-green, #08b94e);
+  color: var(--text-muted);
+}
+
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-conf-theirs-head {
+  border-left: 3px solid var(--color-blue, #086ddd);
+  color: var(--text-muted);
+}
+
+.nfe-text-content .nfe-editor .cm-content .cm-line.nfe-conf-sep {
+  color: var(--text-faint);
 }
 
 .nfe-text-content .nfe-tok-changed {
@@ -488,7 +612,13 @@
   padding: 0 var(--size-4-2);
 }
 
+/* The x that closes the panel: a square the height of the row, no label. */
 .nfe-text-content .nfe-run-close {
+  flex: 0 0 auto;
+  width: var(--size-4-6);
+  height: var(--size-4-6);
+  padding: 0;
+  justify-content: center;
   color: var(--text-muted);
 }
 
@@ -614,4 +744,11 @@
 .nfe-modal .nfe-newfile-none {
   color: var(--text-muted);
   cursor: default;
+}
+
+/* "This plugin does not open .xyz": shown once, the button then reads Create anyway. */
+.nfe-modal .nfe-newfile-warning {
+  margin-top: var(--size-4-2);
+  color: var(--text-warning);
+  font-size: var(--font-ui-small);
 }

@@ -1,5 +1,5 @@
 import { type App, Modal } from "obsidian";
-import { type ExtensionOption, filterExtensions, newFilePath, sanitizeBaseName } from "../core/newFile";
+import { type ExtensionOption, filterExtensions, newFilePath, ownExtension, sanitizeBaseName, typedExtension } from "../core/newFile";
 import { __allEntries } from "../highlight/registry";
 
 export interface NewFileChoice {
@@ -9,12 +9,22 @@ export interface NewFileChoice {
 }
 
 /**
- * "New file" for any type this plugin edits: a name, and an extension found
- * by typing into a filter (the letters in order: `tt` shows `.txt`, `.http`,
+ * "New file" for any type this plugin edits: a name, and a type found by
+ * typing into a filter (the letters in order: `tt` shows `.txt`, `.http`,
  * `.targets`; a language name works too) and picked from the list under it
  * with the arrow keys, Enter or a click. One action, no Cancel button;
  * tapping outside dismisses. The 2026-09-09 replacement for a 330-entry
  * dropdown.
+ *
+ * The rules of the two fields (USER, 2026-09-09): the type field starts
+ * empty and the list appears at the first character typed into it, then
+ * stays until the dialog closes, even if the field is emptied again. An
+ * extension typed in the name (`1.ts`) is the file's extension while the
+ * type field is empty; a type in the field wins otherwise, with the same
+ * suffix stripped from the name so `notes.ts` + `.ts` is `notes.ts`; a type
+ * typed into the field that matches nothing is taken as typed. A type this
+ * plugin cannot open, or no extension at all, is allowed after a warning
+ * (USER, 2026-09-09: Create must never do nothing).
  */
 
 /** How many matches the list shows at once; the rest scroll. */
@@ -22,7 +32,7 @@ const LIST_ROWS = 8;
 export class NewFileModal extends Modal {
   readonly title = "New file";
   private readonly folder: string;
-  private readonly initialExtension: string;
+  private readonly lastExtension: string;
   private readonly exists: (path: string) => boolean;
   private readonly onCreate: (choice: NewFileChoice) => void;
 
@@ -30,14 +40,15 @@ export class NewFileModal extends Modal {
     app: App,
     opts: {
       folder: string;
-      initialExtension: string;
+      /** The extension of the last file created here, shown in the type field's placeholder. */
+      lastExtension: string;
       exists: (path: string) => boolean;
       onCreate: (choice: NewFileChoice) => void;
     }
   ) {
     super(app);
     this.folder = opts.folder;
-    this.initialExtension = opts.initialExtension;
+    this.lastExtension = opts.lastExtension;
     this.exists = opts.exists;
     this.onCreate = opts.onCreate;
   }
@@ -59,16 +70,23 @@ export class NewFileModal extends Modal {
       text: `Creating in ${this.folder === "" || this.folder === "/" ? "the vault root" : this.folder}`,
     });
     const row = this.contentEl.createDiv({ cls: "nfe-newfile-row" });
-    const nameEl = row.createEl("input", { cls: "nfe-newfile-name", type: "text", placeholder: "File name" });
-    const extEl = row.createEl("input", { cls: "nfe-newfile-ext", type: "text", placeholder: "Extension or language" });
+    const nameEl = row.createEl("input", { cls: "nfe-newfile-name", type: "text", placeholder: "File name, e.g. notes or notes.ts" });
+    const extEl = row.createEl("input", {
+      cls: "nfe-newfile-ext",
+      type: "text",
+      placeholder: this.lastExtension ? `Extension or language (last: .${this.lastExtension})` : "Extension or language",
+    });
     extEl.setAttribute("aria-label", "Type letters of the extension or language: tt finds txt, http, targets");
     extEl.setAttribute("spellcheck", "false");
-    const listEl = this.contentEl.createDiv({ cls: "nfe-newfile-list" });
+    const listEl = this.contentEl.createDiv({ cls: "nfe-newfile-list nfe-hidden" });
     listEl.style.setProperty("--nfe-list-rows", String(LIST_ROWS));
+    const warnEl = this.contentEl.createDiv({ cls: "nfe-newfile-warning nfe-hidden" });
     const all = NewFileModal.options();
+    const known = new Set(all.map((o) => o.extension.toLowerCase()));
+    let listShown = false;
     let shown: ExtensionOption[] = [];
     let selected = 0;
-    const chosen = (): string | null => shown[selected]?.extension ?? null;
+    let warnedFor: string | null = null;
     const render = () => {
       listEl.empty();
       shown.forEach((o, i) => {
@@ -85,25 +103,57 @@ export class NewFileModal extends Modal {
       if (shown.length === 0) listEl.createDiv({ cls: "nfe-newfile-item nfe-newfile-none", text: "No file type matches" });
     };
     const filter = () => {
+      listShown = true;
+      listEl.removeClass("nfe-hidden");
       shown = filterExtensions(extEl.value, all);
       selected = 0;
       render();
     };
-    extEl.value = this.initialExtension;
-    filter();
+    const clearWarning = () => {
+      warnedFor = null;
+      warnEl.addClass("nfe-hidden");
+      warnEl.setText("");
+      create.setText("Create");
+    };
+    /**
+     * The extension the file gets: the type field's when it has text (the
+     * selected match, else the text as typed), else the one typed in the
+     * name, else none. Null only when the type field holds nothing usable.
+     */
+    const decide = (): { extension: string; base: string } | null => {
+      if (extEl.value.trim().length > 0) {
+        const extension = (listShown ? shown[selected]?.extension : undefined) ?? typedExtension(extEl.value);
+        if (extension.length === 0) return null;
+        return { extension, base: sanitizeBaseName(nameEl.value, extension) };
+      }
+      const own = ownExtension(nameEl.value) ?? "";
+      return { extension: own, base: sanitizeBaseName(nameEl.value, own) };
+    };
     const actions = this.contentEl.createDiv({ cls: "nfe-modal-actions" });
     const create = actions.createEl("button", { text: "Create", cls: "mod-cta" });
     const submit = () => {
-      const extension = chosen();
-      if (extension === null) return;
-      const base = sanitizeBaseName(nameEl.value, extension);
+      const choice = decide();
+      if (choice === null) return;
+      const { extension, base } = choice;
+      if (!known.has(extension.toLowerCase()) && warnedFor !== extension) {
+        // Once: the second Create goes through.
+        warnedFor = extension;
+        warnEl.setText(
+          extension.length === 0
+            ? "Native File Editor does not open a file without an extension. The file is created all the same; Obsidian decides what opens it."
+            : `Native File Editor does not open .${extension} files. The file is created all the same; Obsidian decides what opens it.`
+        );
+        warnEl.removeClass("nfe-hidden");
+        create.setText("Create anyway");
+        return;
+      }
       const path = newFilePath(this.folder, base, extension, this.exists);
       this.close();
       this.onCreate({ folder: this.folder, path, extension });
     };
     create.addEventListener("click", submit);
     const move = (delta: number) => {
-      if (shown.length === 0) return;
+      if (!listShown || shown.length === 0) return;
       selected = (selected + delta + shown.length) % shown.length;
       render();
       const item = listEl.children[selected];
@@ -121,7 +171,11 @@ export class NewFileModal extends Modal {
         move(-1);
       }
     };
-    extEl.addEventListener("input", filter);
+    extEl.addEventListener("input", () => {
+      clearWarning();
+      filter();
+    });
+    nameEl.addEventListener("input", clearWarning);
     extEl.addEventListener("keydown", onKeys);
     nameEl.addEventListener("keydown", onKeys);
     nameEl.focus();

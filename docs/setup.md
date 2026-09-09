@@ -64,7 +64,11 @@ The plugin writes what it does to `<vault>/.obsidian/plugins/native-file-editor/
 
 ## Creating files
 
-Right-click a folder, "New file (Native File Editor)", type a name and pick an extension from every type the plugin edits; the file opens in the editor. The command "Native File Editor: New file" does the same in the active file's folder.
+Right-click a folder, "New file (Native File Editor)", type a name and a type: letters of the extension or language in the second field filter the list under it (`tt` finds `.txt`, `.http`, `.targets`; `typescript` finds `.ts`), the arrows and a click choose, Enter creates. An extension typed in the name (`notes.ts`) is used as typed while the type field is empty. A type the plugin does not open is allowed after a warning; Obsidian then decides what opens the file. The command "Native File Editor: New file" does the same in the active file's folder.
+
+## Keys and the context menu
+
+Ctrl+F opens the search panel (Ctrl+H the same with Replace, in the editor); its `?` opens a guide to regular expressions with copyable examples and a list of every key the editor answers to: several cursors (Ctrl+Alt+↑/↓, Ctrl+D, Ctrl+Shift+L, Alt+drag, Ctrl+click), moving and copying lines (Alt+↑/↓, Shift+Alt+↑/↓), comments (Ctrl+/, Alt+A), completion (Ctrl+Space), folding. A right click in the text opens a menu with the clipboard, the case of the selection, comments, completion, the date (its format under Settings → Editor → Date format / Time format, moment.js syntax; empty takes the Templates plugin's format), the direction of the current line, and a web search for the selection in the system browser. Several cursors behave as in Notepad++: Alt+drag keeps a caret past a shorter line's end and pads with spaces when you type; with several cursors the arrows stop at each line's ends.
 
 ## Building from source
 

@@ -30,13 +30,14 @@ describe("mhtml", () => {
     // The page's own policy is dropped: two meta policies would intersect and refuse the archive's data: stylesheets.
     expect(pageDocument('<html><head><meta http-equiv="Content-Security-Policy" content="style-src \'self\'"><META HTTP-EQUIV=\'content-security-policy\' CONTENT="img-src none"><title>t</title></head><body/></html>')).toBe(`<html><head><meta http-equiv="Content-Security-Policy" content="${PAGE_CSP}"><title>t</title></head><body/></html>`);
     // Scripts run (inline, and eval inside them), nothing is fetched: no host, no scheme but data:/blob: for bytes the page already holds.
-    expect(PAGE_CSP).toBe("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' data:; style-src 'unsafe-inline' data:; img-src data: blob:; media-src data: blob:; font-src data:;");
+    // No stylesheet source at all: a srcdoc frame inherits Obsidian's own `style-src 'unsafe-inline' 'self' https://fonts.googleapis.com`, so stylesheets are inlined, never loaded. Nested archive pages are data: frames.
+    expect(PAGE_CSP).toBe("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' data:; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; frame-src data:;");
     expect(PAGE_CSP).not.toMatch(/https?:|connect-src|\*/);
     expect(pageDocument("<html lang='en'><body>x</body></html>")).toMatch(/^<html lang='en'><head><meta http-equiv/);
     expect(pageDocument("<p>x</p>")).toMatch(/^<!doctype html><html><head><meta http-equiv=.*<\/head><body><p>x<\/p><\/body><\/html>$/);
   });
 
-  it("renderMhtml inlines the archive's stylesheets and images as data: URIs, resolving relative references against each part's location", () => {
+  it("renderMhtml inlines the archive's stylesheets as <style> text and its images as data: URIs, resolving relative references against each part's location", () => {
     const b64 = (t: string) => Buffer.from(t, "utf8").toString("base64");
     const png = "iVBORw0KGgo=";
     const mht = [
@@ -86,15 +87,46 @@ describe("mhtml", () => {
     expect(html).toContain(`<img src="${pngUri}" srcset="${pngUri} 1x, ${pngUri} 2x">`);
     expect(html).toContain(`style="background-image: url('${pngUri}')"`);
     expect(html).toContain(`<style>body { background: url(${pngUri}) }</style>`);
-    // The stylesheets are inlined with their own references resolved first (theme.css's ../img/bg.png against its own location).
-    const theme = `data:text/css;base64,${b64(`h1 { background: url(${pngUri}); color: red }`)}`;
-    expect(html).toContain(`href="${theme}"`);
-    const main = `data:text/css;base64,${b64(`@import url("${theme}"); p { margin: 0 }`)}`;
-    expect(html).toContain(`href="${main}"`);
+    // The stylesheets become <style> blocks, their own references resolved first (theme.css's ../img/bg.png against its
+    // own location) and an @import of an archived sheet replaced by its text; no <link> to a data: sheet remains.
+    const theme = `h1 { background: url(${pngUri}); color: red }`;
+    expect(html).toContain(`<style>${theme}</style>`);
+    expect(html).toContain(`<style>${theme} p { margin: 0 }</style>`);
+    expect(html).not.toContain("data:text/css");
+    expect(html).not.toContain("<link");
+    void b64;
     // What the archive does not hold stays as it was; the page's own URL is not a resource.
     expect(html).toContain('<img src="https://elsewhere.example/x.png">');
     expect(html).toContain('<a href="https://site.example/page/">home</a>');
     expect(html).not.toContain("cid:");
+    // A nested page (Chrome saves a frame as its own text/html part, referenced by cid:) becomes a data: document with the policy inside; a frame that frames its own ancestor is left alone.
+    const nested = [
+      "Content-Type: multipart/related; boundary=n",
+      "",
+      "--n",
+      "Content-Type: text/html",
+      "Content-Location: https://site.example/",
+      "",
+      '<html><body><iframe src="cid:inner@x"></iframe></body></html>',
+      "--n",
+      "Content-Type: text/html",
+      "Content-ID: <inner@x>",
+      "Content-Location: https://site.example/inner/",
+      "",
+      '<html><head><link rel="stylesheet" href="a.css"></head><body><iframe src="https://site.example/"></iframe></body></html>',
+      "--n",
+      "Content-Type: text/css",
+      "Content-Location: https://site.example/inner/a.css",
+      "",
+      "b { color: blue }",
+      "--n--",
+    ].join("\n");
+    const outer = renderMhtml(nested) ?? "";
+    const src = /<iframe src="data:text\/html;base64,([^"]+)"/.exec(outer)?.[1] ?? "";
+    const inner = Buffer.from(src, "base64").toString("utf8");
+    expect(inner).toContain(`<meta http-equiv="Content-Security-Policy" content="${PAGE_CSP}">`);
+    expect(inner).toContain("<style>b { color: blue }</style>");
+    expect(inner).toContain('<iframe src="https://site.example/">');
     // An archive with the page alone comes back untouched; no HTML part, null.
     expect(renderMhtml("Content-Type: multipart/related; boundary=b\n\n--b\nContent-Type: text/html\n\n<i>x</i>\n--b--")).toBe("<i>x</i>");
     expect(renderMhtml("Content-Type: multipart/related; boundary=b\n\n--b\nContent-Type: text/plain\n\nx\n--b--")).toBeNull();

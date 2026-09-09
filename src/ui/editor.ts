@@ -1,4 +1,5 @@
 import type { Extension } from "@codemirror/state";
+import type { CaseKind } from "../core/editText";
 
 /**
  * What the text view needs from an editor, without naming CodeMirror. The
@@ -11,6 +12,8 @@ export interface EditorOptions {
   readonly text: string;
   /** The language support from the registry, or null for plain text. */
   readonly language: Extension | null;
+  /** The registry's name for it ("Diff" turns on the diff row tints), or null. */
+  readonly languageName: string | null;
   readonly readOnly: boolean;
   readonly lineNumbers: boolean;
   readonly wordWrap: boolean;
@@ -29,7 +32,22 @@ export interface EditorOptions {
   readonly onChange: () => void;
   /** Called when the search panel opens or closes, so the head can follow. */
   readonly onSearchToggle?: (open: boolean) => void;
+  /**
+   * Called on a right click in the text, with what is selected, so the view
+   * can show its context menu. Absent, the browser's default menu shows.
+   */
+  readonly onContextMenu?: (evt: MouseEvent, selection: SelectionInfo) => void;
 }
+
+/** What a right click or a menu needs to know about the selection. */
+export interface SelectionInfo {
+  /** The selected text of every range, joined with line breaks; empty when nothing is selected. */
+  readonly text: string;
+  readonly empty: boolean;
+}
+
+export type { CaseKind };
+export type LineDirection = "ltr" | "rtl" | null;
 
 export interface EditorHandle {
   getText(): string;
@@ -44,6 +62,34 @@ export interface EditorHandle {
   /** Move to the next or previous match of the current query, without opening the panel. */
   findNext(): void;
   findPrevious(): void;
+  /** Every match of the current query becomes a selection and the editor takes the focus, so typing changes all of them. */
+  selectAllMatches(): void;
+  /** Replace every match with the panel's Replace text (the editor only). */
+  replaceAllMatches(): void;
+  /** Add the next occurrence of the selected text (the word at the cursor when nothing is selected) as another selection. */
+  selectNextOccurrence(): void;
+  /** Every occurrence of the main selection's text (the word at the cursor when nothing is selected) becomes a selection. */
+  selectAllOccurrences(): void;
+  /** What the context menu asks about before it is built. */
+  selection(): SelectionInfo;
+  /** Clipboard and selection, as the context menu offers them. Paste and cut do nothing in a read-only view. */
+  cut(): Promise<void>;
+  copy(): Promise<void>;
+  paste(): Promise<void>;
+  selectAll(): void;
+  /** Change the case of the selected text (the word at each cursor when nothing is selected). */
+  changeCase(kind: CaseKind): void;
+  /** Toggle the language's line or block comment on the selection; false when the language has no such comment. */
+  toggleLineComment(): boolean;
+  toggleBlockComment(): boolean;
+  /** Open the completion list at the cursor: words of this document and what the language offers. */
+  startCompletion(): void;
+  /** Insert text at every cursor, replacing what is selected. */
+  insertText(text: string): void;
+  /** Force the direction of the lines the selection touches, or `null` to go back to the content's own. Lives with the editor, not the file. */
+  setLineDirection(direction: LineDirection): void;
+  /** The forced direction of the line the main cursor is on, or `null`. */
+  lineDirection(): LineDirection;
   /** Switch line wrapping without rebuilding the editor. */
   setWordWrap(on: boolean): void;
   /** Switch the whitespace and line-ending markers without rebuilding the editor. */

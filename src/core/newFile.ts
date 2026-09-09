@@ -17,18 +17,40 @@ const FORBIDDEN = /[<>:"/\\|?*#^[\]\x00-\x1f]/g;
 export function sanitizeBaseName(input: string, extension: string): string {
   let name = input.replace(FORBIDDEN, "").trim();
   const suffix = `.${extension}`;
-  if (name.toLowerCase().endsWith(suffix.toLowerCase())) name = name.slice(0, -suffix.length);
+  if (extension.length > 0 && name.toLowerCase().endsWith(suffix.toLowerCase())) name = name.slice(0, -suffix.length);
   name = name.replace(/^[.\s]+|[.\s]+$/g, "");
   return name.length === 0 ? "Untitled" : name;
 }
 
 /**
+ * The extension the user typed as part of the name (`1.ts` → `ts`), or null
+ * when the name has none (`notes`, `.gitignore`, `archive.`). Up to 16 letters,
+ * digits, `_` or `-` after the last dot, as Obsidian accepts them.
+ */
+export function ownExtension(input: string): string | null {
+  const name = input.replace(FORBIDDEN, "").trim();
+  const m = /^.+\.([A-Za-z0-9_-]{1,16})$/.exec(name);
+  return m ? (m[1] ?? null) : null;
+}
+
+/**
+ * The extension as the user typed it into the type field when nothing in the
+ * list matched: a leading dot dropped, anything but letters, digits, `_` and
+ * `-` dropped; empty when nothing usable remains.
+ */
+export function typedExtension(input: string): string {
+  return input.trim().replace(/^\.+/, "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 16);
+}
+
+/**
  * The vault path for a new file in `folder`, adding " 1", " 2", ... while
- * `exists` says the name is taken. `folder` is "" or "/" for the vault root.
+ * `exists` says the name is taken. `folder` is "" or "/" for the vault root;
+ * an empty `extension` makes a file without one.
  */
 export function newFilePath(folder: string, baseName: string, extension: string, exists: (path: string) => boolean): string {
   const prefix = folder === "" || folder === "/" ? "" : `${folder.replace(/\/+$/, "")}/`;
-  const candidate = (n: number) => `${prefix}${baseName}${n === 0 ? "" : ` ${n}`}.${extension}`;
+  const suffix = extension.length > 0 ? `.${extension}` : "";
+  const candidate = (n: number) => `${prefix}${baseName}${n === 0 ? "" : ` ${n}`}${suffix}`;
   for (let n = 0; ; n++) {
     const path = candidate(n);
     if (!exists(path)) return path;

@@ -299,6 +299,16 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
           desc: "What the .* switch in the search panel understands, with the searches people reach for and how to use $1 in Replace. The same guide is behind the ? in the panel.",
           action: () => deps.regexHelp(),
         },
+        {
+          name: "Date format",
+          desc: "What Insert ▸ Date in the text's context menu writes, in the moment.js syntax Obsidian's Templates plugin uses (YYYY, MM, DD, dddd, MMMM …). Empty: the Templates plugin's own format if it has one, else YYYY-MM-DD.",
+          control: { type: "text", key: "shared.dateFormat", placeholder: "YYYY-MM-DD" },
+        },
+        {
+          name: "Time format",
+          desc: "The time part of Insert ▸ Date and time (HH:mm:ss, HH:mm, h:mm A …). Empty: the Templates plugin's own format if it has one, else HH:mm:ss.",
+          control: { type: "text", key: "shared.timeFormat", placeholder: "HH:mm:ss" },
+        },
         { name: "Shortcut hints on search buttons", desc: "\"Next (F3)\", \"Previous (Shift+F3)\" and so on in the search panel. Off shows the plain words; the tooltips keep the shortcuts.", control: { type: "toggle", key: "shared.searchHints" } },
         { name: "Show invisibles", desc: "Spaces as dots, tabs as arrows and a line-ending badge at the end of every line. Also in the pane's header and its menu.", control: { type: "toggle", key: "shared.showInvisibles" } },
         { name: "Tab size", control: { type: "number", key: "shared.tabSize", min: 1, max: 16, step: 1 } },
@@ -491,6 +501,10 @@ export function readSettingValue(key: string, deps: SettingsTabDeps): unknown {
       return s.searchHints;
     case "shared.textDirection":
       return s.textDirection;
+    case "shared.dateFormat":
+      return s.dateFormat;
+    case "shared.timeFormat":
+      return s.timeFormat;
     case "shared.tabSize":
       return s.tabSize;
     case "shared.tabInsertsSpaces":
@@ -555,6 +569,12 @@ export async function writeSettingValue(key: string, value: unknown, deps: Setti
         break;
       case "shared.textDirection":
         if (value === "auto" || value === "ltr" || value === "rtl") s.textDirection = value;
+        break;
+      case "shared.dateFormat":
+        if (typeof value === "string") s.dateFormat = value.trim();
+        break;
+      case "shared.timeFormat":
+        if (typeof value === "string") s.timeFormat = value.trim();
         break;
       case "shared.tabSize":
         if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 16) s.tabSize = value;

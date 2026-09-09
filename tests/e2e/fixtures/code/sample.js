@@ -1,19 +1,25 @@
-// JavaScript: classes, async, destructuring, regex.
-import { readFile } from "node:fs/promises";
+// JavaScript: classes, private fields, async, destructuring, regex, template strings.
+// Runs as it is in the plugin's sandbox (Run): no imports, no DOM, console only.
 
-export class Note {
+class Note {
   #size = 0;
-  constructor(path, tags = []) {
+  constructor(path, text = "") {
     this.path = path;
-    this.tags = tags;
+    this.tags = [...text.matchAll(/#([\w-]+)/g)].map(([, tag]) => tag);
+    this.#size = text.length;
   }
-  static async load(path) {
-    const text = await readFile(path, "utf8");
-    const tags = [...text.matchAll(/#([\w-]+)/g)].map(([, t]) => t);
-    return new Note(path, tags);
+  static async load(path, text) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    return new Note(path, text);
   }
-  get large() { return this.#size > 5 * 1024 * 1024; }
+  get large() {
+    return this.#size > 5 * 1024 * 1024;
+  }
 }
 
-const { path, tags } = await Note.load("a.md");
-console.log(`${path}: ${tags.length} tags`, tags.length === 0 ? null : tags);
+(async () => {
+  const { path, tags, large } = await Note.load("a.md", "Notes on #obsidian and #code-editors, revised 2026-09-09.");
+  console.log(`${path}: ${tags.length} tags`, tags.length === 0 ? null : tags);
+  console.log(`large: ${large}`);
+  console.error("stderr goes red");
+})();
