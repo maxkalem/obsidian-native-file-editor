@@ -107,6 +107,7 @@ describe("settings tab definitions", () => {
       createExamplePalette: async (l) => void actions.push(`palette ${l}`),
       createExampleLanguage: async (l) => void actions.push(`language ${l}`),
       reloadPlugin: async () => void actions.push("reload"),
+      regexHelp: () => void actions.push("regex-help"),
       isDesktop: () => desktop,
       notice: (m: string) => void notices.push(m),
       refresh: () => void actions.push("refresh"),

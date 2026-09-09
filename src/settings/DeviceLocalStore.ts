@@ -33,6 +33,8 @@ export interface DeviceLocalState {
   runners: RunnerDef[];
   /** Vault path -> whether the output panel was open, per file. */
   runPanelOpen: Record<string, boolean>;
+  /** The output panel's height as a share of the pane (0.1 to 0.9), set by dragging its handle; null until the user drags. One value for text output, one for a page. */
+  runPanelHeight: { text: number | null; page: number | null };
 }
 
 export const DEFAULT_DEVICE_STATE: DeviceLocalState = {
@@ -46,6 +48,7 @@ export const DEFAULT_DEVICE_STATE: DeviceLocalState = {
   runOutputCapBytes: DEFAULT_RUN_OUTPUT_CAP_BYTES,
   runners: [],
   runPanelOpen: {},
+  runPanelHeight: { text: null, page: null },
 };
 
 /** The subset of Storage the store uses; a test hands in a Map-backed fake. */
@@ -62,7 +65,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 export function normalizeDeviceState(raw: unknown): DeviceLocalState {
-  const out: DeviceLocalState = { ...DEFAULT_DEVICE_STATE, lastMode: {}, runners: [], runPanelOpen: {} };
+  const out: DeviceLocalState = { ...DEFAULT_DEVICE_STATE, lastMode: {}, runners: [], runPanelOpen: {}, runPanelHeight: { text: null, page: null } };
   if (!isRecord(raw)) return out;
   if (isRecord(raw.lastMode)) {
     for (const [path, mode] of Object.entries(raw.lastMode)) {
@@ -85,6 +88,13 @@ export function normalizeDeviceState(raw: unknown): DeviceLocalState {
   if (runners) out.runners = runners.runners;
   if (isRecord(raw.runPanelOpen)) {
     for (const [path, open] of Object.entries(raw.runPanelOpen)) if (open === true) out.runPanelOpen[path] = true;
+  }
+  out.runPanelHeight = { text: null, page: null };
+  if (isRecord(raw.runPanelHeight)) {
+    for (const kind of ["text", "page"] as const) {
+      const v = raw.runPanelHeight[kind];
+      if (typeof v === "number" && Number.isFinite(v) && v >= 0.1 && v <= 0.9) out.runPanelHeight[kind] = v;
+    }
   }
   return out;
 }
@@ -124,7 +134,7 @@ export class DeviceLocalStore {
 
   /** Back to the defaults for this device, on the user's request only. */
   reset(): void {
-    this.state = { ...DEFAULT_DEVICE_STATE, lastMode: {}, runners: [], runPanelOpen: {} };
+    this.state = { ...DEFAULT_DEVICE_STATE, lastMode: {}, runners: [], runPanelOpen: {}, runPanelHeight: { text: null, page: null } };
     this.write();
   }
 
@@ -135,6 +145,11 @@ export class DeviceLocalStore {
     const panels = { ...this.state.runPanelOpen };
     delete panels[path];
     this.update({ lastMode: next, runPanelOpen: panels });
+  }
+
+  /** The panel height the user dragged to, for text output or for a page. */
+  rememberRunPanelHeight(kind: "text" | "page", fraction: number): void {
+    this.update({ runPanelHeight: { ...this.state.runPanelHeight, [kind]: fraction } });
   }
 
   /** Whether the output panel is open for a file; only open panels are stored, capped like the modes. */

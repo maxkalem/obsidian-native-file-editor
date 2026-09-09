@@ -154,7 +154,7 @@ export function buildExtensions(options: EditorOptions, wrap: Compartment = new 
     bracketMatching(),
     rectangularSelection(),
     highlightSelectionMatches(),
-    search({ top: true, createPanel: (view) => createSearchPanel(view, { hints: options.searchHints, readOnly: options.readOnly }) }),
+    search({ top: true, createPanel: (view) => createSearchPanel(view, { hints: options.searchHints, readOnly: options.readOnly, help: options.regexHelp }) }),
     problemField,
     syntaxHighlighting(nfeHighlighter),
     codeFolding({ placeholderDOM: foldPlaceholder }),

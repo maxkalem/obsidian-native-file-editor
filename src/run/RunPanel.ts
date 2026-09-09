@@ -20,6 +20,31 @@ export interface RunPanelDeps {
   /** Copy to the clipboard; absent when the platform offers none. */
   readonly copy?: (text: string) => void;
   readonly onClose: () => void;
+  /**
+   * The panel's height as a share of the pane it sits in, per kind of
+   * content (text output, a rendered page), read when the panel is built and
+   * written when the user drags the handle. Absent: the defaults below.
+   */
+  readonly height?: {
+    readonly get: (kind: "text" | "page") => number | null;
+    readonly set: (kind: "text" | "page", fraction: number) => void;
+  };
+}
+
+/** The panel's share of the pane until the user drags: a third for text, two thirds for a page. */
+export const DEFAULT_PANEL_HEIGHT: Readonly<Record<"text" | "page", number>> = { text: 0.35, page: 0.65 };
+const MIN_PANEL_FRACTION = 0.1;
+const MAX_PANEL_FRACTION = 0.9;
+
+/**
+ * Where the handle is dragged to, as the panel's share of the pane: the pane's
+ * bottom minus the pointer, over the pane's height, clamped so neither the
+ * editor nor the panel disappears. Pure, for the test.
+ */
+export function panelFractionAt(pointerY: number, paneTop: number, paneHeight: number): number {
+  if (paneHeight <= 0) return DEFAULT_PANEL_HEIGHT.text;
+  const fraction = (paneTop + paneHeight - pointerY) / paneHeight;
+  return Math.min(MAX_PANEL_FRACTION, Math.max(MIN_PANEL_FRACTION, fraction));
 }
 
 /** How often the elapsed-time label refreshes while a run is going. */
@@ -47,11 +72,39 @@ export class RunPanel {
   private lastSpan: HTMLElement | null = null;
   private text = "";
   private frame: HTMLIFrameElement | null = null;
+  /** What the panel shows, for the remembered height. */
+  private kind: "text" | "page" = "text";
+  /** The height in force, as a share of the pane. */
+  private fraction = DEFAULT_PANEL_HEIGHT.text;
 
   /** `parent` only lends its `createDiv`; the view attaches and re-attaches `rootEl` where it wants it. */
   constructor(parent: HTMLElement, deps: RunPanelDeps) {
     this.deps = deps;
     this.rootEl = parent.createDiv({ cls: "nfe-run-panel" });
+    // The handle above the head: drag it to resize; the height is a share of
+    // the pane so it survives a window resize, and is remembered per kind.
+    const handle = this.rootEl.createDiv({ cls: "nfe-run-handle" });
+    handle.setAttribute("aria-label", "Drag to resize the output panel");
+    handle.addEventListener("pointerdown", (evt: PointerEvent) => {
+      evt.preventDefault();
+      (handle as HTMLElement & { setPointerCapture?: (id: number) => void }).setPointerCapture?.(evt.pointerId);
+      handle.addClass("is-dragging");
+      const move = (e: PointerEvent) => {
+        const pane = this.rootEl.parentElement?.getBoundingClientRect();
+        if (!pane) return;
+        this.applyHeight(panelFractionAt(e.clientY, pane.top, pane.height));
+      };
+      const up = () => {
+        handle.removeClass("is-dragging");
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", up);
+        handle.removeEventListener("pointercancel", up);
+        this.deps.height?.set(this.kind, this.fraction);
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", up);
+      handle.addEventListener("pointercancel", up);
+    });
     const head = this.rootEl.createDiv({ cls: "nfe-run-head" });
     this.runButton = head.createEl("button", { cls: "nfe-run-button", text: "Run" });
     this.runButton.addEventListener("click", () => (this.handle ? this.stop() : void this.run()));
@@ -72,6 +125,20 @@ export class RunPanel {
     this.wrapEl = this.rootEl.createDiv({ cls: "nfe-run-output-wrap" });
     this.outputEl = this.wrapEl.createEl("pre", { cls: "nfe-run-output" });
     this.refreshRunners();
+    this.applyHeight(this.deps.height?.get("text") ?? DEFAULT_PANEL_HEIGHT.text);
+  }
+
+  /** The panel's height as a CSS custom property the stylesheet reads; the class rule stays in styles.css. */
+  private applyHeight(fraction: number): void {
+    this.fraction = fraction;
+    this.rootEl.style.setProperty("--nfe-run-height", `${Math.round(fraction * 1000) / 10}%`);
+  }
+
+  /** Text and a page have their own remembered heights; switching kinds switches the height. */
+  private setKind(kind: "text" | "page"): void {
+    if (this.kind === kind) return;
+    this.kind = kind;
+    this.applyHeight(this.deps.height?.get(kind) ?? DEFAULT_PANEL_HEIGHT[kind]);
   }
 
   get isRunning(): boolean {
@@ -134,6 +201,7 @@ export class RunPanel {
     this.frame?.remove();
     this.frame = null;
     this.rootEl.removeClass("nfe-run-page-mode");
+    this.setKind("text");
     this.lastKind = null;
     this.lastSpan = null;
     this.text = "";
@@ -181,6 +249,7 @@ export class RunPanel {
     frame.srcdoc = html;
     this.frame = frame;
     this.rootEl.addClass("nfe-run-page-mode");
+    this.setKind("page");
     this.text = html;
   }
 

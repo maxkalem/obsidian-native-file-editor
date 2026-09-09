@@ -199,6 +199,11 @@ export const PAGE_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-
 
 export function pageDocument(html: string): string {
   const csp = `<meta http-equiv="Content-Security-Policy" content="${PAGE_CSP}">`;
+  // The page's own policy would ALSO apply (two meta policies intersect):
+  // html5up's `style-src 'self' https://fonts.googleapis.com` refused the
+  // data: stylesheets the archive was rewritten to (2026-09-08). Offline in a
+  // sandbox, the plugin's policy is the one that matters; the page's is dropped.
+  html = html.replace(/<meta\s+[^>]*http-equiv\s*=\s*["']?content-security-policy["']?[^>]*>/gi, "");
   if (/<head[\s>]/i.test(html)) return html.replace(/<head([^>]*)>/i, (m) => `${m}${csp}`);
   if (/<html[\s>]/i.test(html)) return html.replace(/<html([^>]*)>/i, (m) => `${m}<head>${csp}</head>`);
   return `<!doctype html><html><head>${csp}</head><body>${html}</body></html>`;

@@ -18,6 +18,8 @@ export interface SearchPanelDeps {
   readonly hints: () => boolean;
   /** A read-only view has no replace row. */
   readonly readOnly: boolean;
+  /** Opens the regular-expression guide; absent, no `?` button. */
+  readonly help?: () => void;
 }
 
 const MOD = Platform.isMacOS ? "Cmd" : "Ctrl";
@@ -26,11 +28,13 @@ interface ButtonSpec {
   readonly label: string;
   readonly shortcut: string;
   readonly run: (view: EditorView) => boolean;
+  /** A sentence after the shortcut in the tooltip, when the label alone does not say what happens. */
+  readonly hint?: string;
 }
 
 const NEXT: ButtonSpec = { label: "Next", shortcut: "F3", run: findNext };
 const PREVIOUS: ButtonSpec = { label: "Previous", shortcut: "Shift+F3", run: findPrevious };
-const ALL: ButtonSpec = { label: "Select all", shortcut: "Alt+Enter", run: selectMatches };
+const ALL: ButtonSpec = { label: "Select all", shortcut: "Alt+Enter", run: selectMatches, hint: "every match becomes a cursor; what you type then changes all of them" };
 const REPLACE: ButtonSpec = { label: "Replace", shortcut: "Enter", run: replaceNext };
 const REPLACE_ALL: ButtonSpec = { label: "Replace all", shortcut: `${MOD}+Alt+Enter`, run: replaceAll };
 
@@ -86,6 +90,15 @@ export function createSearchPanel(view: EditorView, deps: SearchPanelDeps): Pane
   toggle("case-sensitive", "Match case", "caseSensitive");
   toggle("regex", "Regular expression", "regexp");
   toggle("whole-word", "Whole word", "wholeWord");
+  if (deps.help) {
+    const help = el(rows.find, "button", "clickable-icon nfe-search-help");
+    help.type = "button";
+    setIcon(help, "circle-help");
+    help.setAttribute("aria-label", "Regular expressions: syntax and examples");
+    help.setAttribute("data-tooltip-position", "top");
+    const open = deps.help;
+    help.addEventListener("click", () => open());
+  }
 
   const close = el(rows.find, "button", "clickable-icon nfe-search-close");
   close.type = "button";
@@ -129,7 +142,7 @@ export function createSearchPanel(view: EditorView, deps: SearchPanelDeps): Pane
     const hints = deps.hints();
     for (const { el: b, spec } of buttons) {
       b.textContent = hints ? `${spec.label} (${spec.shortcut})` : spec.label;
-      b.setAttribute("aria-label", `${spec.label} (${spec.shortcut})`);
+      b.setAttribute("aria-label", `${spec.label} (${spec.shortcut})${spec.hint ? `: ${spec.hint}` : ""}`);
     }
   }
 

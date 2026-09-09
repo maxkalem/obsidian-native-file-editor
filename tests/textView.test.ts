@@ -143,9 +143,11 @@ const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 function harness(overrides: Partial<SharedSettings> = {}, run?: RunViewDeps) {
   const vault = new Events();
   const leafOpened: TFile[] = [];
-  const leaf = { app: { vault, workspace: {} }, view: null as unknown, openFile: async (f: TFile) => void leafOpened.push(f) };
+  const triggered: unknown[][] = [];
+  const leaf = { app: { vault, workspace: { trigger: (...args: unknown[]) => void triggered.push(args) } }, view: null as unknown, openFile: async (f: TFile) => void leafOpened.push(f) };
   const copies = { existing: new Set<string>(), created: [] as Array<{ path: string; bytes: Uint8Array }> };
   const renamed: TFile[] = [];
+  const deleted: TFile[] = [];
   const transport = new FakeTransport();
   const timers = new FakeTimers();
   const device = new DeviceLocalStore("v", null);
@@ -181,6 +183,7 @@ function harness(overrides: Partial<SharedSettings> = {}, run?: RunViewDeps) {
         settings = { ...settings, textDirection: d };
       },
       rename: (f) => void renamed.push(f as never),
+      deleteFile: (f) => void deleted.push(f as never),
       copy: {
         exists: (path) => copies.existing.has(path) || copies.created.some((c) => c.path === path),
         create: async (path, bytes) => {
@@ -204,6 +207,8 @@ function harness(overrides: Partial<SharedSettings> = {}, run?: RunViewDeps) {
     copies,
     leafOpened,
     renamed,
+    triggered,
+    deleted,
     lastEditor: () => editors[editors.length - 1] as FakeEditor,
     advance: (ms: number) => void (now += ms),
     setSettings: (s: Partial<SharedSettings>) => void (settings = { ...settings, ...s }),
@@ -299,6 +304,9 @@ describe("TextView", () => {
     // Ctrl+F on the Ukrainian layout reports key "а" and code "KeyF".
     expect(press("KeyF", { ctrl: true, key: "а" })).toBe(false);
     expect(h.lastEditor().searchOpen).toBe(true);
+    // Ctrl+H (replace) is the editor's; in the preview it falls through.
+    expect(press("KeyH", { ctrl: true })).toBeUndefined();
+    await h.view.setMode("edit");
     expect(press("KeyH", { ctrl: true })).toBe(false);
     expect(press("KeyG", { ctrl: true })).toBe(false);
     expect(press("KeyG", { ctrl: true, shift: true })).toBe(false);
@@ -329,10 +337,13 @@ describe("TextView", () => {
     await h.view.__load(new TFile("a.txt"));
     const menu = new Menu();
     h.view.onPaneMenu(menu as never, "more-options");
-    // Both views with a check on the active one, a separator, the switches, a separator, the directions.
+    // Both views with a check on the active one (Obsidian's "pane" section), Rename and Delete as Obsidian's own
+    // views add them, the file-menu event for everything else, then a separator, the switches, a separator, the directions.
     expect(menu.items.map((i) => [i.title, i.icon, i.checked])).toEqual([
       ["Reading view", "book-open", true],
       ["Editing view", "pencil", false],
+      ["Rename...", "lucide-edit-3", null],
+      ["Delete file", "lucide-trash-2", null],
       ["---", "", null],
       ["Search", "search", null],
       ["Word wrap", "wrap-text", false],
@@ -342,12 +353,18 @@ describe("TextView", () => {
       ["Left to right", "pilcrow-left", false],
       ["Right to left", "pilcrow-right", false],
     ]);
-    menu.items[4]?.click();
+    expect(menu.items.map((i) => i.section)).toEqual(["pane", "pane", "action", "danger", "", "", "", "", "", "", "", ""]);
+    expect(h.triggered).toEqual([["file-menu", menu, expect.objectContaining({ path: "a.txt" }), "more-options", expect.anything()]]);
+    menu.items[2]?.click();
+    expect(h.renamed.map((f) => f.path)).toEqual(["a.txt"]);
+    menu.items[3]?.click();
+    expect(h.deleted.map((f) => f.path)).toEqual(["a.txt"]);
+    menu.items[6]?.click();
     expect(h.lastEditor().wrap).toBe(true);
     expect(h.wrapSaved).toEqual([true]);
-    menu.items[3]?.click();
+    menu.items[5]?.click();
     expect(h.lastEditor().searchOpen).toBe(true);
-    menu.items[9]?.click();
+    menu.items[11]?.click();
     expect(h.lastEditor().direction).toBe("rtl");
     menu.items[1]?.click();
     await tick();
@@ -361,8 +378,8 @@ describe("TextView", () => {
       ["Reading view", false],
       ["Editing view", true],
     ]);
-    expect(again.items[4]?.checked).toBe(true);
-    expect(again.items[9]?.checked).toBe(true);
+    expect(again.items[6]?.checked).toBe(true);
+    expect(again.items[11]?.checked).toBe(true);
   });
 
   it("Show invisibles: the header button and the menu item switch the editor live, store the setting, and the button shows the state", async () => {
@@ -379,8 +396,8 @@ describe("TextView", () => {
     expect(btn.hasClass("is-active")).toBe(true);
     const menu = new Menu();
     h.view.onPaneMenu(menu as never, "more-options");
-    expect(menu.items[5]?.checked).toBe(true);
-    menu.items[5]?.click();
+    expect(menu.items[7]?.checked).toBe(true);
+    menu.items[7]?.click();
     expect(h.lastEditor().invisibles).toBe(false);
     expect(btn.hasClass("is-active")).toBe(false);
     // The next editor is built with the stored setting.

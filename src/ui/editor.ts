@@ -21,6 +21,8 @@ export interface EditorOptions {
   readonly textDirection: "auto" | "ltr" | "rtl";
   /** Whether the search panel's buttons spell out their shortcuts. */
   readonly searchHints: () => boolean;
+  /** Opens the regular-expression guide; the panel shows a `?` when present. */
+  readonly regexHelp?: () => void;
   readonly tabSize: number;
   readonly tabInsertsSpaces: boolean;
   /** Called after every document change. */

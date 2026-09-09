@@ -320,6 +320,39 @@
   color: var(--text-error);
 }
 
+/* Tag names: Obsidian's --code-tag is red in its default theme, the same red
+   as an error, and the user asked for a tag colour of its own (2026-09-08).
+   The property colour, everywhere a tag appears (HTML, XML, JSX, MDX,
+   Svelte, MHTML); attributes keep the function colour. Palettes override. */
+.nfe-text-content .nfe-tok-tag {
+  color: var(--code-property);
+}
+
+/* Search panel: the ? that opens the regular-expression guide; the guide's table. */
+.nfe-modal.nfe-regex-help .nfe-regex-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-ui-small);
+}
+
+.nfe-modal.nfe-regex-help .nfe-regex-table td {
+  padding: var(--size-2-1) var(--size-4-2);
+  vertical-align: top;
+  border-bottom: var(--border-width) solid var(--background-modifier-border);
+}
+
+.nfe-modal.nfe-regex-help .nfe-regex-table td:first-child {
+  white-space: nowrap;
+}
+
+.nfe-modal.nfe-regex-help .nfe-regex-replace {
+  color: var(--text-muted);
+}
+
+.nfe-text-content .nfe-editor .nfe-search-help {
+  color: var(--text-muted);
+}
+
 .nfe-text-content .nfe-tok-heading,
 .nfe-text-content .cm-header {
   font-weight: var(--bold-weight);
@@ -387,14 +420,33 @@
   color: var(--text-accent);
 }
 
+/* The panel's height is a share of the pane (--nfe-run-height, set by
+   RunPanel from the remembered value or the default; dragged with the
+   handle), so it does not depend on how long the file is: 2026-09-08 a
+   one-line file gave a tall panel and a long one a sliver. */
 .nfe-text-content .nfe-run-panel {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  max-height: 40%;
+  height: var(--nfe-run-height, 35%);
+  max-height: 90%;
   min-height: 0;
   border-top: var(--border-width) solid var(--background-modifier-border);
   background-color: var(--background-secondary);
+}
+
+.nfe-text-content .nfe-run-handle {
+  flex: 0 0 auto;
+  height: var(--size-4-2);
+  margin-top: calc(-1 * var(--size-4-1));
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.nfe-text-content .nfe-run-handle:hover,
+.nfe-text-content .nfe-run-handle.is-dragging {
+  background-color: var(--interactive-accent);
+  opacity: 0.6;
 }
 
 .nfe-text-content .nfe-run-head {
@@ -476,12 +528,7 @@
   display: none;
 }
 
-/* A rendered page takes most of the pane; the frame fills the output area. */
-.nfe-text-content .nfe-run-page-mode {
-  flex: 1 1 65%;
-  max-height: 75%;
-}
-
+/* A rendered page: the frame fills the output area; the height comes from the same variable (default two thirds, set by RunPanel). */
 .nfe-text-content .nfe-run-frame {
   display: block;
   width: 100%;
@@ -534,4 +581,37 @@
 .nfe-modal .nfe-newfile-ext {
   flex: 0 1 16em;
   min-width: 0;
+}
+
+/* The type list under the fields: LIST_ROWS visible, the rest scroll; the
+   selected row in the theme's hover colour. */
+.nfe-modal .nfe-newfile-list {
+  margin-top: var(--size-4-2);
+  max-height: calc(var(--nfe-list-rows, 8) * 2em);
+  overflow-y: auto;
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+.nfe-modal .nfe-newfile-item {
+  padding: 0 var(--size-4-2);
+  line-height: 2em;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nfe-modal .nfe-newfile-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.nfe-modal .nfe-newfile-item.is-selected {
+  background-color: var(--background-modifier-active-hover);
+  color: var(--text-accent);
+}
+
+.nfe-modal .nfe-newfile-none {
+  color: var(--text-muted);
+  cursor: default;
 }

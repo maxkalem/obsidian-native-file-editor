@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { __fakeEl, __findAllByClass, __findByClass, __fire, __resetObsidianMock, __textOf } from "./mocks/obsidian";
 import type { Timers } from "../src/core/autosave";
 import type { ExecuteHandle, ExecuteResult } from "../src/run/execute";
-import { RunPanel } from "../src/run/RunPanel";
+import { DEFAULT_PANEL_HEIGHT, RunPanel, panelFractionAt } from "../src/run/RunPanel";
 import type { RunOutput } from "../src/run/runner";
 import type { RunnerDef } from "../src/run/runners";
 
@@ -195,5 +195,54 @@ describe("RunPanel", () => {
     panel.destroy();
     await run;
     expect(started[0]?.stopped).toBe(true);
+  });
+
+  it("has a drag handle; the height is a share of the pane, remembered per kind (text, page) and read back on the next panel", async () => {
+    // Pure arithmetic: the pointer's distance from the pane's bottom over the pane's height, clamped to [0.1, 0.9].
+    expect(panelFractionAt(700, 100, 1000)).toBeCloseTo(0.4);
+    expect(panelFractionAt(1090, 100, 1000)).toBe(0.1);
+    expect(panelFractionAt(0, 100, 1000)).toBe(0.9);
+    expect(panelFractionAt(50, 0, 0)).toBe(DEFAULT_PANEL_HEIGHT.text);
+    const remembered: Record<string, number | null> = { text: null, page: null };
+    const emitter: { fn: ((o: RunOutput) => void) | null } = { fn: null };
+    const build = () =>
+      new RunPanel(__fakeEl("div"), {
+        runners: () => RUNNERS,
+        start: (_def, onOutput) => {
+          emitter.fn = onOutput;
+          return { stop: () => undefined, done: new Promise(() => undefined) };
+        },
+        timers,
+        now: () => now,
+        onClose: () => undefined,
+        height: { get: (k) => remembered[k] ?? null, set: (k, f) => void (remembered[k] = f) },
+      });
+    const panel = build();
+    const handle = __findByClass(panel.rootEl, "nfe-run-handle");
+    expect(handle).not.toBeNull();
+    expect(handle.getAttribute("aria-label")).toContain("resize");
+    const setVars: string[] = [];
+    panel.rootEl.style.setProperty = (k: string, v: string) => void setVars.push(`${k}=${v}`);
+    // A page switches to the page default; Clear back to text.
+    const run = panel.run();
+    emitter.fn?.({ kind: "page", text: "<p>x</p>" });
+    expect(setVars.at(-1)).toBe("--nfe-run-height=65%");
+    panel.clear();
+    expect(setVars.at(-1)).toBe("--nfe-run-height=35%");
+    void run;
+    // A drag: the pane is 1000 px tall from y=100; the pointer ends at y=600 → 50 %, remembered for "text".
+    (panel.rootEl as unknown as { parent: { getBoundingClientRect: () => unknown } }).parent.getBoundingClientRect = () => ({ top: 100, height: 1000, left: 0, right: 0, bottom: 1100, width: 0 });
+    __fire(handle, "pointerdown", { pointerId: 1 });
+    __fire(handle, "pointermove", { clientY: 600 });
+    expect(setVars.at(-1)).toBe("--nfe-run-height=50%");
+    __fire(handle, "pointerup", {});
+    expect(remembered.text).toBeCloseTo(0.5);
+    expect(remembered.page).toBeNull();
+    // The next panel starts at the remembered height.
+    const again = build();
+    const vars2: string[] = [];
+    again.rootEl.style.setProperty = (k: string, v: string) => void vars2.push(`${k}=${v}`);
+    expect(vars2).toEqual([]);
+    expect(remembered.text).toBeCloseTo(0.5);
   });
 });

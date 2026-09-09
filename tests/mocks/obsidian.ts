@@ -45,6 +45,9 @@ function fakeEl(tag = "div", cls = "", text = ""): Any {
     hidden: false,
     children: [] as Any[],
     parent: null as Any,
+    get parentElement() {
+      return el.parent;
+    },
     textContent: text,
     attrs: {} as Record<string, string>,
     listeners: new Map<string, Array<(e: Any) => void>>(),
@@ -240,6 +243,7 @@ export class Menu {
       setIcon: (i: string) => ((rec.icon = i), item),
       setSection: (s: string) => ((rec.section = s), item),
       setChecked: (c: boolean | null) => ((rec.checked = c), item),
+      setWarning: () => item,
       onClick: (fn: () => void) => ((rec.click = fn), item),
     };
     cb(item);

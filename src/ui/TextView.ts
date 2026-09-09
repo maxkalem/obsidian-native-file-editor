@@ -66,6 +66,10 @@ export interface TextViewDeps {
   readonly setTextDirection?: (direction: SharedSettings["textDirection"]) => void;
   /** F2 or a click on the title: Obsidian's own rename dialog for the file. */
   readonly rename?: (file: TFile) => void;
+  /** The `?` in the search panel: the regular-expression guide (a modal the plugin owns). */
+  readonly regexHelp?: () => void;
+  /** Obsidian's delete dialog for the file (pane menu). */
+  readonly deleteFile?: (file: TFile) => void;
   /**
    * The read-only modal's "Create UTF-8 copy": whether a vault path is taken,
    * and the write that makes Obsidian index the new file at once. The view
@@ -333,6 +337,10 @@ export class TextView extends FileView {
       now: this.nfeDeps.now,
       copy: run.copy,
       onClose: () => this.nfeCloseRunPanel(),
+      height: {
+        get: (kind) => this.nfeDeps.device.get().runPanelHeight[kind],
+        set: (kind, fraction) => this.nfeDeps.device.rememberRunPanelHeight(kind, fraction),
+      },
     });
     this.nfeRunPanel = panel;
     this.nfeSyncRunButton();
@@ -406,8 +414,9 @@ export class TextView extends FileView {
   }
 
   /**
-   * What a key does in this pane, by physical key: Mod+F and Mod+H open the
-   * search panel (H is "replace" elsewhere; the panel has both rows), F3 and
+   * What a key does in this pane, by physical key: Mod+F opens the search
+   * panel and Mod+H does the same in the editor (H is "replace" elsewhere;
+   * the panel has both rows; a preview cannot replace), F3 and
    * Mod+G move to the next match, Shift+F3 and Shift+Mod+G to the previous,
    * F2 renames the file. Null when the key is not this pane's.
    */
@@ -417,8 +426,10 @@ export class TextView extends FileView {
     if (evt.altKey) return null;
     switch (evt.code) {
       case "KeyF":
-      case "KeyH":
         return mod && !shift ? () => this.openSearch() : null;
+      case "KeyH":
+        // Replace: the editor only; a preview has nothing to replace into.
+        return mod && !shift && this.nfeMode === "edit" ? () => this.openSearch() : null;
       case "KeyG":
         return mod ? () => (shift ? this.nfeEditor?.findPrevious() : this.nfeEditor?.findNext()) : null;
       case "F3":
@@ -501,10 +512,14 @@ export class TextView extends FileView {
    */
   override onPaneMenu(menu: Menu, source: string): void {
     super.onPaneMenu(menu, source);
-    if (!this.nfeDoc) return;
+    if (!this.nfeDoc || !this.file) return;
+    const file = this.file;
     const editing = this.nfeMode === "edit";
+    // The two views sit in Obsidian's "pane" section, where its own Reading
+    // view / Source mode go; the plugin's switches follow unsectioned.
     menu.addItem((item) =>
       item
+        .setSection("pane")
         .setTitle("Reading view")
         .setIcon("book-open")
         .setChecked(!editing)
@@ -512,11 +527,32 @@ export class TextView extends FileView {
     );
     menu.addItem((item) =>
       item
+        .setSection("pane")
         .setTitle("Editing view")
         .setIcon("pencil")
         .setChecked(editing)
         .onClick(() => void this.setMode("edit"))
     );
+    // What Obsidian's own file views add (read from app.js, 2026-09-08):
+    // Rename in "action", Delete in "danger", then the file-menu event, which
+    // is where Move, Bookmark, Copy path, Open in default app, Show in system
+    // explorer and every other plugin's item come from.
+    menu.addItem((item) =>
+      item
+        .setSection("action")
+        .setTitle("Rename...")
+        .setIcon("lucide-edit-3")
+        .onClick(() => this.nfeDeps.rename?.(file))
+    );
+    menu.addItem((item) =>
+      item
+        .setSection("danger")
+        .setTitle("Delete file")
+        .setIcon("lucide-trash-2")
+        .setWarning(true)
+        .onClick(() => this.nfeDeps.deleteFile?.(file))
+    );
+    this.app.workspace.trigger("file-menu", menu, file, source, this.leaf);
     menu.addSeparator();
     const open = this.searchOpen;
     menu.addItem((item) =>
@@ -643,6 +679,7 @@ export class TextView extends FileView {
       eolLabel: describeLineEnding(this.nfeDoc.info.eol),
       textDirection: s.textDirection,
       searchHints: () => this.nfeDeps.settings().searchHints,
+      regexHelp: this.nfeDeps.regexHelp,
       tabSize: s.tabSize,
       tabInsertsSpaces: s.tabInsertsSpaces,
       onChange: () => {

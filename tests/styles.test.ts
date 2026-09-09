@@ -43,7 +43,8 @@ const src = [
 // template literals; if one ever is, this scan misses it and the device finds it.
 const literals = [...src.matchAll(/["']([^"'\n]*)["']/g)].map((m) => m[1] ?? "").join(" ");
 // `data-nfe-*` are the attributes a palette scopes on (palette/render.ts), not classes.
-const emitted = new Set([...literals.matchAll(/(?<!data-)\bnfe-[a-z0-9-]*[a-z0-9]/g)].map((m) => m[0]));
+// `--nfe-*` are CSS custom properties the code sets (the run panel's height), not classes.
+const emitted = new Set([...literals.matchAll(/(?<!data-)(?<!-)\bnfe-[a-z0-9-]*[a-z0-9]/g)].map((m) => m[0]));
 const styled = new Set([...cssWithoutComments.matchAll(/\.(nfe-[a-z0-9-]+)/g)].map((m) => m[1] ?? ""));
 
 describe("styles.css agrees with the classes the code emits", () => {

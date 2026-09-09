@@ -27,6 +27,8 @@ describe("mhtml", () => {
 
   it("injects the no-network policy into the head, or wraps a fragment", () => {
     expect(pageDocument("<html><head><title>t</title></head><body/></html>")).toBe(`<html><head><meta http-equiv="Content-Security-Policy" content="${PAGE_CSP}"><title>t</title></head><body/></html>`);
+    // The page's own policy is dropped: two meta policies would intersect and refuse the archive's data: stylesheets.
+    expect(pageDocument('<html><head><meta http-equiv="Content-Security-Policy" content="style-src \'self\'"><META HTTP-EQUIV=\'content-security-policy\' CONTENT="img-src none"><title>t</title></head><body/></html>')).toBe(`<html><head><meta http-equiv="Content-Security-Policy" content="${PAGE_CSP}"><title>t</title></head><body/></html>`);
     // Scripts run (inline, and eval inside them), nothing is fetched: no host, no scheme but data:/blob: for bytes the page already holds.
     expect(PAGE_CSP).toBe("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' data:; style-src 'unsafe-inline' data:; img-src data: blob:; media-src data: blob:; font-src data:;");
     expect(PAGE_CSP).not.toMatch(/https?:|connect-src|\*/);

@@ -37,6 +37,7 @@ import { NfeSettingsTab } from "./settings/SettingsTab";
 import { DEFAULT_SETTINGS, type SharedSettings, normalizeSettings, resolvePaletteFolder, resolvePluginFolder } from "./settings/settings";
 import { loadVaultLanguages, writeExampleLanguage } from "./highlight/vaultLanguages";
 import { NewFileModal } from "./ui/NewFileModal";
+import { RegexHelpModal } from "./ui/RegexHelpModal";
 import { TextView } from "./ui/TextView";
 import { codeMirrorFactory } from "./ui/codemirror";
 
@@ -204,6 +205,8 @@ export default class NativeFileEditorPlugin extends Plugin {
         setWordWrap: (on) => void this.saveSettings({ ...this.nfeSettings, wordWrap: on }),
         setShowInvisibles: (on) => void this.saveSettings({ ...this.nfeSettings, showInvisibles: on }),
         setTextDirection: (direction) => void this.saveSettings({ ...this.nfeSettings, textDirection: direction }),
+        regexHelp: () => new RegexHelpModal(this.app).open(),
+        deleteFile: (file) => void this.app.fileManager.promptForDeletion(file),
         // Obsidian's own rename dialog (fileManager.promptForFileRename is not in the public typings; guarded).
         rename: (file) => {
           const fm = this.app.fileManager as unknown as { promptForFileRename?: (f: TFile) => Promise<void> };
@@ -365,6 +368,7 @@ export default class NativeFileEditorPlugin extends Plugin {
         reread: () => this.reread(false),
         createExamplePalette: (language) => this.createExamplePalette(language),
         createExampleLanguage: (language) => this.createExampleLanguage(language),
+        regexHelp: () => new RegexHelpModal(this.app).open(),
         reloadPlugin: async () => {
           const err = await reloadPlugin(this.app, PLUGIN_ID);
           if (err) new Notice(`Native File Editor: reload failed: ${err}`);

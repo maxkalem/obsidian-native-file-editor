@@ -39,6 +39,8 @@ export interface SettingsTabDeps {
   readonly createExamplePalette: (language: string) => Promise<void>;
   readonly createExampleLanguage: (language: string) => Promise<void>;
   readonly reloadPlugin: () => Promise<void>;
+  /** The regular-expression guide, also behind the `?` in the search panel. */
+  readonly regexHelp: () => void;
   /** The Run group exists on the desktop only (ADR-004). */
   readonly isDesktop: () => boolean;
   readonly notice: (message: string) => void;
@@ -291,6 +293,11 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
           name: "Text direction",
           desc: "Auto reads each line by its first letter (an Arabic or Hebrew line runs right to left, the rest left to right); the two others force the whole document. Also in the pane's menu.",
           control: { type: "dropdown", key: "shared.textDirection", options: { auto: "Auto, per line", ltr: "Left to right", rtl: "Right to left" } },
+        },
+        {
+          name: "Regular expressions in search",
+          desc: "What the .* switch in the search panel understands, with the searches people reach for and how to use $1 in Replace. The same guide is behind the ? in the panel.",
+          action: () => deps.regexHelp(),
         },
         { name: "Shortcut hints on search buttons", desc: "\"Next (F3)\", \"Previous (Shift+F3)\" and so on in the search panel. Off shows the plain words; the tooltips keep the shortcuts.", control: { type: "toggle", key: "shared.searchHints" } },
         { name: "Show invisibles", desc: "Spaces as dots, tabs as arrows and a line-ending badge at the end of every line. Also in the pane's header and its menu.", control: { type: "toggle", key: "shared.showInvisibles" } },
