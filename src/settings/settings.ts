@@ -1,3 +1,4 @@
+import { type HotkeyOverrides, NO_OVERRIDES, normalizeHotkeys } from "../core/hotkeys";
 import type { InitialModeSetting } from "../core/openMode";
 
 /**
@@ -29,6 +30,8 @@ export interface SharedSettings {
    */
   dateFormat: string;
   timeFormat: string;
+  /** The user's key remapping per platform, action id → chord text (`core/hotkeys.ts`); only what differs from that platform's defaults is kept. */
+  hotkeys: HotkeyOverrides;
   tabSize: number;
   tabInsertsSpaces: boolean;
   /**
@@ -57,6 +60,7 @@ export const DEFAULT_SETTINGS: SharedSettings = {
   textDirection: "auto",
   dateFormat: "",
   timeFormat: "",
+  hotkeys: NO_OVERRIDES,
   tabSize: 4,
   tabInsertsSpaces: false,
   paletteFolder: "",
@@ -87,7 +91,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * never reach the code that reads it.
  */
 export function normalizeSettings(raw: unknown): SharedSettings {
-  const out: SharedSettings = { ...DEFAULT_SETTINGS, extensions: {}, customExtensions: {} };
+  const out: SharedSettings = { ...DEFAULT_SETTINGS, extensions: {}, customExtensions: {}, hotkeys: NO_OVERRIDES };
   if (!isRecord(raw)) return out;
 
   if (isRecord(raw.extensions)) {
@@ -105,6 +109,7 @@ export function normalizeSettings(raw: unknown): SharedSettings {
   if (raw.textDirection === "auto" || raw.textDirection === "ltr" || raw.textDirection === "rtl") out.textDirection = raw.textDirection;
   if (typeof raw.dateFormat === "string") out.dateFormat = raw.dateFormat.trim();
   if (typeof raw.timeFormat === "string") out.timeFormat = raw.timeFormat.trim();
+  out.hotkeys = normalizeHotkeys(raw.hotkeys);
   if (typeof raw.tabSize === "number" && Number.isInteger(raw.tabSize) && raw.tabSize >= 1 && raw.tabSize <= 16) {
     out.tabSize = raw.tabSize;
   }

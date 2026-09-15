@@ -14,10 +14,15 @@ describe("sanitizeBaseName", () => {
     expect(sanitizeBaseName("archive.tar", "gz")).toBe("archive.tar");
   });
 
-  it("falls back to Untitled", () => {
-    expect(sanitizeBaseName("", "ts")).toBe("Untitled");
-    expect(sanitizeBaseName(" . ", "ts")).toBe("Untitled");
-    expect(sanitizeBaseName(".ts", "ts")).toBe("Untitled");
+  it("falls back to Untitled only without an extension; with one, an empty name is a dot-file", () => {
+    expect(sanitizeBaseName("", "")).toBe("Untitled");
+    expect(sanitizeBaseName(" . ", "")).toBe("Untitled");
+    // With an extension, an empty name is a dot-file's empty base (`.gitignore`).
+    expect(sanitizeBaseName(".ts", "ts")).toBe("");
+    expect(sanitizeBaseName("", "gitignore")).toBe("");
+    expect(sanitizeBaseName(".gitignore", "gitignore")).toBe("");
+    expect(newFilePath("d", "", "gitignore", () => false)).toBe("d/.gitignore");
+    expect(newFilePath("d", "", "gitignore", (p) => p === "d/.gitignore")).toBe("d/1.gitignore");
   });
 });
 
@@ -80,7 +85,8 @@ describe("ownExtension", () => {
     expect(ownExtension(" notes.TXT ")).toBe("TXT");
     expect(ownExtension("archive.tar.gz")).toBe("gz");
     expect(ownExtension("notes")).toBeNull();
-    expect(ownExtension(".gitignore")).toBeNull();
+    expect(ownExtension(".gitignore")).toBe("gitignore");
+    expect(ownExtension(".")).toBeNull();
     expect(ownExtension("archive.")).toBeNull();
     expect(ownExtension("a.this-extension-is-too-long-x")).toBeNull();
   });
@@ -124,7 +130,10 @@ describe("NewFileModal", () => {
     expect(shown.some((s) => s.endsWith(".txt  (Plain text)"))).toBe(true);
     expect(shown.some((s) => s.includes(".http"))).toBe(true);
     expect(shown.some((s) => s.includes(".targets"))).toBe(true);
-    expect(shown[0]?.startsWith("*")).toBe(true);
+    // Nothing highlighted while `tt` is only a filter (2026-09-15: the typed text is the extension unless a row is picked); ↓ picks the first row, ↓ the second, ↑ the first.
+    expect(shown.some((s) => s.startsWith("*"))).toBe(false);
+    __fire(m.ext, "keydown", { key: "ArrowDown" });
+    expect(m.items()[0]?.startsWith("*")).toBe(true);
     __fire(m.ext, "keydown", { key: "ArrowDown" });
     expect(m.items()[1]?.startsWith("*")).toBe(true);
     __fire(m.ext, "keydown", { key: "ArrowUp" });
@@ -185,6 +194,70 @@ describe("NewFileModal", () => {
     expect(m.warning.textContent).toBe("Native File Editor does not open .zzz files. The file is created all the same; Obsidian decides what opens it.");
     __fire(m.name, "keydown", { key: "Enter" });
     expect(created[4]).toEqual({ path: "d/1.zzz", extension: "zzz" });
+  });
+
+  it("a dot-file: an empty name with a type, or `.gitignore` as the name, makes `.gitignore`, after a warning that Obsidian hides it", () => {
+    const created: unknown[] = [];
+    let m = open((c) => void created.push(c));
+    m.ext.value = "gitignore";
+    __fire(m.ext, "input");
+    __fire(m.create, "click");
+    expect(created).toHaveLength(0);
+    expect(m.warning.textContent).toBe(".gitignore is a dot-file: Obsidian hides it, so it will not appear in the file explorer and Native File Editor cannot open it. The file is created all the same.");
+    __fire(m.create, "click");
+    expect(created[0]).toEqual({ path: "d/.gitignore", extension: "gitignore" });
+    m = open((c) => void created.push(c));
+    m.name.value = ".gitignore";
+    __fire(m.create, "click");
+    __fire(m.create, "click");
+    expect(created[1]).toEqual({ path: "d/.gitignore", extension: "gitignore" });
+  });
+
+  it("the typed text beats the list's first match unless the user picked a row; letters of any script make an extension", () => {
+    const created: Array<{ path: string; extension: string }> = [];
+    // `z` alone: the list shows .z80 first, nothing is highlighted, Enter makes `.z` (a dot-file, after its warning).
+    let m = open((c) => void created.push(c));
+    m.ext.value = "z";
+    __fire(m.ext, "input");
+    expect(__findAllByClass(m.modal.contentEl, "is-selected")).toHaveLength(0);
+    __fire(m.ext, "keydown", { key: "Enter" });
+    expect(m.warning.textContent).toContain(".z is a dot-file");
+    __fire(m.ext, "keydown", { key: "Enter" });
+    expect(created[0]).toEqual({ path: "d/.z", extension: "z" });
+    // ↓ picks the first row: now the list's choice wins.
+    m = open((c) => void created.push(c));
+    m.name.value = "a";
+    m.ext.value = "z";
+    __fire(m.ext, "input");
+    __fire(m.ext, "keydown", { key: "ArrowDown" });
+    expect(__findAllByClass(m.modal.contentEl, "is-selected")).toHaveLength(1);
+    __fire(m.ext, "keydown", { key: "Enter" });
+    expect(created[1]?.path).toMatch(/^d\/a\.z/);
+    expect(created[1]?.extension).not.toBe("z");
+    // Typed exactly as an option: that option, highlighted.
+    m = open((c) => void created.push(c));
+    m.name.value = "a";
+    m.ext.value = "TS";
+    __fire(m.ext, "input");
+    expect(__findAllByClass(m.modal.contentEl, "is-selected")).toHaveLength(1);
+    __fire(m.ext, "keydown", { key: "Enter" });
+    expect(created[2]).toEqual({ path: "d/a.ts", extension: "ts" });
+    // Cyrillic: in the type field it is an extension (after the unknown-type warning), in the name it is a dot-file.
+    expect(typedExtension("фіфі")).toBe("фіфі");
+    expect(ownExtension(".фіфі")).toBe("фіфі");
+    m = open((c) => void created.push(c));
+    m.name.value = "a";
+    m.ext.value = "фіфі";
+    __fire(m.ext, "input");
+    __fire(m.ext, "keydown", { key: "Enter" });
+    expect(m.warning.textContent).toBe("Native File Editor does not open .фіфі files. The file is created all the same; Obsidian decides what opens it.");
+    __fire(m.ext, "keydown", { key: "Enter" });
+    expect(created[3]).toEqual({ path: "d/a.фіфі", extension: "фіфі" });
+    m = open((c) => void created.push(c));
+    m.name.value = ".фіфі";
+    __fire(m.create, "click");
+    __fire(m.create, "click");
+    expect(created[4]).toEqual({ path: "d/.фіфі", extension: "фіфі" });
   });
 
   it("a type the plugin does not open warns once, then Create anyway goes through; editing clears the warning", () => {

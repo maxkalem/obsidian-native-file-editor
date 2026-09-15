@@ -41,8 +41,8 @@ export interface RunContext {
  * What the plugin can do for a language without any interpreter of the user's:
  * JavaScript runs in the Web Worker sandbox, a web page (HTML, MHTML) is
  * rendered inside Obsidian. These are offered only when the user has added no
- * interpreter for that language; an added interpreter replaces them (USER,
- * 2026-09-06). The list of user interpreters starts EMPTY: nothing is shown
+ * interpreter for that language; an added interpreter replaces them. The
+ * list of user interpreters starts EMPTY: nothing is shown
  * that cannot be changed.
  */
 export const BUILTIN_RUNNERS: readonly RunnerDef[] = [

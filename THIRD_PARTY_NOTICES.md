@@ -28,7 +28,7 @@ All MIT, copyright Marijn Haverbeke and others (the `@lezer/json` grammar also c
 
 ## Bundled: community CodeMirror language packages (tier 3)
 
-Each one a separate decision (handoff §17), with its size in `main.js` from `npm run size` on 2026-09-05.
+Each one a separate decision, with its size in `main.js` from `npm run size` on 2026-09-05.
 
 | Package | Language, extensions | Licence, author | Size |
 | --- | --- | --- | --- |

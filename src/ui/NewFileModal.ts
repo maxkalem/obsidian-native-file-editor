@@ -1,5 +1,5 @@
 import { type App, Modal } from "obsidian";
-import { type ExtensionOption, filterExtensions, newFilePath, ownExtension, sanitizeBaseName, typedExtension } from "../core/newFile";
+import { type ExtensionOption, chosenExtension, filterExtensions, newFilePath, ownExtension, sanitizeBaseName, typedExtension } from "../core/newFile";
 import { __allEntries } from "../highlight/registry";
 
 export interface NewFileChoice {
@@ -16,7 +16,7 @@ export interface NewFileChoice {
  * tapping outside dismisses. The 2026-09-09 replacement for a 330-entry
  * dropdown.
  *
- * The rules of the two fields (USER, 2026-09-09): the type field starts
+ * The rules of the two fields: the type field starts
  * empty and the list appears at the first character typed into it, then
  * stays until the dialog closes, even if the field is emptied again. An
  * extension typed in the name (`1.ts`) is the file's extension while the
@@ -24,7 +24,7 @@ export interface NewFileChoice {
  * suffix stripped from the name so `notes.ts` + `.ts` is `notes.ts`; a type
  * typed into the field that matches nothing is taken as typed. A type this
  * plugin cannot open, or no extension at all, is allowed after a warning
- * (USER, 2026-09-09: Create must never do nothing).
+ * (Create must never do nothing).
  */
 
 /** How many matches the list shows at once; the rest scroll. */
@@ -85,7 +85,10 @@ export class NewFileModal extends Modal {
     const known = new Set(all.map((o) => o.extension.toLowerCase()));
     let listShown = false;
     let shown: ExtensionOption[] = [];
-    let selected = 0;
+    // The highlighted row: an exact spelling of the typed text, or what the arrows or a click chose (`picked`);
+    // -1 when the typed text is its own extension (`z` makes `.z`, not the first match `.z80`).
+    let selected = -1;
+    let picked = false;
     let warnedFor: string | null = null;
     const render = () => {
       listEl.empty();
@@ -95,6 +98,7 @@ export class NewFileModal extends Modal {
         item.setAttribute("data-extension", o.extension);
         item.addEventListener("click", () => {
           selected = i;
+          picked = true;
           extEl.value = o.extension;
           render();
           nameEl.focus();
@@ -106,7 +110,9 @@ export class NewFileModal extends Modal {
       listShown = true;
       listEl.removeClass("nfe-hidden");
       shown = filterExtensions(extEl.value, all);
-      selected = 0;
+      picked = false;
+      const typed = typedExtension(extEl.value).toLowerCase();
+      selected = shown.findIndex((o) => o.extension.toLowerCase() === typed);
       render();
     };
     const clearWarning = () => {
@@ -121,8 +127,9 @@ export class NewFileModal extends Modal {
      * name, else none. Null only when the type field holds nothing usable.
      */
     const decide = (): { extension: string; base: string } | null => {
-      if (extEl.value.trim().length > 0) {
-        const extension = (listShown ? shown[selected]?.extension : undefined) ?? typedExtension(extEl.value);
+      const pick = picked ? (shown[selected] ?? null) : null;
+      if (extEl.value.trim().length > 0 || pick) {
+        const extension = chosenExtension(extEl.value, listShown ? shown : all, pick);
         if (extension.length === 0) return null;
         return { extension, base: sanitizeBaseName(nameEl.value, extension) };
       }
@@ -135,13 +142,19 @@ export class NewFileModal extends Modal {
       const choice = decide();
       if (choice === null) return;
       const { extension, base } = choice;
-      if (!known.has(extension.toLowerCase()) && warnedFor !== extension) {
+      // A dot-file (`.gitignore`) is a legitimate wish, and Obsidian hides every path whose name starts
+      // with a dot: no explorer entry, no TFile, so this plugin cannot open it either. Said once; the second Create goes through.
+      const dotFile = base.length === 0;
+      const warnKey = dotFile ? `.${extension}` : extension;
+      if ((dotFile || !known.has(extension.toLowerCase())) && warnedFor !== warnKey) {
         // Once: the second Create goes through.
-        warnedFor = extension;
+        warnedFor = warnKey;
         warnEl.setText(
-          extension.length === 0
-            ? "Native File Editor does not open a file without an extension. The file is created all the same; Obsidian decides what opens it."
-            : `Native File Editor does not open .${extension} files. The file is created all the same; Obsidian decides what opens it.`
+          dotFile
+            ? `.${extension} is a dot-file: Obsidian hides it, so it will not appear in the file explorer and Native File Editor cannot open it. The file is created all the same.`
+            : extension.length === 0
+              ? "Native File Editor does not open a file without an extension. The file is created all the same; Obsidian decides what opens it."
+              : `Native File Editor does not open .${extension} files. The file is created all the same; Obsidian decides what opens it.`
         );
         warnEl.removeClass("nfe-hidden");
         create.setText("Create anyway");
@@ -154,7 +167,8 @@ export class NewFileModal extends Modal {
     create.addEventListener("click", submit);
     const move = (delta: number) => {
       if (!listShown || shown.length === 0) return;
-      selected = (selected + delta + shown.length) % shown.length;
+      selected = selected < 0 ? (delta > 0 ? 0 : shown.length - 1) : (selected + delta + shown.length) % shown.length;
+      picked = true;
       render();
       const item = listEl.children[selected];
       if (item && "scrollIntoView" in item && typeof (item as { scrollIntoView?: unknown }).scrollIntoView === "function") (item as HTMLElement).scrollIntoView({ block: "nearest" });

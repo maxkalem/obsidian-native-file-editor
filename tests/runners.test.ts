@@ -273,20 +273,26 @@ describe("execute", () => {
     const html = "<html><head><title>x</title></head><body>hi</body></html>";
     const r = await execute({ ...request({ language: "HTML", name: "Page (inside Obsidian)", kind: "page" }, (o) => out.push(o)), text: html }, { processes, worker: new FakeWorker(), tempDirs: null }).done;
     expect(processes.requests).toEqual([]);
-    expect(out).toHaveLength(1);
-    expect(out[0]?.kind).toBe("page");
-    expect(out[0]?.text).toContain('<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'');
-    expect(out[0]?.text).toContain("<body>hi</body>");
+    // An info line for the Log (what was built, how big, how long), then the page with the run's token.
+    expect(out).toHaveLength(2);
+    expect(out[0]?.kind).toBe("info");
+    expect(out[0]?.text).toMatch(/^\[page\] HTML document, document \d+ KB, 0 frame\(s\) in the page, \d+ ms to build\n$/);
+    expect(out[1]?.kind).toBe("page");
+    expect(out[1]?.token).toMatch(/^nfe-[0-9a-z]+-[0-9a-z]+$/);
+    expect(out[1]?.text).toContain('<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'');
+    expect(out[1]?.text).toContain(`<script>(function(){var T="${out[1]?.token}";`);
+    expect(out[1]?.text).toContain("<body>hi</body>");
     expect(r).toMatchObject({ exitCode: 0, error: null });
     // A fragment without <html> is wrapped.
     const out2: RunOutput[] = [];
     await execute({ ...request({ language: "HTML", name: "P", kind: "page" }, (o) => out2.push(o)), text: "<p>only</p>" }, { processes, worker: new FakeWorker(), tempDirs: null }).done;
-    expect(out2[0]?.text).toMatch(/^<!doctype html><html><head><meta http-equiv="Content-Security-Policy"/);
+    expect(out2[1]?.text).toMatch(/^<!doctype html><html><head><meta http-equiv="Content-Security-Policy"/);
     // An MHTML archive yields its html part; one without fails to start.
     const mht = 'MIME-Version: 1.0\nContent-Type: multipart/related; boundary="----=_B"\n\n------=_B\nContent-Type: text/html; charset="utf-8"\nContent-Transfer-Encoding: quoted-printable\n\n<html><body>caf=C3=A9 =3D 1</body></html>\n------=_B--\n';
     const out3: RunOutput[] = [];
     await execute({ ...request({ language: "MHTML", name: "P", kind: "page" }, (o) => out3.push(o)), text: mht }, { processes, worker: new FakeWorker(), tempDirs: null }).done;
-    expect(out3[0]?.text).toContain("café = 1");
+    expect(out3[0]?.text).toMatch(/^\[page\] MHTML archive, /);
+    expect(out3[1]?.text).toContain("café = 1");
     const bad = await execute({ ...request({ language: "MHTML", name: "P", kind: "page" }), text: 'MIME-Version: 1.0\nContent-Type: multipart/related; boundary="b"\n\n--b\nContent-Type: text/plain\n\nx\n--b--' }, { processes, worker: new FakeWorker(), tempDirs: null }).done;
     expect(bad.error).toMatch(/no text\/html part/);
   });

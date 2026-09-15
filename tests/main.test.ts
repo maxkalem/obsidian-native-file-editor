@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Events, Menu, TFile, TFolder, __modalInstances, __notices, __openedModals, __resetObsidianMock, mockPlugin } from "./mocks/obsidian";
 import { VIEW_TYPE_TEXT } from "../src/constants";
-import NativeFileEditorPlugin, { logFilePath, readOwnedExtensions, selfTestStreamLanguage, vaultId } from "../src/main";
+import NativeFileEditorPlugin, { logFilePath, obsidianCommandsOn, readOwnedExtensions, selfTestStreamLanguage, vaultId } from "../src/main";
 import { PALETTE_STYLE_ID } from "../src/ui/styleSink";
 
 /**
@@ -250,6 +250,31 @@ describe("readOwnedExtensions and vaultId", () => {
   it("prefers appId and falls back to the vault name", () => {
     expect(vaultId({ appId: "abc", vault: { getName: () => "V" } } as never)).toBe("abc");
     expect(vaultId({ vault: { getName: () => "V" } } as never)).toBe("V");
+  });
+
+  it("names Obsidian's commands on a chord through the hotkey manager's baked arrays, and answers [] when the shape is not there", () => {
+    let baked = 0;
+    const app = {
+      hotkeyManager: {
+        bake: () => void baked++,
+        bakedHotkeys: [
+          { modifiers: "Ctrl", key: "b" },
+          { modifiers: "Alt", key: "Enter" },
+          { modifiers: "Ctrl", key: "b" },
+        ],
+        bakedIds: ["editor:toggle-bold", "editor:follow-link", "other-plugin:thing"],
+      },
+      commands: { findCommand: (id: string) => (id === "editor:toggle-bold" ? { name: "Toggle bold" } : id === "editor:follow-link" ? { name: "Follow link under cursor" } : undefined) },
+    };
+    expect(obsidianCommandsOn(app as never, { mod: true, shift: false, alt: false, key: "B" }, false)).toEqual(["Toggle bold", "other-plugin:thing"]);
+    expect(obsidianCommandsOn(app as never, { mod: false, shift: false, alt: true, key: "Enter" }, false)).toEqual(["Follow link under cursor"]);
+    expect(obsidianCommandsOn(app as never, { mod: true, shift: false, alt: true, key: "ArrowUp" }, false)).toEqual([]);
+    expect(baked).toBe(3);
+    // On macOS the chord's Mod is Meta; a Ctrl entry is not it.
+    expect(obsidianCommandsOn(app as never, { mod: true, shift: false, alt: false, key: "B" }, true)).toEqual([]);
+    expect(obsidianCommandsOn({} as never, { mod: true, shift: false, alt: false, key: "B" }, false)).toEqual([]);
+    expect(obsidianCommandsOn({ hotkeyManager: { bake: () => { throw new Error("no"); } } } as never, { mod: true, shift: false, alt: false, key: "B" }, false)).toEqual([]);
+    expect(obsidianCommandsOn({ hotkeyManager: { bake: () => undefined, bakedHotkeys: "x", bakedIds: [] } } as never, { mod: true, shift: false, alt: false, key: "B" }, false)).toEqual([]);
   });
 
   it("the log lives in the plugin folder under the config dir", () => {

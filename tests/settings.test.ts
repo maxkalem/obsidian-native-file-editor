@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_LARGE_FILE_BYTES } from "../src/constants";
+import { chordText } from "../src/core/hotkeys";
 import { DEFAULT_DEVICE_STATE, DeviceLocalStore, type StorageLike, normalizeDeviceState } from "../src/settings/DeviceLocalStore";
-import { Setting, __fakeEl, __fire } from "./mocks/obsidian";
+import { Setting, __fakeEl, __findAllByClass, __fire, __textOf } from "./mocks/obsidian";
 import type { DesktopShell } from "../src/platform/desktopShell";
 import { type SettingsTabDeps, buildDefinitions, readSettingValue, writeSettingValue } from "../src/settings/SettingsTab";
 import { DEFAULT_SETTINGS, type SharedSettings, normalizeSettings } from "../src/settings/settings";
@@ -83,6 +84,8 @@ describe("settings tab definitions", () => {
     const notices: string[] = [];
     const device = new DeviceLocalStore("v", new MapStorage());
     const dialogs = { folder: null as string | null, file: null as string | null, language: null as string | null, text: null as string | null };
+    /** What Obsidian would say holds a chord (`Ctrl+B` → ["Toggle bold"]); empty by default. */
+    const obsidianKeys: Record<string, string[]> = {};
     const shell: DesktopShell = {
       openPath: async (p) => (actions.push(`open ${p}`), null),
       pickFolder: async () => dialogs.folder,
@@ -108,11 +111,12 @@ describe("settings tab definitions", () => {
       createExampleLanguage: async (l) => void actions.push(`language ${l}`),
       reloadPlugin: async () => void actions.push("reload"),
       regexHelp: () => void actions.push("regex-help"),
+      obsidianHoldersOf: (chord) => (obsidianKeys[chordText(chord)] ?? []),
       isDesktop: () => desktop,
       notice: (m: string) => void notices.push(m),
       refresh: () => void actions.push("refresh"),
     };
-    return { deps, device, current: () => current, actions, notices, dialogs };
+    return { deps, device, current: () => current, actions, notices, dialogs, obsidianKeys };
   }
 
   function controlKeys(items: unknown[]): string[] {
@@ -345,9 +349,97 @@ describe("settings tab definitions", () => {
     expect(h.device.get().runners.map((r) => r.language)).toEqual(["Python", "Batch"]);
   });
 
+  it("hotkeys live on their own page: a row per action with its key, a recorder that saves the next chord, a reset, and the conflict named", async () => {
+    const h = harness();
+    const page = () => buildDefinitions(h.deps).find((d) => "type" in d && d.type === "page" && (d as { name?: string }).name === "Hotkeys") as unknown as { displayValue: () => string; items: Array<{ items: unknown[] }> };
+    expect(page().displayValue()).toBe("defaults");
+    let rows = renderRows(page().items[0]!.items as never);
+    const descOf = (r: { setting: Setting }) => __textOf(r.setting.descEl);
+    const above = rows.find((r) => r.name === "Add cursor above")!;
+    expect(descOf(above)).toContain("Ctrl+Alt+↑");
+    expect(descOf(above)).toContain("does not reach it");
+    expect(above.setting.settingEl.hasClass("nfe-hotkey-conflict")).toBe(false);
+    // The pencil opens the recorder; the next key pressed becomes the chord and is saved.
+    above.setting.__click("Change: press");
+    const field = above.setting.texts[0]!;
+    __fire(field.inputEl, "keydown", { code: "ArrowUp", key: "ArrowUp", altKey: true, shiftKey: true, ctrlKey: false, metaKey: false });
+    await tick();
+    expect(h.current().hotkeys).toEqual({ win: { "add-cursor-above": "Shift+Alt+ArrowUp" }, mac: {}, linux: {} });
+    expect(page().displayValue()).toBe("1 changed");
+    // Taken by Copy line up: a notice at once, and both rows marked as a conflict with the other named.
+    expect(h.notices.at(-1)).toBe("Native File Editor: Shift+Alt+↑ is already used by Copy line up. Both rows keep it; the first in the list wins. Change one of them.");
+    rows = renderRows(page().items[0]!.items as never);
+    const changed = rows.find((r) => r.name === "Add cursor above")!;
+    expect(descOf(changed)).toContain("Shift+Alt+↑");
+    expect(descOf(changed)).toContain("default Ctrl+Alt+↑");
+    expect(descOf(changed)).toContain("already used by Copy line up");
+    expect(changed.setting.settingEl.hasClass("nfe-hotkey-conflict")).toBe(true);
+    const copyUp = rows.find((r) => r.name === "Copy line up")!;
+    expect(descOf(copyUp)).toContain("already used by Add cursor above");
+    expect(copyUp.setting.settingEl.hasClass("nfe-hotkey-conflict")).toBe(true);
+    // The row's element is reused across refreshes: rendered again into the SAME Setting after the clash is gone, the class goes too (2026-09-09: two rows stayed red without a conflict).
+    await h.deps.saveSettings({ ...h.current(), hotkeys: { ...h.current().hotkeys, win: { ...h.current().hotkeys.win, "copy-line-up": "Ctrl+ArrowUp" } } });
+    const copyUpItem = (page().items[0]!.items as Array<{ name: string; render: (s: Setting) => void }>).find((i) => i.name === "Copy line up")!;
+    copyUpItem.render(copyUp.setting);
+    expect(copyUp.setting.settingEl.hasClass("nfe-hotkey-conflict")).toBe(false);
+    expect(descOf(copyUp)).not.toContain("already used");
+    expect(descOf(copyUp)).toContain("Ctrl+↑");
+    // The reset arrow appears on a changed row; it removes the override.
+    expect(changed.setting.buttons).toHaveLength(2);
+    changed.setting.__click("Back to the default");
+    await tick();
+    expect(h.current().hotkeys).toEqual({ win: { "copy-line-up": "Ctrl+ArrowUp" }, mac: {}, linux: {} });
+  });
+
+  it("an editor-bound action on a key Obsidian holds shows the holder as a warning, at recording time and on the row; a Scope-bound one does not", async () => {
+    const h = harness();
+    h.obsidianKeys["Ctrl+B"] = ["Toggle bold"];
+    const page = () => buildDefinitions(h.deps).find((d) => "type" in d && d.type === "page" && (d as { name?: string }).name === "Hotkeys") as unknown as { items: Array<{ items: unknown[] }> };
+    let rows = renderRows(page().items[0]!.items as never);
+    const descOf = (r: { setting: Setting }) => __textOf(r.setting.descEl);
+    // Add cursor above (inside the text) onto Ctrl+B: Obsidian's bold runs first, so the row says so in the warning colour and the notice too; saved all the same.
+    const above = rows.find((r) => r.name === "Add cursor above")!;
+    above.setting.__click("Change: press");
+    __fire(above.setting.texts[0]!.inputEl, "keydown", { code: "KeyB", key: "b", altKey: false, shiftKey: false, ctrlKey: true, metaKey: false });
+    await tick();
+    expect(h.current().hotkeys.win).toEqual({ "add-cursor-above": "Ctrl+B" });
+    expect(h.notices.at(-1)).toBe("Native File Editor: Ctrl+B is Obsidian's Toggle bold, which runs first: inside the text it will not reach Add cursor above. Saved anyway; change it here or under Obsidian's Hotkeys.");
+    rows = renderRows(page().items[0]!.items as never);
+    const changed = rows.find((r) => r.name === "Add cursor above")!;
+    expect(changed.setting.settingEl.hasClass("nfe-hotkey-conflict")).toBe(false);
+    expect(descOf(changed)).toContain("Obsidian's Toggle bold takes this key first");
+    expect(__findAllByClass(changed.setting.descEl, "nfe-hotkey-obsidian")).toHaveLength(1);
+    // Search (the pane's Scope, ahead of Obsidian) onto Ctrl+B: allowed, no warning.
+    const search = rows.find((r) => r.name === "Search")!;
+    search.setting.__click("Change: press");
+    __fire(search.setting.texts[0]!.inputEl, "keydown", { code: "KeyB", key: "b", altKey: false, shiftKey: false, ctrlKey: true, metaKey: false });
+    await tick();
+    expect(h.notices.filter((n) => n.includes("Obsidian's Toggle bold"))).toHaveLength(1);
+    rows = renderRows(page().items[0]!.items as never);
+    const searchRow = rows.find((r) => r.name === "Search")!;
+    // …marked as a changed key that Obsidian also holds: the note in the warning colour, the keycap plain.
+    expect(__findAllByClass(searchRow.setting.descEl, "nfe-hotkey-obsidian")).toHaveLength(1);
+    expect(descOf(searchRow)).not.toContain("takes this key first");
+    // …but says, muted, that Obsidian has it too and the pane wins.
+    expect(descOf(searchRow)).toContain("also Obsidian's Toggle bold: this pane takes it first while the text has the focus");
+    // Both plugin rows now share Ctrl+B: the conflict (error) is what the keycap shows, the warning text stays beside it.
+    const aboveAgain = rows.find((r) => r.name === "Add cursor above")!;
+    expect(aboveAgain.setting.settingEl.hasClass("nfe-hotkey-conflict")).toBe(true);
+    // Back to the default: the warning class is toggled off on the reused element.
+    const item = (page().items[0]!.items as Array<{ name: string; render: (s: Setting) => void }>).find((i) => i.name === "Add cursor above")!;
+    await h.deps.saveSettings({ ...h.current(), hotkeys: { ...h.current().hotkeys, win: { search: "Ctrl+B" } } });
+    item.render(aboveAgain.setting);
+    expect(aboveAgain.setting.settingEl.hasClass("nfe-hotkey-conflict")).toBe(false);
+    // The page's entry carries Obsidian's warning indicator while a row needs a look (Search still on Ctrl+B), none at the defaults.
+    const status = () => (buildDefinitions(h.deps).find((d) => "type" in d && d.type === "page" && (d as { name?: string }).name === "Hotkeys") as unknown as { status: () => string | null }).status();
+    expect(status()).toBe("warning");
+    await h.deps.saveSettings({ ...h.current(), hotkeys: { win: {}, mac: {}, linux: {} } });
+    expect(status()).toBe(null);
+  });
+
   it("custom file types live on the File types page: add asks for the extension and a language, delete removes, both reread", async () => {
     const h = harness();
-    const page = () => buildDefinitions(h.deps).find((d) => "type" in d && d.type === "page") as unknown as { items: Array<Record<string, unknown>> };
+    const page = () => buildDefinitions(h.deps).find((d) => "type" in d && d.type === "page" && (d as { name?: string }).name === "File types") as unknown as { items: Array<Record<string, unknown>> };
     const list = () => page().items[0] as { items: unknown[]; addItem: { action: () => void }; onDelete: (i: number) => void };
     expect(list().items).toEqual([]);
     h.dialogs.text = "xl";

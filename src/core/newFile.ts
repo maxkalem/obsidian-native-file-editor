@@ -12,45 +12,61 @@ const FORBIDDEN = /[<>:"/\\|?*#^[\]\x00-\x1f]/g;
 /**
  * A safe base name: forbidden characters dropped, surrounding whitespace and
  * dots trimmed, the extension stripped when the user typed it. Empty input
- * becomes "Untitled".
+ * with an extension is an EMPTY base: the file is `.gitignore`, a dot-file;
+ * with no extension either it becomes "Untitled".
  */
 export function sanitizeBaseName(input: string, extension: string): string {
   let name = input.replace(FORBIDDEN, "").trim();
   const suffix = `.${extension}`;
   if (extension.length > 0 && name.toLowerCase().endsWith(suffix.toLowerCase())) name = name.slice(0, -suffix.length);
   name = name.replace(/^[.\s]+|[.\s]+$/g, "");
-  return name.length === 0 ? "Untitled" : name;
+  return name.length === 0 && extension.length === 0 ? "Untitled" : name;
 }
 
 /**
- * The extension the user typed as part of the name (`1.ts` → `ts`), or null
- * when the name has none (`notes`, `.gitignore`, `archive.`). Up to 16 letters,
- * digits, `_` or `-` after the last dot, as Obsidian accepts them.
+ * The extension the user typed as part of the name (`1.ts` → `ts`, and
+ * `.gitignore` → `gitignore`: a dot-file is all extension), or null when the
+ * name has none (`notes`, `archive.`). Up to 16 letters (of any script:
+ * `.фіфі` is a name too), digits, `_` or `-`
+ * after the last dot.
  */
 export function ownExtension(input: string): string | null {
   const name = input.replace(FORBIDDEN, "").trim();
-  const m = /^.+\.([A-Za-z0-9_-]{1,16})$/.exec(name);
+  const m = /^.*\.([\p{L}\p{N}_-]{1,16})$/u.exec(name);
   return m ? (m[1] ?? null) : null;
 }
 
 /**
- * The extension as the user typed it into the type field when nothing in the
- * list matched: a leading dot dropped, anything but letters, digits, `_` and
- * `-` dropped; empty when nothing usable remains.
+ * The extension as the user typed it into the type field: a leading dot
+ * dropped, anything but letters (any script), digits, `_` and `-` dropped;
+ * empty when nothing usable remains.
  */
 export function typedExtension(input: string): string {
-  return input.trim().replace(/^\.+/, "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 16);
+  return input.trim().replace(/^\.+/, "").replace(/[^\p{L}\p{N}_-]/gu, "").slice(0, 16);
+}
+
+/**
+ * Which extension the type field means (`z` makes `.z`, not the list's first
+ * match `.z80`): an option the user picked with the arrows
+ * or a click; else the option spelt exactly as typed; else the text as typed.
+ */
+export function chosenExtension(typed: string, options: readonly ExtensionOption[], picked: ExtensionOption | null): string {
+  if (picked) return picked.extension;
+  const text = typedExtension(typed);
+  const exact = options.find((o) => o.extension.toLowerCase() === text.toLowerCase());
+  return exact ? exact.extension : text;
 }
 
 /**
  * The vault path for a new file in `folder`, adding " 1", " 2", ... while
- * `exists` says the name is taken. `folder` is "" or "/" for the vault root;
- * an empty `extension` makes a file without one.
+ * `exists` says the name is taken (for an empty base, a dot-file, the number
+ * alone: `1.gitignore`). `folder` is "" or "/" for the vault root; an empty
+ * `extension` makes a file without one.
  */
 export function newFilePath(folder: string, baseName: string, extension: string, exists: (path: string) => boolean): string {
   const prefix = folder === "" || folder === "/" ? "" : `${folder.replace(/\/+$/, "")}/`;
   const suffix = extension.length > 0 ? `.${extension}` : "";
-  const candidate = (n: number) => `${prefix}${baseName}${n === 0 ? "" : ` ${n}`}${suffix}`;
+  const candidate = (n: number) => `${prefix}${baseName}${n === 0 ? "" : baseName.length === 0 ? `${n}` : ` ${n}`}${suffix}`;
   for (let n = 0; ; n++) {
     const path = candidate(n);
     if (!exists(path)) return path;
@@ -64,7 +80,7 @@ export interface ExtensionOption {
 
 /**
  * Whether `query`'s characters appear in `text` in that order, not necessarily
- * together: the Unity-style match the user asked for (2026-09-09), where `tt`
+ * together: the Unity-style match, where `tt`
  * finds `txt`, `http` and `targets`. Case-insensitive; an empty query matches.
  */
 export function isSubsequence(query: string, text: string): boolean {

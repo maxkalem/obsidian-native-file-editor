@@ -1,4 +1,5 @@
-import { type App, type Plugin, PluginSettingTab, type Setting, type SettingDefinitionItem, type SettingGroupItem } from "obsidian";
+import { type App, Platform, type Plugin, PluginSettingTab, type Setting, type SettingDefinitionItem, type SettingGroupItem } from "obsidian";
+import { type Chord, HOTKEY_ACTIONS, type HotkeyAction, type HotkeyPlatform, chordConflicts, chordFor, chordOfEvent, chordText, defaultChord, describeChord, platformOf } from "../core/hotkeys";
 import { registeredExtensions } from "../highlight/registry";
 import type { DesktopShell } from "../platform/desktopShell";
 import { type RunnerDef, STANDARD_COMMANDS, formatArgvLine, formatStepsLine, parseArgvLine, parseStepsLine, runnerForProgram } from "../run/runners";
@@ -41,6 +42,8 @@ export interface SettingsTabDeps {
   readonly reloadPlugin: () => Promise<void>;
   /** The regular-expression guide, also behind the `?` in the search panel. */
   readonly regexHelp: () => void;
+  /** The names of Obsidian's own commands whose active hotkey is this chord (any plugin's too); [] when Obsidian does not tell. */
+  readonly obsidianHoldersOf: (chord: Chord) => string[];
   /** The Run group exists on the desktop only (ADR-004). */
   readonly isDesktop: () => boolean;
   readonly notice: (message: string) => void;
@@ -57,6 +60,10 @@ export class NfeSettingsTab extends PluginSettingTab {
     super(app, plugin);
     this.deps = deps;
     deps.refresh = () => this.update();
+    // Obsidian's page rows (`mod-navigable`) get no hover colour in its own stylesheet, its action rows
+    // (`mod-action`) do; both should read as buttons, so styles.css gives the
+    // navigable rows of THIS tab the same hover, through this class.
+    this.containerEl.addClass("nfe-settings-tab");
   }
 
   override getSettingDefinitions(): SettingDefinitionItem[] {
@@ -239,6 +246,115 @@ function customTypeRow(deps: SettingsTabDeps, ext: string, language: string): Se
   };
 }
 
+/**
+ * One row of the Hotkeys section: the action's name, its key as it is (and
+ * the default when changed, and any other action on the same key), a pencil
+ * that turns the row into a recorder (the next key pressed becomes the
+ * chord; Escape cancels) and, when changed, a reset. Editor-bound actions
+ * (the arrows and lines) run inside CodeMirror after Obsidian's own hotkeys,
+ * so a key Obsidian takes for itself cannot reach them; the Scope-bound ones
+ * (search, occurrences, comment, completion) run first and can.
+ */
+function hotkeyRow(deps: SettingsTabDeps, action: HotkeyAction): SettingGroupItem {
+  const platform = platformOf(Platform);
+  const mac = platform === "mac";
+  const own = () => deps.settings().hotkeys[platform];
+  const current = () => chordFor(action.id, own(), platform);
+  const isDefault = () => chordText(current()) === chordText(defaultChord(action, platform));
+  const save = async (text: string | null) => {
+    const mine = { ...own() };
+    if (text === null) delete mine[action.id];
+    else mine[action.id] = text;
+    await deps.saveSettings({ ...deps.settings(), hotkeys: { ...deps.settings().hotkeys, [platform]: mine } });
+    deps.refresh();
+  };
+  return {
+    name: action.name,
+    desc: describeChord(current(), mac),
+    render: (setting: Setting) => {
+      setting.setName(action.name);
+      // The description is built, not one string: the key as a keycap, the default when changed,
+      // a red "already used by …" when another action has the same key, then what the action does.
+      const others = takenBy(own(), action.id, platform);
+      setting.setDesc("");
+      setting.descEl.createSpan({ cls: "nfe-hotkey-key", text: describeChord(current(), mac) });
+      if (!isDefault()) setting.descEl.createSpan({ cls: "nfe-hotkey-default", text: ` default ${describeChord(defaultChord(action, platform), mac)}` });
+      // Toggled, not added: the declarative tab reuses the row's element across refreshes, and a class
+      // added while two rows clashed stayed on after one of them was remapped (seen 2026-09-09).
+      setting.settingEl.toggleClass("nfe-hotkey-conflict", others.length > 0);
+      if (others.length > 0) setting.descEl.createSpan({ cls: "nfe-hotkey-taken", text: ` already used by ${others.join(", ")} — the first of the two in this list wins` });
+      // An editor-bound action on a key one of Obsidian's hotkeys holds: Obsidian runs first and keeps the
+      // key, so it never reaches the text. Shown in the warning colour with the holder's name.
+      const obsidian = deps.obsidianHoldersOf(current());
+      // A NON-default key that is one of Obsidian's is marked as a warning, not brightly but apart from the plain colour.
+      // The text differs: inside the text Obsidian wins and the key never arrives; a
+      // Scope-bound action wins over Obsidian while the pane has the focus, so its note is muted.
+      const warned = obsidian.length > 0 && !isDefault();
+      // The explanation carries the warning colour, not the keycap; a default key on Obsidian's list stays muted.
+      // No class on the row: the page's indicator comes from `hotkeysNeedAttention`, and the styles test wants a rule for every class emitted.
+      const cls = warned ? "nfe-hotkey-obsidian" : "nfe-hotkey-default";
+      if (obsidian.length > 0 && action.where === "editor") setting.descEl.createSpan({ cls, text: ` Obsidian's ${obsidian.join(", ")} takes this key first: inside the text it does not arrive` });
+      else if (obsidian.length > 0) setting.descEl.createSpan({ cls, text: ` also Obsidian's ${obsidian.join(", ")}: this pane takes it first while the text has the focus` });
+      setting.descEl.createDiv({ cls: "nfe-hotkey-meaning", text: `${action.meaning}${action.where === "editor" ? ". Inside the text: a key Obsidian uses for its own hotkey does not reach it." : ""}` });
+      let recording = false;
+      setting.addExtraButton((b) =>
+        b
+          .setIcon("pencil")
+          .setTooltip("Change: press the new key combination (Escape cancels)")
+          .onClick(() => {
+            if (recording) return;
+            recording = true;
+            setting.addText((t) => {
+              t.setPlaceholder("Press a key…");
+              t.inputEl.addClass("nfe-setting-hotkey");
+              t.inputEl.addEventListener("keydown", (e: KeyboardEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.key === "Escape") {
+                  deps.refresh();
+                  return;
+                }
+                const chord = chordOfEvent(e, mac);
+                if (!chord) return;
+                t.setValue(describeChord(chord, mac));
+                // Taken already: said at once, and saved all the same (the row turns red; Obsidian's own hotkey settings do the same).
+                const holders = HOTKEY_ACTIONS.filter((a) => a.id !== action.id && chordText(chordFor(a.id, own(), platform)) === chordText(chord)).map((a) => a.name);
+                if (holders.length > 0) deps.notice(`Native File Editor: ${describeChord(chord, mac)} is already used by ${holders.join(", ")}. Both rows keep it; the first in the list wins. Change one of them.`);
+                // Obsidian's own hotkey on an editor-bound action: said at once too, and saved all the same (the row shows the warning).
+                const obsidian = action.where === "editor" ? deps.obsidianHoldersOf(chord) : [];
+                if (obsidian.length > 0) deps.notice(`Native File Editor: ${describeChord(chord, mac)} is Obsidian's ${obsidian.join(", ")}, which runs first: inside the text it will not reach ${action.name}. Saved anyway; change it here or under Obsidian's Hotkeys.`);
+                void save(chordText(chord));
+              });
+              t.inputEl.focus();
+            });
+          })
+      );
+      if (!isDefault()) {
+        setting.addExtraButton((b) =>
+          b
+            .setIcon("rotate-ccw")
+            .setTooltip(`Back to the default, ${describeChord(defaultChord(action, platform), mac)}`)
+            .onClick(() => void save(null))
+        );
+      }
+    },
+  };
+}
+
+/** Whether any row of the Hotkeys page is red or in the warning colour: a shared chord, or a changed chord one of Obsidian's hotkeys holds. */
+export function hotkeysNeedAttention(deps: SettingsTabDeps): boolean {
+  const platform = platformOf(Platform);
+  const own = deps.settings().hotkeys[platform];
+  if (chordConflicts(own, platform).length > 0) return true;
+  return HOTKEY_ACTIONS.some((a) => own[a.id] !== undefined && deps.obsidianHoldersOf(chordFor(a.id, own, platform)).length > 0);
+}
+
+/** The names of the other actions on this action's chord. */
+function takenBy(hotkeys: Readonly<Record<string, string>>, id: string, platform: HotkeyPlatform): string[] {
+  const conflict = chordConflicts(hotkeys, platform).find((ids) => ids.includes(id));
+  return conflict ? conflict.filter((other) => other !== id).map((other) => HOTKEY_ACTIONS.find((a) => a.id === other)?.name ?? other) : [];
+}
+
 export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[] {
   const owned = deps.ownedElsewhere();
   const s = deps.settings();
@@ -295,11 +411,6 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
           control: { type: "dropdown", key: "shared.textDirection", options: { auto: "Auto, per line", ltr: "Left to right", rtl: "Right to left" } },
         },
         {
-          name: "Regular expressions in search",
-          desc: "What the .* switch in the search panel understands, with the searches people reach for and how to use $1 in Replace. The same guide is behind the ? in the panel.",
-          action: () => deps.regexHelp(),
-        },
-        {
           name: "Date format",
           desc: "What Insert ▸ Date in the text's context menu writes, in the moment.js syntax Obsidian's Templates plugin uses (YYYY, MM, DD, dddd, MMMM …). Empty: the Templates plugin's own format if it has one, else YYYY-MM-DD.",
           control: { type: "text", key: "shared.dateFormat", placeholder: "YYYY-MM-DD" },
@@ -313,6 +424,47 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
         { name: "Show invisibles", desc: "Spaces as dots, tabs as arrows and a line-ending badge at the end of every line. Also in the pane's header and its menu.", control: { type: "toggle", key: "shared.showInvisibles" } },
         { name: "Tab size", control: { type: "number", key: "shared.tabSize", min: 1, max: 16, step: 1 } },
         { name: "Tab inserts spaces", control: { type: "toggle", key: "shared.tabInsertsSpaces" } },
+      ],
+    },
+    // The guide's row stands next to the Hotkeys page it describes, in a group of its own.
+    {
+      type: "group",
+      heading: "Keys",
+      items: [
+        {
+          name: "Keys and regular expressions",
+          desc: "Every key the editor answers to, and what the .* switch in the search panel understands, with the searches people reach for. The same guide is behind the ? in the pane's head bar.",
+          action: () => deps.regexHelp(),
+        },
+      ],
+    },
+    // Its own page, as File types is: the row on the main page says how many keys differ from the defaults.
+    {
+      type: "page",
+      name: "Hotkeys",
+      desc: "Every key this plugin takes, and your changes to them. Defaults and changes are per platform (Windows and Linux, macOS), so a remap here does not land on another kind of machine. The guide behind the ? in the pane's head bar shows the same keys.",
+      displayValue: () => {
+        const changed = Object.keys(deps.settings().hotkeys[platformOf(Platform)]).length;
+        return changed === 0 ? "defaults" : `${changed} changed`;
+      },
+      // Obsidian's own indicator on the entry when a row inside needs a look: two actions on one key, or a changed key Obsidian holds.
+      status: () => (hotkeysNeedAttention(deps) ? "warning" : null),
+      items: [
+        {
+          type: "group",
+          heading: "Keys",
+          items: [
+            {
+              name: "How to change one",
+              desc: "The pencil records the next key combination you press for that row (Escape cancels); the arrow puts the default back. A change applies to panes opened afterwards. Keys that act inside the text (cursors, lines, block comment) cannot take a combination Obsidian keeps for itself; such a row shows the holder in the warning colour.",
+              render: (setting: Setting) => {
+                setting.setName("How to change one");
+                setting.setDesc("The pencil records the next key combination you press for that row (Escape cancels); the arrow puts the default back. A change applies to panes opened afterwards. Keys that act inside the text (cursors, lines, block comment) cannot take a combination Obsidian keeps for itself; such a row shows the holder in the warning colour.");
+              },
+            },
+            ...HOTKEY_ACTIONS.map((a) => hotkeyRow(deps, a)),
+          ],
+        },
       ],
     },
     {

@@ -206,6 +206,7 @@ function harness(overrides: Partial<SharedSettings> = {}, run?: RunViewDeps) {
   const copies = { existing: new Set<string>(), created: [] as Array<{ path: string; bytes: Uint8Array }> };
   const renamed: TFile[] = [];
   const deleted: TFile[] = [];
+  const helpOpened: number[] = [];
   const transport = new FakeTransport();
   const timers = new FakeTimers();
   const device = new DeviceLocalStore("v", null);
@@ -242,6 +243,7 @@ function harness(overrides: Partial<SharedSettings> = {}, run?: RunViewDeps) {
       },
       rename: (f) => void renamed.push(f as never),
       deleteFile: (f) => void deleted.push(f as never),
+      regexHelp: () => void helpOpened.push(1),
       copy: {
         exists: (path) => copies.existing.has(path) || copies.created.some((c) => c.path === path),
         create: async (path, bytes) => {
@@ -267,6 +269,7 @@ function harness(overrides: Partial<SharedSettings> = {}, run?: RunViewDeps) {
     renamed,
     triggered,
     deleted,
+    helpOpened,
     lastEditor: () => editors[editors.length - 1] as FakeEditor,
     advance: (ms: number) => void (now += ms),
     setSettings: (s: Partial<SharedSettings>) => void (settings = { ...settings, ...s }),
@@ -425,6 +428,32 @@ describe("TextView", () => {
     h.lastEditor().hasComments = false;
     press("Slash", { ctrl: true });
     expect(__notices.at(-1)).toBe("No line comment is known for plain text.");
+  });
+
+  it("the Scope follows the user's key map: a remapped search key opens the panel, the old one falls through; the head bar has the guide's ? left of the mode button", async () => {
+    const h = harness({ hotkeys: { win: { search: "Ctrl+Shift+F", "select-next-occurrence": "Alt+D" }, mac: {}, linux: {} } });
+    h.transport.files.set("a.txt", utf8("x"));
+    await h.view.__load(new TFile("a.txt"));
+    const fn = (h.view.scope as unknown as { bindings: Array<{ fn: (evt: unknown) => unknown }> }).bindings[0]!.fn;
+    const press = (code: string, mods: { ctrl?: boolean; shift?: boolean; alt?: boolean } = {}) =>
+      fn({ code, key: code, ctrlKey: mods.ctrl === true, metaKey: false, altKey: mods.alt === true, shiftKey: mods.shift === true, preventDefault: () => undefined });
+    expect(press("KeyF", { ctrl: true })).toBeUndefined();
+    expect(h.lastEditor().searchOpen).toBe(false);
+    expect(press("KeyF", { ctrl: true, shift: true })).toBe(false);
+    expect(h.lastEditor().searchOpen).toBe(true);
+    expect(press("KeyD", { ctrl: true })).toBeUndefined();
+    expect(press("KeyD", { alt: true })).toBe(false);
+    expect(h.lastEditor().actions).toEqual(["nextOccurrence"]);
+    // The editor was built with this platform's map, for its own keymap.
+    expect(h.lastEditor().options.hotkeys).toEqual({ search: "Ctrl+Shift+F", "select-next-occurrence": "Alt+D" });
+    expect(h.lastEditor().options.platform).toBe("win");
+    // The guide's button sits in the head bar's button group, before the mode button.
+    const buttons = __findByClass(h.view.contentEl, "nfe-head-buttons");
+    const classes = buttons.children.map((c: { className: string }) => c.className);
+    expect(classes[classes.length - 1]).toBe("nfe-mode-button");
+    expect(classes[classes.length - 2]).toBe("clickable-icon nfe-help-button");
+    __fire(buttons.children[classes.length - 2], "click");
+    expect(h.helpOpened).toHaveLength(1);
   });
 
   it("the context menu of the text: clipboard and Select all always; Format, Comment, completion and Insert in the editor only; this line's direction with the current one checked; a web search for the selection", async () => {

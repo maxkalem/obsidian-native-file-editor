@@ -7,7 +7,7 @@
  * HTML and inside the stylesheets to them, so the page renders inside the
  * sandboxed frame with its styles and images and without touching the
  * network (2026-09-08: a Chrome-saved page came out blank because every
- * stylesheet was `cid:`). Pure, this plugin's own code (spec §2 rule 2).
+ * stylesheet was `cid:`). Pure, this plugin's own code: no library parses it.
  */
 
 export function looksLikeMhtml(text: string): boolean {
@@ -135,14 +135,14 @@ function rewriteCssImports(css: string, base: string | null, lookup: (url: strin
  * reaches the network either. A reference the archive does not hold is left
  * as it is and stays blank in the frame. Null when there is no HTML part.
  */
-export function renderMhtml(text: string): string | null {
+export function renderMhtml(text: string, token?: string): string | null {
   const parts = parseMhtml(text);
   const htmlPart = parts.find((p) => p.type === "text/html");
   if (!htmlPart) return null;
-  return renderPart(htmlPart, parts.filter((p) => p !== htmlPart), new Set());
+  return renderPart(htmlPart, parts.filter((p) => p !== htmlPart), new Set(), token);
 }
 
-function renderPart(htmlPart: MhtmlPart, resources: readonly MhtmlPart[], framing: Set<MhtmlPart>): string {
+function renderPart(htmlPart: MhtmlPart, resources: readonly MhtmlPart[], framing: Set<MhtmlPart>, token?: string): string {
   const html = new TextDecoder("utf-8").decode(htmlPart.bytes);
   if (resources.length === 0) return html;
 
@@ -182,7 +182,7 @@ function renderPart(htmlPart: MhtmlPart, resources: readonly MhtmlPart[], framin
       if (framing.has(p)) return null;
       const nested = new Set(framing);
       nested.add(htmlPart);
-      uri = `data:text/html;base64,${toBase64(utf8Bytes(pageDocument(renderPart(p, resources.filter((r) => r !== p), nested))))}`;
+      uri = `data:text/html;base64,${toBase64(utf8Bytes(pageDocument(renderPart(p, resources.filter((r) => r !== p), nested, token), token)))}`;
     } else if (p.type === "text/css") {
       uri = `data:text/css;base64,${toBase64(utf8Bytes(cssOf(p)))}`;
     } else {
@@ -235,8 +235,34 @@ function renderPart(htmlPart: MhtmlPart, resources: readonly MhtmlPart[], framin
 }
 
 /**
+ * What the page reports back to the panel's Log, so that a page that shows
+ * something unexpected can say why: its console, uncaught
+ * errors, unhandled rejections, every Content-Security-Policy refusal and
+ * one line at load. A sandboxed frame in an opaque origin can still
+ * `postMessage` to `window.top`, and the panel accepts only messages
+ * carrying the token of the run it started (nested frames of an archive
+ * post to `top` too, with the same token). One line on purpose, so a page's
+ * own line numbers in error messages stay right. Inline, which the policy
+ * allows; nothing else could carry it into an opaque origin.
+ */
+export function pageReporter(token: string): string {
+  const js = [
+    "(function(){",
+    `var T=${JSON.stringify(token)};var top=window.top;`,
+    "function post(level,text){try{top.postMessage({nfe:T,level:level,text:String(text).slice(0,2000)},'*')}catch(e){}}",
+    "['log','info','warn','error','debug'].forEach(function(l){var o=console[l];console[l]=function(){post(l,Array.prototype.map.call(arguments,function(a){if(typeof a==='string')return a;if(a instanceof Error)return String(a.stack||a);try{return JSON.stringify(a)}catch(e){return String(a)}}).join(' '));if(o)o.apply(console,arguments)}});",
+    "window.addEventListener('error',function(e){post('error',(e.message||'error')+(e.lineno?' (line '+e.lineno+')':''))});",
+    "window.addEventListener('unhandledrejection',function(e){post('error','Unhandled rejection: '+(e.reason&&e.reason.message||e.reason))});",
+    "document.addEventListener('securitypolicyviolation',function(e){post('csp',e.violatedDirective+' refused '+(e.blockedURI||'inline').slice(0,120)+(e.sourceFile?' from '+e.sourceFile.slice(0,80):''))});",
+    "window.addEventListener('load',function(){post('load','loaded: '+(document.title||'(no title)')+', '+document.querySelectorAll('iframe').length+' frame(s), '+document.scripts.length+' script(s), '+document.styleSheets.length+' stylesheet(s)')});",
+    "})();",
+  ].join("");
+  return `<script>${js}</script>`;
+}
+
+/**
  * The document handed to the sandboxed iframe: the page with a policy that
- * lets nothing load from anywhere (spec §2 rule 1: no network, ever): inline
+ * lets nothing load from anywhere (ADR-001: no network, ever): inline
  * scripts and styles, `data:` scripts, `data:`/`blob:` images and media,
  * `data:` fonts, `data:` frames (an archive's nested pages, each carrying
  * this policy again). A `<script src>` or `fetch` to any URL is refused by
@@ -253,8 +279,8 @@ function renderPart(htmlPart: MhtmlPart, resources: readonly MhtmlPart[], framin
  */
 export const PAGE_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' data:; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; frame-src data:;";
 
-export function pageDocument(html: string): string {
-  const csp = `<meta http-equiv="Content-Security-Policy" content="${PAGE_CSP}">`;
+export function pageDocument(html: string, token?: string): string {
+  const csp = `<meta http-equiv="Content-Security-Policy" content="${PAGE_CSP}">${token ? pageReporter(token) : ""}`;
   // The page's own policy would ALSO apply (two meta policies intersect);
   // offline in a sandbox, the plugin's policy is the one that matters, so
   // the page's is dropped.

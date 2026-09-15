@@ -1,6 +1,6 @@
 # ADR-004: Run code with the user's own interpreters
 
-Status: accepted, 2026-09-05 (decisions taken with the user on 2026-09-04).
+Status: accepted, 2026-09-05.
 
 ## Decision
 
@@ -10,14 +10,14 @@ Run is off by default. A per-device toggle enables it; the Run button, the comma
 
 ## Why
 
-The user asked to run the file in the pane, for every language, "in a sandbox". Two things had to be corrected first and shape the design:
+The request: run the file in the pane, for every language, "in a sandbox". Two things had to be corrected first and shape the design:
 
 - **There is no sandbox for a native interpreter.** A Python or Lua process started by the plugin runs with the user's full permissions, exactly as pressing Run in Notepad++ or an IDE does. Only what runs inside Obsidian's JavaScript engine can be isolated, so the feature is two features: a real sandbox for JavaScript (a Worker has no DOM, no Obsidian API and no filesystem, and `terminate()` ends it), and "run with the interpreter on this device" for the rest, said plainly.
 - **Interpreters do not live in the plugin folder.** It is inside the vault: a synced or Git-tracked vault would carry hundreds of megabytes, `clean.cmd` wipes it, and paths differ between devices. Interpreter locations are device-local settings: bare command names resolved through `PATH`, or absolute paths, including one inside the vault at the user's own risk.
 
 Precedent in the community directory: `twibiral/obsidian-execute-code` runs fenced code blocks through user-configured interpreter paths for two dozen languages, desktop only, and passed review with the process use disclosed; `Shell commands` (Taitava) is the other. The review question is therefore disclosure and argument hygiene, not permission.
 
-This amends the specification's §2 rule 7 (the handoff template's "no shell"): the exception is this feature, desktop only, off by default, argv arrays only.
+This amends the project's "no shell" rule: the one exception is this feature, desktop only, off by default, argv arrays only.
 
 ## Consequences
 

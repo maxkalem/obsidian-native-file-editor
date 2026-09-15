@@ -4,8 +4,8 @@ import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate
 /**
  * Row tints, the way Native Git Bridge (the same author's other plugin) draws
  * a diff and a conflict: the whole line takes a translucent background rather
- * than the `+`/`-` text taking a colour (USER, 2026-09-09: "take the palette
- * from the diff and the conflict pane"). Two independent pieces:
+ * than the `+`/`-` text taking a colour: the palette of its diff and conflict
+ * panes. Two independent pieces:
  *
  * - `diffLineTints` for `.diff`/`.patch`/`.rej`: added lines green, removed
  *   lines red, hunk headers and file headers muted. Computed for the visible

@@ -3,8 +3,8 @@ import { OBSIDIAN_OWNED_EXTENSIONS } from "../src/constants";
 import { __allEntries, languageFor, registeredExtensions, resolveLanguage } from "../src/highlight/registry";
 
 /**
- * What the two plugins this one replaces register, read 2026-09-04 (handoff
- * §17). A user switching to Native File Editor must not lose a file type.
+ * What the two plugins this one replaces register, read 2026-09-04. A user
+ * switching to Native File Editor must not lose a file type.
  */
 const CM_CODE_EDITOR = "ts js py css scss less html json xml svg xsl xsd sql yaml yml rs go c cpp h java php sh rb lua toml r ps1 dockerfile swift".split(" ");
 const OBSIDIAN_CODE_EDITOR =

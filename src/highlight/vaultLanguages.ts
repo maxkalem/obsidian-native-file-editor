@@ -10,7 +10,7 @@ import { __clearVaultLanguages, keywordTableFor, registerCustomExtension, regist
  * for its extensions while it is there (the user's rule: from the folder if
  * present, from the plugin otherwise), so a bundled table can be copied out
  * as an example, edited, and used in place of the original. This is how a
- * language arrives without a release: data, no code, no download (spec §8).
+ * language arrives without a release: data, no code, no download (ADR-001).
  * A file that is not valid is named in the log and in the report and the
  * others still load.
  */

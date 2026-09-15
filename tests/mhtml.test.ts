@@ -37,6 +37,15 @@ describe("mhtml", () => {
     expect(pageDocument("<p>x</p>")).toMatch(/^<!doctype html><html><head><meta http-equiv=.*<\/head><body><p>x<\/p><\/body><\/html>$/);
   });
 
+  it("with a token the document carries the reporter script after the policy, posting to window.top with that token; without one, nothing", () => {
+    const doc = pageDocument("<html><head><title>t</title></head><body/></html>", "nfe-xyz");
+    expect(doc).toMatch(/^<html><head><meta http-equiv="Content-Security-Policy" content="[^"]*"><script>\(function\(\)\{var T="nfe-xyz";/);
+    expect(doc).toContain("top.postMessage({nfe:T,level:level,text:");
+    for (const hook of ["'error'", "'unhandledrejection'", "'securitypolicyviolation'", "'load'", "console[l]="]) expect(doc).toContain(hook);
+    expect(doc.split("\n")).toHaveLength(1);
+    expect(pageDocument("<html><head><title>t</title></head><body/></html>")).not.toContain("<script>");
+  });
+
   it("renderMhtml inlines the archive's stylesheets as <style> text and its images as data: URIs, resolving relative references against each part's location", () => {
     const b64 = (t: string) => Buffer.from(t, "utf8").toString("base64");
     const png = "iVBORw0KGgo=";

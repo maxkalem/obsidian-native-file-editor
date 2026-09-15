@@ -5,8 +5,7 @@ import { describe, expect, it } from "vitest";
 import { workerSource } from "../../src/run/worker";
 
 /**
- * The JavaScript sample the check-notes point at (`064 js sample.js` in the
- * vault is a copy of fixtures/code/sample.js) has to run in the plugin's
+ * The JavaScript sample (fixtures/code/sample.js) has to run in the plugin's
  * sandbox, or the Run button has nothing to show. The prelude needs a Worker
  * global; a `vm` context with `self`, `postMessage` and timers stands in for
  * one, which is enough to prove the script is not a module, sets no network

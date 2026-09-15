@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Converts Notepad++'s `langs.model.xml` into `src/highlight/langs.generated.ts`:
- * the keyword tables behind tier 4 of the registry (handoff §17). Run when the
+ * the keyword tables behind tier 4 of the registry (docs/architecture.md). Run when the
  * table changes, commit the output; the build does not need the XML.
  *
  *   node scripts/convert-langs-model.mjs "C:\Program Files\Notepad++\langs.model.xml"

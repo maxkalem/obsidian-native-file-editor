@@ -20,10 +20,11 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { changeCase } from "../core/editText";
+import { chordFor, describeChord } from "../core/hotkeys";
 import { OBSIDIAN_SCHEME_CLASS, nfeHighlighter } from "../highlight/highlighter";
 import { forkLineHighlighter } from "../highlight/obsidianFork";
 import type { EditorFactory, EditorHandle, EditorOptions, LineDirection, SelectionInfo } from "./editor";
-import { columnKeymap, columnMode, selectAllOccurrences } from "./columnMode";
+import { DEFAULT_KEYS_TAKEN, columnKeymap, columnMode, selectAllOccurrences } from "./columnMode";
 import { conflictTints, diffLineTints } from "./lineTints";
 import { createSearchPanel } from "./searchPanel";
 
@@ -238,7 +239,7 @@ export function buildExtensions(options: EditorOptions, wrap: Compartment = new 
     bracketMatching(),
     columnMode(),
     highlightSelectionMatches(),
-    search({ top: true, createPanel: (view) => createSearchPanel(view, { hints: options.searchHints, readOnly: options.readOnly, help: options.regexHelp }) }),
+    search({ top: true, createPanel: (view) => createSearchPanel(view, { hints: options.searchHints, readOnly: options.readOnly, keyOf: (id) => describeChord(chordFor(id, options.hotkeys, options.platform), options.platform === "mac") }) }),
     problemField,
     lineDirectionField,
     conflictTints,
@@ -253,7 +254,8 @@ export function buildExtensions(options: EditorOptions, wrap: Compartment = new 
     EditorView.editorAttributes.of({ class: OBSIDIAN_SCHEME_CLASS }),
     EditorState.tabSize.of(options.tabSize),
     indentUnit.of(options.tabInsertsSpaces ? " ".repeat(options.tabSize) : "\t"),
-    keymap.of([...columnKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
+    // The plugin's bindings first (the remappable ones on their configured chords), then CodeMirror's own without the keys the remappable commands had by default.
+    keymap.of([...columnKeymap(options.hotkeys, options.platform), ...defaultKeymap.filter((b) => !b.key || !DEFAULT_KEYS_TAKEN.has(b.key)), ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) options.onChange();
       // The panel is state, not DOM: the head's search button follows it here.

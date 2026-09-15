@@ -78,9 +78,14 @@ export function execute(req: ExecuteRequest, deps: ExecuteDeps): ExecuteHandle {
     // with its stylesheets and images inlined as data: URIs), rendered by the
     // panel in a sandboxed frame: scripts in an opaque origin, no network.
     const started = Date.now();
-    const html = looksLikeMhtml(req.text) ? renderMhtml(req.text) : req.text;
+    // One token per run: the page's reports come back through window.top with it (mhtml.ts, pageReporter).
+    const token = `nfe-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const archive = looksLikeMhtml(req.text);
+    const html = archive ? renderMhtml(req.text, token) : req.text;
     if (html === null) return fail("this MHTML file has no text/html part");
-    req.onOutput({ kind: "page", text: pageDocument(html) });
+    const doc = pageDocument(html, token);
+    req.onOutput({ kind: "info", text: `[page] ${archive ? "MHTML archive" : "HTML document"}, document ${(doc.length / 1024).toFixed(0)} KB, ${(doc.match(/<iframe\b/gi) ?? []).length} frame(s) in the page, ${Date.now() - started} ms to build\n` });
+    req.onOutput({ kind: "page", text: doc, token });
     return { stop: () => undefined, done: Promise.resolve({ exitCode: 0, timedOut: false, stopped: false, truncated: false, ms: Date.now() - started, error: null, step: 1, steps: 1 }) };
   }
 

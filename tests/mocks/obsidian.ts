@@ -180,6 +180,9 @@ export const Platform = {
   isTablet: false,
   isAndroidApp: false,
   isIosApp: false,
+  isMacOS: false,
+  isWin: true,
+  isLinux: false,
 };
 
 export function __setPlatformDesktop(desktop: boolean): void {
@@ -463,23 +466,31 @@ export class PluginSettingTab {
 export class Setting {
   settingEl: Any;
   controlEl: Any;
+  descEl: Any;
   nameText = "";
   descText = "";
+  classes: string[] = [];
   buttons: Array<{ text: string; tooltip: string; icon: string; click: () => void }> = [];
   texts: Array<{ inputEl: Any; value: string; onChange: ((v: string) => void) | null }> = [];
   constructor(containerEl: Any) {
     this.settingEl = adopt(containerEl, fakeEl("div", "setting-item"));
+    this.descEl = adopt(this.settingEl, fakeEl("div", "setting-item-description"));
     this.controlEl = adopt(this.settingEl, fakeEl("div", "setting-item-control"));
   }
   setName(n: string): this {
     this.nameText = n;
     return this;
   }
+  /** As Obsidian's: the description element is emptied and given the text, so a re-render into the same Setting starts clean. */
   setDesc(d: string): this {
     this.descText = d;
+    this.descEl.empty();
+    this.descEl.textContent = d;
     return this;
   }
-  setClass(): this {
+  setClass(cls: string): this {
+    this.classes.push(cls);
+    this.settingEl.addClass(cls);
     return this;
   }
   private button(): Any {

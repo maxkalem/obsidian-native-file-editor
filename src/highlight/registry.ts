@@ -14,7 +14,6 @@ import { xml } from "@codemirror/lang-xml";
 import { yaml } from "@codemirror/lang-yaml";
 import { astro } from "@fazelstudio/codemirror-lang-astro";
 import { assembly } from "@codincod/codemirror-lang-assembly";
-import { prisma } from "@fazelstudio/codemirror-lang-prisma";
 import { nix } from "@replit/codemirror-lang-nix";
 import { parser as solidityParser } from "@replit/codemirror-lang-solidity";
 import { svelte } from "@replit/codemirror-lang-svelte";
@@ -25,6 +24,7 @@ import { hexRecordMode } from "./hexRecordMode";
 import { makefileMode } from "./makefileMode";
 import { mhtmlMode } from "./mhtmlMode";
 import { retag, withFallbackKeywords, withLineComment, wholeWords } from "./streamFixes";
+import { prismaFixed } from "./prismaFix";
 import { txt2tagsMode } from "./txt2tagsMode";
 import { type KeywordLanguage, keywordMode } from "./keywordMode";
 import { NPP_FALLBACKS, NPP_LANGUAGES } from "./langs.generated";
@@ -124,8 +124,8 @@ import { adaptStreamParser } from "./obsidianFork";
  * The language registry: extension -> language entry. This module is the only
  * place any extension or language name appears; everything else asks it.
  *
- * Tiers, from the handoff's inventory: tier 1 is the official lezer packages
- * (the fourteen the user confirmed), tier 2 is `@codemirror/legacy-modes`
+ * Tiers (docs/architecture.md): tier 1 is the official lezer packages, tier 2
+ * is `@codemirror/legacy-modes`
  * where tier 1 has nothing. Where both offer a language, tier 1 is listed and
  * the legacy mode is not. Tier 3 is the confirmed set of community packages,
  * each bundled after its licence and size were checked (THIRD_PARTY_NOTICES).
@@ -209,14 +209,15 @@ const ENTRIES: readonly LanguageEntry[] = [
   lezer("PHP", ["php", "phtml", "php3", "php4", "php5", "phps", "phpt"], () => php()),
   lezer("C/C++", ["c", "h", "cpp", "cc", "cxx", "c++", "hpp", "hh", "hxx", "h++", "ino", "cu", "cuh", "lex"], () => cpp()),
 
-  // Tier 3: community lezer packages, one decision each (handoff §17; sizes
-  // and licences in THIRD_PARTY_NOTICES.md). Only what tiers 1 and 2 lack.
+  // Tier 3: community lezer packages, one decision each (sizes and licences in
+  // THIRD_PARTY_NOTICES.md). Only what tiers 1 and 2 lack.
   lezer("Svelte", ["svelte"], () => svelte()),
   lezer("Astro", ["astro"], () => astro()),
   lezer("Elixir", ["ex", "exs"], () => elixir()),
   lezer("HCL", ["hcl", "tf", "tfvars", "nomad"], () => hcl()),
   lezer("Nix", ["nix"], () => nix()),
-  lezer("Prisma", ["prisma"], () => prisma()),
+  // The package's own styleTags reach almost nothing (prismaFix.ts); the fixed language, same grammar.
+  lezer("Prisma", ["prisma"], () => prismaFixed()),
   // One grammar for the shape every assembler shares (8080/Z80, NASM/MASM/FASM,
   // GNU as in both syntaxes, 68000, ARM, 6502, MIPS, RISC-V); replaces the
   // legacy gas and z80 stream modes (2026-09-07), which knew one syntax each.

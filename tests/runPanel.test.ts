@@ -192,6 +192,67 @@ describe("RunPanel", () => {
     expect(panel.rootEl.hasClass("nfe-run-page-mode")).toBe(false);
   });
 
+  it("Output | Log: info lines go to both views, the Log tab shows the log and counts errors, Clear resets", async () => {
+    const panel = makePanel();
+    const run = panel.run();
+    started[0]?.onOutput({ kind: "info", text: "[Sandbox]\n" });
+    started[0]?.onOutput({ kind: "stdout", text: "a\n" });
+    const tabs = __findAllByClass(panel.rootEl, "nfe-run-tab");
+    expect(tabs.map((t: { textContent: string }) => t.textContent)).toEqual(["Output", "Log"]);
+    expect(tabs[0]?.hasClass("is-active")).toBe(true);
+    expect(__findByClass(panel.rootEl, "nfe-run-log-wrap").hasClass("nfe-hidden")).toBe(true);
+    const log = __findByClass(panel.rootEl, "nfe-run-log");
+    expect(log.children.map((c: { textContent: string }) => c.textContent)).toEqual(["[Sandbox]\n"]);
+    panel.log("something failed", "error");
+    expect(tabs[1]?.textContent).toBe("Log (1)");
+    // Copy copies the view that is showing: the output now, the whole Log once the Log tab is active.
+    __fire(__findAllByClass(panel.rootEl, "nfe-run-tool")[1], "click");
+    expect(copied).toEqual(["[Sandbox]\na\n"]);
+    expect(tabs[1]?.hasClass("has-errors")).toBe(true);
+    __fire(tabs[1], "click");
+    expect(tabs[1]?.hasClass("is-active")).toBe(true);
+    expect(tabs[0]?.hasClass("is-active")).toBe(false);
+    expect(__findByClass(panel.rootEl, "nfe-run-log-wrap").hasClass("nfe-hidden")).toBe(false);
+    expect(__findByClass(panel.rootEl, "nfe-run-output-wrap").hasClass("nfe-hidden")).toBe(true);
+    expect(log.children.map((c: { className: string }) => c.className)).toEqual(["nfe-run-info", "nfe-run-stderr"]);
+    __fire(__findAllByClass(panel.rootEl, "nfe-run-tool")[1], "click");
+    expect(copied).toEqual(["[Sandbox]\na\n", "[Sandbox]\nsomething failed\n"]);
+    panel.clear();
+    __fire(__findAllByClass(panel.rootEl, "nfe-run-tool")[1], "click");
+    expect(copied[2]).toBe("");
+    expect(log.children).toHaveLength(0);
+    expect(tabs[1]?.textContent).toBe("Log");
+    expect(tabs[1]?.hasClass("has-errors")).toBe(false);
+    started[0]?.resolve(result());
+    await run;
+  });
+
+  it("a page's messages reach the Log only with the token of the page being shown; a nested frame's and a stranger's differ only by that", async () => {
+    const panel = makePanel();
+    const run = panel.run();
+    started[0]?.onOutput({ kind: "page", text: "<html><body>hi</body></html>", token: "nfe-abc" });
+    const log = __findByClass(panel.rootEl, "nfe-run-log");
+    panel.receiveMessage({ nfe: "nfe-abc", level: "log", text: "hello from the page" });
+    panel.receiveMessage({ nfe: "nfe-abc", level: "csp", text: "style-src-elem refused data:" });
+    panel.receiveMessage({ nfe: "nfe-abc", level: "error", text: "boom (line 3)" });
+    panel.receiveMessage({ nfe: "other", level: "error", text: "not ours" });
+    panel.receiveMessage({ level: "error", text: "no token" });
+    panel.receiveMessage("junk");
+    panel.receiveMessage({ nfe: "nfe-abc", level: "error", text: 42 });
+    expect(log.children.map((c: { className: string; textContent: string }) => [c.className, c.textContent])).toEqual([
+      ["nfe-run-info", "[page log] hello from the page\n"],
+      ["nfe-run-stderr", "[page csp] style-src-elem refused data:\n"],
+      ["nfe-run-stderr", "[page error] boom (line 3)\n"],
+    ]);
+    expect(__findAllByClass(panel.rootEl, "nfe-run-tab")[1]?.textContent).toBe("Log (2)");
+    // Without a page (or after Clear) nothing is accepted, whatever the token.
+    panel.clear();
+    panel.receiveMessage({ nfe: "nfe-abc", level: "log", text: "late" });
+    expect(log.children).toHaveLength(0);
+    started[0]?.resolve(result());
+    await run;
+  });
+
   it("Run while running does nothing; destroy stops a run", async () => {
     const panel = makePanel();
     const run = panel.run();

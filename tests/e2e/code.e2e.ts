@@ -11,7 +11,7 @@ import { decodeText } from "../../src/model/text/encoding";
  * sample.<first extension>. Every entry with a language must parse its sample
  * and produce highlighted tokens; a mode that emits nothing on a plausible
  * file is either misregistered or broken, and this is where that shows up.
- * The same files are what the user opens on the device.
+ * The same files serve for checks inside Obsidian.
  */
 
 const CODE = fileURLToPath(new URL("./fixtures/code/", import.meta.url));

@@ -1,5 +1,6 @@
 import type { Extension } from "@codemirror/state";
 import type { CaseKind } from "../core/editText";
+import type { HotkeyPlatform } from "../core/hotkeys";
 
 /**
  * What the text view needs from an editor, without naming CodeMirror. The
@@ -24,8 +25,9 @@ export interface EditorOptions {
   readonly textDirection: "auto" | "ltr" | "rtl";
   /** Whether the search panel's buttons spell out their shortcuts. */
   readonly searchHints: () => boolean;
-  /** Opens the regular-expression guide; the panel shows a `?` when present. */
-  readonly regexHelp?: () => void;
+  /** The user's key remapping for THIS platform (core/hotkeys.ts) and which platform it is, consulted when the editor is built; a change applies to editors built afterwards. */
+  readonly hotkeys: Readonly<Record<string, string>>;
+  readonly platform: HotkeyPlatform;
   readonly tabSize: number;
   readonly tabInsertsSpaces: boolean;
   /** Called after every document change. */

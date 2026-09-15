@@ -1,4 +1,5 @@
-import { FileView, Keymap, Menu, type MenuItem, Notice, Scope, type TFile, type WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
+import { FileView, Menu, type MenuItem, Notice, Platform, Scope, type TFile, type WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
+import { HOTKEY_ACTIONS, chordFor, matchesEvent, platformOf } from "../core/hotkeys";
 import { AUTOSAVE_DELAY_MS, VIEW_TYPE_TEXT } from "../constants";
 import { Autosave, type Timers } from "../core/autosave";
 import { type CaseKind, formatDate, formatDateTime, menuExcerpt, webSearchUrl } from "../core/editText";
@@ -67,7 +68,7 @@ export interface TextViewDeps {
   readonly setTextDirection?: (direction: SharedSettings["textDirection"]) => void;
   /** F2 or a click on the title: Obsidian's own rename dialog for the file. */
   readonly rename?: (file: TFile) => void;
-  /** The `?` in the search panel: the regular-expression guide (a modal the plugin owns). */
+  /** The `?` in the head bar: the guide to the keys and the search patterns (a modal the plugin owns). */
   readonly regexHelp?: () => void;
   /** Obsidian's delete dialog for the file (pane menu). */
   readonly deleteFile?: (file: TFile) => void;
@@ -438,54 +439,46 @@ export class TextView extends FileView {
   }
 
   /**
-   * What a key does in this pane, by physical key: Mod+F opens the search
-   * panel and Mod+H does the same in the editor (H is "replace" elsewhere;
-   * the panel has both rows; a preview cannot replace), F3 and
-   * Mod+G move to the next match, Shift+F3 and Shift+Mod+G to the previous,
-   * F2 renames the file. Null when the key is not this pane's.
+   * What a key does in this pane: the `scope` actions of core/hotkeys.ts on
+   * their configured chords (search, replace in the editor only, next and
+   * previous match, the two Enter chords while the panel is open, rename,
+   * the occurrence selections, the line comment, completion). Null when the
+   * key is not this pane's, so Obsidian's own bindings run.
    */
   nfeKeyAction(evt: KeyboardEvent): (() => void) | null {
-    const mod = Keymap.isModifier(evt, "Mod");
-    const shift = evt.shiftKey;
-    if (evt.altKey) {
-      // The search panel's two Alt chords. Obsidian binds Alt+Enter and
-      // Mod+Alt+Enter to link commands, and its hotkey handler consumes the
-      // key even when the command declines (app.js: executeCommand returns
-      // true unless the callback throws), so the panel's own listener never
-      // saw them (2026-09-09). Taken here only while the panel is open.
-      if ((evt.code === "Enter" || evt.code === "NumpadEnter") && !shift && this.searchOpen) {
-        if (mod) return this.nfeEditorReadOnly ? null : () => this.nfeEditor?.replaceAllMatches();
-        return () => this.nfeEditor?.selectAllMatches();
-      }
-      return null;
+    // Every chord is the user's (core/hotkeys.ts), matched by physical key.
+    // Obsidian binds several of the defaults itself (Alt+Enter and
+    // Mod+Alt+Enter to link commands, Mod+/ to its comment toggle, Mod+D to
+    // delete paragraph) and its hotkey handler consumes the key even when the
+    // command declines (app.js: executeCommand returns true unless the
+    // callback throws), so this Scope, consulted first, is where they live.
+    const platform = platformOf(Platform);
+    const hotkeys = this.nfeDeps.settings().hotkeys[platform];
+    const mac = platform === "mac";
+    const editable = !this.nfeEditorReadOnly;
+    const handlers: Record<string, () => (() => void) | null> = {
+      search: () => () => this.openSearch(),
+      // Replace: the editor only; a preview has nothing to replace into.
+      replace: () => (this.nfeMode === "edit" ? () => this.openSearch() : null),
+      "find-next": () => () => this.nfeEditor?.findNext(),
+      "find-previous": () => () => this.nfeEditor?.findPrevious(),
+      "find-next-alt": () => () => this.nfeEditor?.findNext(),
+      "select-all-matches": () => (this.searchOpen ? () => this.nfeEditor?.selectAllMatches() : null),
+      "replace-all": () => (this.searchOpen && editable ? () => this.nfeEditor?.replaceAllMatches() : null),
+      rename: () => () => this.renameFile(),
+      "select-next-occurrence": () => () => this.nfeEditor?.selectNextOccurrence(),
+      "select-all-occurrences": () => () => this.nfeEditor?.selectAllOccurrences(),
+      "toggle-line-comment": () => (editable ? () => this.nfeToggleLineComment() : null),
+      completion: () => (editable ? () => this.nfeEditor?.startCompletion() : null),
+    };
+    for (const action of HOTKEY_ACTIONS) {
+      if (action.where !== "scope") continue;
+      const chord = chordFor(action.id, hotkeys, platform);
+      if (matchesEvent(chord, evt, mac)) return handlers[action.id]?.() ?? null;
+      // The second "next match" key doubles as "previous" with Shift, as Mod+G / Mod+Shift+G always did.
+      if (action.id === "find-next-alt" && matchesEvent({ ...chord, shift: !chord.shift }, evt, mac)) return () => this.nfeEditor?.findPrevious();
     }
-    switch (evt.code) {
-      case "Space":
-        // Completion on request, as Notepad++ has it; Obsidian has no default on Ctrl+Space.
-        return mod && !shift && !this.nfeEditorReadOnly ? () => this.nfeEditor?.startCompletion() : null;
-      case "KeyD":
-        // CodeMirror's "select next occurrence"; Obsidian's Mod+D (delete paragraph) would consume it first.
-        return mod && !shift ? () => this.nfeEditor?.selectNextOccurrence() : null;
-      case "KeyL":
-        // Every occurrence. CodeMirror's own Mod+Shift+L refuses once there is more than one range (the state after Ctrl+D); the plugin's does not.
-        return mod && shift ? () => this.nfeEditor?.selectAllOccurrences() : null;
-      case "Slash":
-        // CodeMirror's own Mod+/ never arrives: Obsidian's "Toggle comment" hotkey consumes it first (see the Alt chords above).
-        return mod && !shift && !this.nfeEditorReadOnly ? () => this.nfeToggleLineComment() : null;
-      case "KeyF":
-        return mod && !shift ? () => this.openSearch() : null;
-      case "KeyH":
-        // Replace: the editor only; a preview has nothing to replace into.
-        return mod && !shift && this.nfeMode === "edit" ? () => this.openSearch() : null;
-      case "KeyG":
-        return mod ? () => (shift ? this.nfeEditor?.findPrevious() : this.nfeEditor?.findNext()) : null;
-      case "F3":
-        return !mod ? () => (shift ? this.nfeEditor?.findPrevious() : this.nfeEditor?.findNext()) : null;
-      case "F2":
-        return !mod && !shift ? () => this.renameFile() : null;
-      default:
-        return null;
-    }
+    return null;
   }
 
   /** F2, or a click on the tab's title: Obsidian's rename dialog, as a Markdown note has. */
@@ -811,7 +804,8 @@ export class TextView extends FileView {
       eolLabel: describeLineEnding(this.nfeDoc.info.eol),
       textDirection: s.textDirection,
       searchHints: () => this.nfeDeps.settings().searchHints,
-      regexHelp: this.nfeDeps.regexHelp,
+      hotkeys: s.hotkeys[platformOf(Platform)],
+      platform: platformOf(Platform),
       tabSize: s.tabSize,
       tabInsertsSpaces: s.tabInsertsSpaces,
       onChange: () => {
@@ -871,6 +865,15 @@ export class TextView extends FileView {
       runBtn.toggleClass("is-active", this.runPanelOpen);
       setIcon(runBtn.createSpan({ cls: "nfe-mode-icon" }), "play");
       runBtn.addEventListener("click", () => void this.runFile());
+    }
+    if (this.nfeDeps.regexHelp) {
+      // The guide to the keys and the search patterns: a `?` in the head bar, left of the mode button (it sat in the search row before).
+      const help = buttons.createEl("button", { cls: "clickable-icon nfe-help-button" });
+      setIcon(help, "circle-help");
+      help.setAttribute("aria-label", "Keys and regular expressions");
+      help.setAttribute("data-tooltip-position", "top");
+      const open = this.nfeDeps.regexHelp;
+      help.addEventListener("click", () => open());
     }
     const btn = buttons.createEl("button", {
       cls: "nfe-mode-button",

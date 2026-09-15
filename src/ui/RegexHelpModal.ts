@@ -1,12 +1,14 @@
 import { type App, Modal, Notice, Platform } from "obsidian";
+import { HOTKEY_ACTIONS, type HotkeyAction, type HotkeyOverrides, NO_OVERRIDES, chordFor, describeChord, platformOf } from "../core/hotkeys";
 
 /**
  * A short guide to regular expressions as the search panel uses them
  * (JavaScript's syntax, since the search runs on CodeMirror's `RegExp`), with
  * the examples people reach for, and the keys the editor answers to. Opened
- * from Settings → Editor and from the `?` in the search panel. A click on a
- * pattern copies it (USER, 2026-09-09: no copy icon, the pattern itself is
- * the button). Plain DOM, no HTML strings.
+ * from Settings → Editor and from the `?` in the pane's head bar. A click on a
+ * pattern copies it (no copy icon, the pattern itself is the button); the
+ * keys are shown as the user has mapped them. Plain DOM, no
+ * HTML strings.
  */
 
 interface Row {
@@ -49,85 +51,93 @@ const EXAMPLES: readonly (Row & { readonly replaceNote?: string })[] = [
   { pattern: "(\\w+) \\1", meaning: "a word repeated (the the): \\1 is the first group again" },
 ];
 
-const MOD = Platform.isMacOS ? "Cmd" : "Ctrl";
-
 /**
- * What the editor answers to, by group. Only keys that reach the editor are
- * listed: Obsidian's own hotkeys (Ctrl+D, Ctrl+I, Ctrl+K, Ctrl+B, Ctrl+Enter,
- * Ctrl+/ …) are consumed before CodeMirror sees them unless the pane takes
- * them itself (TextView.nfeKeyAction), which is the case for the ones here.
+ * The keys the editor answers to, by group: the remappable ones from
+ * core/hotkeys.ts as the user has them, plus the fixed ones (CodeMirror's
+ * own bindings the plugin does not remap, the mouse, the menu). Only keys
+ * that reach the editor are listed: Obsidian's own hotkeys (Ctrl+I, Ctrl+K,
+ * Ctrl+B, Ctrl+Enter …) are consumed before CodeMirror sees them unless the
+ * pane takes them itself.
  */
-const KEYS: readonly { readonly group: string; readonly rows: readonly Row[] }[] = [
-  {
-    group: "Search",
-    rows: [
-      { pattern: `${MOD}+F  ${MOD}+H`, meaning: "open the panel; the same panel with Replace (editor only). Escape closes it" },
-      { pattern: `F3  Shift+F3  ${MOD}+G  Shift+${MOD}+G`, meaning: "next / previous match, panel open or not" },
-      { pattern: "Alt+Enter", meaning: "every match becomes a selection and the text takes the focus: typing changes all of them" },
-      { pattern: `${MOD}+Alt+Enter`, meaning: "replace all (in the Replace field: Enter replaces one)" },
-    ],
-  },
-  {
-    group: "Several cursors",
-    rows: [
-      { pattern: `${MOD}+Alt+↑  ${MOD}+Alt+↓`, meaning: "add a cursor on the line above / below, in the same column (at the end of a shorter line)" },
-      { pattern: `${MOD}+D`, meaning: "add the next occurrence of the selected text as another selection" },
-      { pattern: `${MOD}+Shift+L`, meaning: "select every occurrence of the selected text" },
-      { pattern: "Alt+drag", meaning: "column selection: one range per line over the rectangle" },
-      { pattern: `${MOD}+click`, meaning: "add a cursor where you click" },
-      { pattern: "Escape", meaning: "back to one cursor (with the search panel closed)" },
-    ],
-  },
-  {
-    group: "Lines",
-    rows: [
-      { pattern: "Alt+↑  Alt+↓", meaning: "move the line (or the selected lines) up / down" },
-      { pattern: "Shift+Alt+↑  Shift+Alt+↓", meaning: "copy the line up / down" },
-      { pattern: `Shift+${MOD}+K`, meaning: "delete the line" },
-      { pattern: "Alt+L", meaning: "select the line" },
-      { pattern: `Tab  Shift+Tab  ${MOD}+]  ${MOD}+[`, meaning: "indent / unindent the selected lines" },
-      { pattern: `${MOD}+Alt+\\`, meaning: "reindent the selection by the language's rules" },
-    ],
-  },
-  {
-    group: "Editing",
-    rows: [
-      { pattern: `${MOD}+/  Alt+A`, meaning: "toggle the line comment / the block comment of the language" },
-      { pattern: `${MOD}+Space`, meaning: "word completion: the words of this file and what the language knows" },
-      { pattern: `${MOD}+Z  ${MOD}+Y`, meaning: "undo / redo" },
-      { pattern: `${MOD}+U  Alt+U`, meaning: "undo / redo a selection change" },
-      { pattern: `Shift+${MOD}+\\`, meaning: "jump to the matching bracket" },
-      { pattern: `${MOD}+Shift+[  ${MOD}+Shift+]`, meaning: "fold / unfold the block at the cursor (the gutter triangles do the same)" },
-      { pattern: `${MOD}+Alt+[  ${MOD}+Alt+]`, meaning: "fold / unfold everything" },
-      { pattern: "Right click", meaning: "the context menu: clipboard, case, comments, completion, date, this line's direction, web search" },
-    ],
-  },
-];
+function keyRows(overrides: HotkeyOverrides): ReadonlyArray<{ readonly group: string; readonly rows: readonly Row[] }> {
+  const platform = platformOf(Platform);
+  const mac = platform === "mac";
+  const MOD = mac ? "Cmd" : "Ctrl";
+  const key = (id: string) => describeChord(chordFor(id, overrides[platform], platform), mac);
+  const mapped = (group: HotkeyAction["group"]): Row[] => HOTKEY_ACTIONS.filter((a) => a.group === group).map((a) => ({ pattern: key(a.id), meaning: a.meaning }));
+  return [
+    {
+      group: "Search",
+      rows: [
+        ...mapped("Search"),
+        { pattern: `Shift+${key("find-next-alt")}`, meaning: "previous match (the second key with Shift)" },
+        { pattern: "Enter  Shift+Enter  Escape", meaning: "in the Find field: next / previous match; close the panel" },
+      ],
+    },
+    {
+      group: "Several cursors",
+      rows: [
+        ...mapped("Several cursors"),
+        { pattern: "Alt+drag", meaning: "column selection: one range per line over the rectangle; on a shorter line the rectangle goes on past its end and the first keystroke pads with spaces (Notepad++'s column mode)" },
+        { pattern: `${MOD}+click`, meaning: "add a cursor where you click" },
+        { pattern: `←  →  ${MOD}+←  ${MOD}+→`, meaning: "with several cursors, each stays on its own line: past the line's end it goes on into virtual space instead of wrapping (← and Backspace come back through it; the first keystroke pads with spaces)" },
+        { pattern: "Escape", meaning: "back to one cursor (with the search panel closed)" },
+      ],
+    },
+    {
+      group: "Lines",
+      rows: [
+        ...mapped("Lines"),
+        { pattern: `Shift+${MOD}+K`, meaning: "delete the line" },
+        { pattern: `Tab  Shift+Tab  ${MOD}+]  ${MOD}+[`, meaning: "indent / unindent the selected lines" },
+        { pattern: `${MOD}+Alt+\\`, meaning: "reindent the selection by the language's rules" },
+      ],
+    },
+    {
+      group: "Editing",
+      rows: [
+        ...mapped("Editing"),
+        { pattern: `${MOD}+Z  ${MOD}+Y`, meaning: "undo / redo" },
+        { pattern: `${MOD}+U  Alt+U`, meaning: "undo / redo a selection change" },
+        { pattern: `Shift+${MOD}+\\`, meaning: "jump to the matching bracket" },
+        { pattern: `${MOD}+Shift+[  ${MOD}+Shift+]`, meaning: "fold / unfold the block at the cursor (the gutter triangles do the same)" },
+        { pattern: `${MOD}+Alt+[  ${MOD}+Alt+]`, meaning: "fold / unfold everything" },
+        { pattern: "Right click", meaning: "the context menu: clipboard, case, comments, completion, date, this line's direction, web search" },
+      ],
+    },
+  ];
+}
 
 export class RegexHelpModal extends Modal {
-  readonly title = "Regular expressions in search";
+  readonly title = "Keys and regular expressions";
+  private readonly hotkeys: HotkeyOverrides;
 
-  constructor(app: App) {
+  /** `hotkeys` is the user's remapping (settings, per platform), so the guide names the keys as they are on this one. */
+  constructor(app: App, hotkeys: HotkeyOverrides = NO_OVERRIDES) {
     super(app);
+    this.hotkeys = hotkeys;
   }
 
   override onOpen(): void {
     this.titleEl.setText(this.title);
     this.contentEl.addClass("nfe-modal", "nfe-regex-help");
     this.contentEl.createEl("p", {
-      text: "With the .* switch on, the Find field is a pattern rather than exact text, in JavaScript's syntax. Match case decides whether letters must match in case; Whole word adds \\b around the pattern. In the Replace field, $1, $2 … stand for the numbered groups of the match and $& for the whole match.",
-    });
-    this.contentEl.createEl("p", {
       cls: "nfe-modal-note",
-      text: "Click a pattern to copy it.",
+      text: "The keys with a row under Settings → Native File Editor → Hotkeys can be changed there; this list shows them as they are now.",
     });
-    this.section("Syntax", SYNTAX);
-    this.section("Common searches", EXAMPLES);
     this.contentEl.createEl("h3", { text: "Keys in the editor" });
-    for (const { group, rows } of KEYS) {
+    for (const { group, rows } of keyRows(this.hotkeys)) {
       this.contentEl.createEl("h4", { text: group });
       this.table(rows, false);
     }
+    this.contentEl.createEl("h3", { text: "Regular expressions in search" });
+    this.contentEl.createEl("p", {
+      text: "With the .* switch on, the Find field is a pattern rather than exact text, in JavaScript's syntax. Match case decides whether letters must match in case; Whole word adds \\b around the pattern. In the Replace field, $1, $2 … stand for the numbered groups of the match and $& for the whole match.",
+    });
+    // Under the patterns it speaks of, not at the top with the keys.
+    this.contentEl.createEl("p", { cls: "nfe-modal-note", text: "Click a pattern below to copy it." });
+    this.section("Syntax", SYNTAX);
+    this.section("Common searches", EXAMPLES);
   }
 
   private section(heading: string, rows: readonly (Row & { readonly replaceNote?: string })[]): void {
@@ -135,17 +145,25 @@ export class RegexHelpModal extends Modal {
     this.table(rows, true);
   }
 
+  /**
+   * A pattern is one `code` you can click; a key row is keycaps (the look of
+   * the Hotkeys page, `nfe-hotkey-key`), one per key where the row names
+   * several (`Ctrl+Z  Ctrl+Y`), so keys and patterns read as different things
+   * (in one style they did not).
+   */
   private table(rows: readonly (Row & { readonly replaceNote?: string })[], patterns: boolean): void {
     const table = this.contentEl.createEl("table", { cls: "nfe-regex-table" });
     for (const row of rows) {
       const tr = table.createEl("tr");
       const cell = tr.createEl("td");
-      const code = cell.createEl("code", { text: row.pattern });
       if (patterns) {
-        code.addClass("nfe-regex-copy");
+        const code = cell.createEl("code", { cls: "nfe-regex-copy", text: row.pattern });
         code.setAttribute("aria-label", "Click to copy");
         code.setAttribute("data-tooltip-position", "top");
         code.addEventListener("click", () => void copyText(row.pattern));
+      } else {
+        cell.addClass("nfe-regex-keys");
+        for (const key of row.pattern.split("  ")) cell.createEl("kbd", { cls: "nfe-hotkey-key", text: key });
       }
       const td = tr.createEl("td", { text: row.meaning });
       if (row.replaceNote) {

@@ -306,12 +306,70 @@
   text-align: right;
 }
 
-/* Column mode: the phantom spaces a caret past a short line's end stands
-   behind (Notepad++'s virtual space). Drawn, not in the document; the first
-   keystroke turns them into real spaces. */
+/* Column mode: the rectangle drawn past a short line's end (Notepad++'s
+   virtual space, its `Sel: 4x3`): plain spaces up to the rectangle, the
+   selection tint inside it. Drawn, not in the document; the first keystroke
+   turns the spaces before the rectangle into real ones. */
 .nfe-text-content .nfe-editor .nfe-virtual-space {
   white-space: pre;
   pointer-events: none;
+}
+
+.nfe-text-content .nfe-editor .nfe-virtual-blank {
+  white-space: pre;
+}
+
+.nfe-text-content .nfe-editor .nfe-virtual-selected {
+  white-space: pre;
+  background-color: var(--text-selection);
+}
+
+/* The Hotkeys page: the key as a keycap, the default beside it when changed,
+   "already used by …" and the keycap in the error colour when two actions
+   share a key, the action's meaning on its own line; the recorder field. */
+.nfe-hotkey-key {
+  display: inline-block;
+  padding: 0 var(--size-4-1);
+  border: var(--border-width) solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background-color: var(--background-modifier-hover);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+}
+
+.nfe-hotkey-default {
+  color: var(--text-faint);
+}
+
+.nfe-hotkey-taken {
+  color: var(--text-error);
+}
+
+.setting-item.nfe-hotkey-conflict .nfe-hotkey-key {
+  border-color: var(--text-error);
+  color: var(--text-error);
+}
+
+/* A changed key that one of Obsidian's own hotkeys holds: the EXPLANATION is in the warning colour, the
+   keycap stays plain. A warning, not an error: the plugin keeps the mapping. */
+.nfe-hotkey-obsidian {
+  color: var(--text-warning);
+}
+
+/* Obsidian's page rows (Hotkeys, File types) get no hover colour from Obsidian's own stylesheet, its
+   action rows do; in this tab both read as buttons. Same colour as Obsidian's; no
+   `@media (hover)` guard, which the styles test does not parse — a phone has no hover to speak of. */
+.nfe-settings-tab .setting-item.mod-navigable:not(.is-disabled):hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.nfe-hotkey-meaning {
+  margin-top: var(--size-2-1);
+}
+
+.nfe-setting-hotkey {
+  width: 12em;
 }
 
 /* The completion list (Ctrl+Space). CodeMirror's base theme paints its
@@ -371,7 +429,7 @@
 }
 
 /* Tag names: Obsidian's --code-tag is red in its default theme, the same red
-   as an error, and the user asked for a tag colour of its own (2026-09-08).
+   as an error, so tags take a colour of their own (2026-09-08).
    The property colour, everywhere a tag appears (HTML, XML, JSX, MDX,
    Svelte, MHTML); attributes keep the function colour. Palettes override. */
 .nfe-text-content .nfe-tok-tag {
@@ -404,6 +462,11 @@
   cursor: pointer;
 }
 
+/* A key row is keycaps (the Hotkeys page's look), so keys and patterns read as different things. */
+.nfe-modal.nfe-regex-help .nfe-regex-keys .nfe-hotkey-key {
+  margin-right: var(--size-4-1);
+}
+
 .nfe-modal.nfe-regex-help .nfe-regex-copy:hover {
   color: var(--text-accent);
   text-decoration: underline;
@@ -415,7 +478,12 @@
   color: var(--text-muted);
 }
 
-.nfe-text-content .nfe-editor .nfe-search-help {
+.nfe-text-content .nfe-help-button {
+  flex: 0 0 auto;
+  width: var(--size-4-6);
+  height: var(--size-4-6);
+  padding: 0;
+  justify-content: center;
   color: var(--text-muted);
 }
 
@@ -610,6 +678,46 @@
   flex: 0 0 auto;
   font-size: var(--font-ui-smaller);
   padding: 0 var(--size-4-2);
+}
+
+/* Output | Log: two segments in the head; the active one is the accent, the Log
+   one turns red while it counts errors nobody is looking at. */
+.nfe-text-content .nfe-run-tabs {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+}
+
+.nfe-text-content .nfe-run-tab {
+  font-size: var(--font-ui-smaller);
+  padding: 0 var(--size-4-2);
+  height: var(--size-4-5);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background-color: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.nfe-text-content .nfe-run-tab.is-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.nfe-text-content .nfe-run-tab.has-errors:not(.is-active) {
+  color: var(--text-error);
+}
+
+/* The Log view: the same pre as the output, kept in its own scroller so a page's frame and the log never share one. */
+.nfe-text-content .nfe-run-log-wrap {
+  flex: 1 1 auto;
+}
+
+.nfe-text-content .nfe-run-log {
+  color: var(--text-muted);
 }
 
 /* The x that closes the panel: a square the height of the row, no label. */

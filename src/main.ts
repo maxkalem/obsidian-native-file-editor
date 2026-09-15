@@ -38,6 +38,7 @@ import { DEFAULT_SETTINGS, type SharedSettings, normalizeSettings, resolvePalett
 import { loadVaultLanguages, writeExampleLanguage } from "./highlight/vaultLanguages";
 import { NewFileModal } from "./ui/NewFileModal";
 import { RegexHelpModal } from "./ui/RegexHelpModal";
+import { type BakedHotkey, type Chord, bakedMatches, platformOf } from "./core/hotkeys";
 import { TextView } from "./ui/TextView";
 import { codeMirrorFactory } from "./ui/codemirror";
 
@@ -115,6 +116,38 @@ export function describeNodeType(type: { name: string }): string {
   return `${type.name} props[${entries.join(", ")}] fields[${own}]`;
 }
 
+/**
+ * The Obsidian commands (core or any plugin's) whose active hotkey is this
+ * chord, by name. `app.hotkeyManager` (`bake()`, `bakedHotkeys`, `bakedIds`)
+ * and `app.commands.findCommand` are not in the typings; read in app.js
+ * 1.13.7 (2026-09-14): the manager's `onTrigger` runs `bake()` and walks the
+ * two arrays in step, which is what this does. Every member is probed and
+ * the answer is [] when any is missing, so a future Obsidian loses the
+ * warning, not the settings page.
+ */
+export function obsidianCommandsOn(app: App, chord: Chord, mac: boolean): string[] {
+  const manager = (app as unknown as { hotkeyManager?: { bake?: unknown; bakedHotkeys?: unknown; bakedIds?: unknown } }).hotkeyManager;
+  const commands = (app as unknown as { commands?: { findCommand?: unknown } }).commands;
+  if (!manager || typeof manager.bake !== "function") return [];
+  try {
+    (manager.bake as () => void)();
+  } catch {
+    return [];
+  }
+  const baked = manager.bakedHotkeys;
+  const ids = manager.bakedIds;
+  if (!Array.isArray(baked) || !Array.isArray(ids)) return [];
+  const find = typeof commands?.findCommand === "function" ? (commands.findCommand as (id: string) => { name?: unknown } | undefined).bind(commands) : null;
+  const out: string[] = [];
+  baked.forEach((hotkey: unknown, i: number) => {
+    if (hotkey === null || typeof hotkey !== "object" || !bakedMatches(hotkey as BakedHotkey, chord, mac)) return;
+    const id = String(ids[i]);
+    const name = find?.(id)?.name;
+    out.push(typeof name === "string" && name.length > 0 ? name : id);
+  });
+  return out;
+}
+
 export default class NativeFileEditorPlugin extends Plugin {
   private nfeSettings: SharedSettings = DEFAULT_SETTINGS;
   private nfeDevice!: DeviceLocalStore;
@@ -126,7 +159,7 @@ export default class NativeFileEditorPlugin extends Plugin {
   private readonly nfeRegistered = new Set<string>();
 
   override async onload(): Promise<void> {
-    // The two measurements the ledger asks for (check-notes §12), taken here
+    // Two measurements worth having in every log, taken here
     // so that no DevTools console is needed: the time onload takes, and the
     // JS heap before and after it (Chromium's performance.memory; absent on
     // other engines).
@@ -205,7 +238,7 @@ export default class NativeFileEditorPlugin extends Plugin {
         setWordWrap: (on) => void this.saveSettings({ ...this.nfeSettings, wordWrap: on }),
         setShowInvisibles: (on) => void this.saveSettings({ ...this.nfeSettings, showInvisibles: on }),
         setTextDirection: (direction) => void this.saveSettings({ ...this.nfeSettings, textDirection: direction }),
-        regexHelp: () => new RegexHelpModal(this.app).open(),
+        regexHelp: () => new RegexHelpModal(this.app, this.nfeSettings.hotkeys).open(),
         deleteFile: (file) => void this.app.fileManager.promptForDeletion(file),
         // "Search the web" in the context menu: Obsidian routes window.open of
         // an http(s) address to the system browser on every platform. The
@@ -376,7 +409,8 @@ export default class NativeFileEditorPlugin extends Plugin {
         reread: () => this.reread(false),
         createExamplePalette: (language) => this.createExamplePalette(language),
         createExampleLanguage: (language) => this.createExampleLanguage(language),
-        regexHelp: () => new RegexHelpModal(this.app).open(),
+        regexHelp: () => new RegexHelpModal(this.app, this.nfeSettings.hotkeys).open(),
+        obsidianHoldersOf: (chord) => obsidianCommandsOn(this.app, chord, platformOf(Platform) === "mac"),
         reloadPlugin: async () => {
           const err = await reloadPlugin(this.app, PLUGIN_ID);
           if (err) new Notice(`Native File Editor: reload failed: ${err}`);
@@ -570,12 +604,10 @@ export default class NativeFileEditorPlugin extends Plugin {
       const file = await this.app.vault.create(path, "");
       if (extension.length > 0) this.nfeDevice.update({ lastNewFileExtension: extension });
       this.nfeLog.info("new-file", path);
-      // A type no view opens is created and left alone: `openFile` would hand
-      // it to the operating system ("Select an app to open this .zzz file").
-      if (extension.length === 0 || !(extension.toLowerCase() in readOwnedExtensions(this.app))) {
-        new Notice(`Created ${path}. No plugin opens ${extension.length > 0 ? `.${extension}` : "a file without an extension"}; it is in the file explorer.`);
-        return;
-      }
+      // A type no view opens goes through `openFile` all the same: Obsidian
+      // hands it to the operating system ("Select an app to open this .zzz
+      // file"), which is the useful outcome after creating one (a Notice
+      // instead was tried and taken back the same day, 2026-09-09).
       const leaf = this.app.workspace.getLeaf(false);
       await leaf.openFile(file);
       const view = leaf.view;

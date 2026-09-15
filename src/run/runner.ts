@@ -10,6 +10,8 @@ export type OutputKind = "stdout" | "stderr" | "info" | "page";
 export interface RunOutput {
   readonly kind: OutputKind;
   readonly text: string;
+  /** A page's run token: the panel accepts the page's reports (console, errors, policy refusals) only with it. */
+  readonly token?: string;
 }
 
 export interface RunResult {

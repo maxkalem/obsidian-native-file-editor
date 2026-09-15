@@ -1,6 +1,6 @@
 import { SearchQuery, closeSearchPanel, findNext, findPrevious, getSearchQuery, replaceAll, replaceNext, selectMatches, setSearchQuery } from "@codemirror/search";
 import type { EditorView, Panel, ViewUpdate } from "@codemirror/view";
-import { Platform, setIcon } from "obsidian";
+import { setIcon } from "obsidian";
 
 /**
  * The plugin's own search panel for CodeMirror's `search` extension, in place
@@ -18,15 +18,14 @@ export interface SearchPanelDeps {
   readonly hints: () => boolean;
   /** A read-only view has no replace row. */
   readonly readOnly: boolean;
-  /** Opens the regular-expression guide; absent, no `?` button. */
-  readonly help?: () => void;
+  /** The key of a hotkey action as the user has it (core/hotkeys.ts), for the button labels and tooltips. */
+  readonly keyOf: (actionId: string) => string;
 }
-
-const MOD = Platform.isMacOS ? "Cmd" : "Ctrl";
 
 interface ButtonSpec {
   readonly label: string;
-  readonly shortcut: string;
+  /** A hotkey action id, resolved through `deps.keyOf`, or a fixed key. */
+  readonly shortcut: { action: string } | { fixed: string };
   readonly run: (view: EditorView) => boolean;
   /** A sentence after the shortcut in the tooltip, when the label alone does not say what happens. */
   readonly hint?: string;
@@ -38,17 +37,17 @@ interface ButtonSpec {
   readonly focus?: "field" | "editor";
 }
 
-const NEXT: ButtonSpec = { label: "Next", shortcut: "F3", run: findNext };
-const PREVIOUS: ButtonSpec = { label: "Previous", shortcut: "Shift+F3", run: findPrevious };
+const NEXT: ButtonSpec = { label: "Next", shortcut: { action: "find-next" }, run: findNext };
+const PREVIOUS: ButtonSpec = { label: "Previous", shortcut: { action: "find-previous" }, run: findPrevious };
 const ALL: ButtonSpec = {
   label: "Select all",
-  shortcut: "Alt+Enter",
+  shortcut: { action: "select-all-matches" },
   run: selectMatches,
   hint: "every match becomes a cursor and the text takes the focus; what you type then changes all of them (Escape: one cursor)",
   focus: "editor",
 };
-const REPLACE: ButtonSpec = { label: "Replace", shortcut: "Enter", run: replaceNext };
-const REPLACE_ALL: ButtonSpec = { label: "Replace all", shortcut: `${MOD}+Alt+Enter`, run: replaceAll };
+const REPLACE: ButtonSpec = { label: "Replace", shortcut: { fixed: "Enter" }, run: replaceNext };
+const REPLACE_ALL: ButtonSpec = { label: "Replace all", shortcut: { action: "replace-all" }, run: replaceAll };
 
 export function createSearchPanel(view: EditorView, deps: SearchPanelDeps): Panel {
   const dom = view.dom.ownerDocument.createElement("div");
@@ -102,16 +101,6 @@ export function createSearchPanel(view: EditorView, deps: SearchPanelDeps): Pane
   toggle("case-sensitive", "Match case", "caseSensitive");
   toggle("regex", "Regular expression", "regexp");
   toggle("whole-word", "Whole word", "wholeWord");
-  if (deps.help) {
-    const help = el(rows.find, "button", "clickable-icon nfe-search-help");
-    help.type = "button";
-    setIcon(help, "circle-help");
-    help.setAttribute("aria-label", "Regular expressions: syntax and examples");
-    help.setAttribute("data-tooltip-position", "top");
-    const open = deps.help;
-    help.addEventListener("click", () => open());
-  }
-
   const close = el(rows.find, "button", "clickable-icon nfe-search-close");
   close.type = "button";
   setIcon(close, "x");
@@ -153,8 +142,9 @@ export function createSearchPanel(view: EditorView, deps: SearchPanelDeps): Pane
     for (const t of toggles) t.el.classList.toggle("is-active", q[t.key]);
     const hints = deps.hints();
     for (const { el: b, spec } of buttons) {
-      b.textContent = hints ? `${spec.label} (${spec.shortcut})` : spec.label;
-      b.setAttribute("aria-label", `${spec.label} (${spec.shortcut})${spec.hint ? `: ${spec.hint}` : ""}`);
+      const key = "action" in spec.shortcut ? deps.keyOf(spec.shortcut.action) : spec.shortcut.fixed;
+      b.textContent = hints ? `${spec.label} (${key})` : spec.label;
+      b.setAttribute("aria-label", `${spec.label} (${key})${spec.hint ? `: ${spec.hint}` : ""}`);
     }
   }
 

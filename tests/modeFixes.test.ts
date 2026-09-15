@@ -1,12 +1,13 @@
 import { StringStream } from "@codemirror/language";
 import { describe, expect, it } from "vitest";
 import { tokenize } from "../src/highlight/highlighter";
+import { PRISMA_KEYWORD } from "../src/highlight/prismaFix";
 import { languageFor, resolveLanguage } from "../src/highlight/registry";
 import { retag, wholeWords, withFallbackKeywords, withLineComment } from "../src/highlight/streamFixes";
 
 /**
- * The 2026-09-07 device pass: languages whose colours read wrong. Each test
- * here is one report. `classesOf` runs a registry entry through the npm
+ * Checked in Obsidian on 2026-09-07: languages whose colours read wrong. Each
+ * test here is one finding. `classesOf` runs a registry entry through the npm
  * highlighter (tag hierarchy); `rawTokens` runs a raw parser line by line and
  * returns the token NAMES it emits, which is what Obsidian's fork turns into
  * classes on the device.
@@ -253,6 +254,27 @@ describe("own modes for Notepad++'s hand-written lexers", () => {
     expect(tek.get("6")).toContain("cm-keyword");
     expect(tek.get("12")).toContain("cm-atom");
     expect(tek.get("3000")).toContain("cm-variable");
+  });
+
+  it("Prisma: field names, types, attributes, functions and config keys are tagged at the leaves the grammar leaves bare; the keywords are a line-start regex", () => {
+    const m = classesOf("prisma", 'generator client {\n  provider = "prisma-client-js"\n}\nmodel Note {\n  id    Int      @id @default(autoincrement())\n  body  String?\n  tags  Tag[]\n}\nenum Role {\n  ADMIN\n}\n');
+    expect(m.get("client")).toContain("cm-type");
+    expect(m.get("provider")).toContain("cm-property");
+    expect(m.get("id")).toContain("cm-attribute");
+    expect(m.get("body")).toContain("cm-property");
+    expect(m.get("Int")).toContain("cm-type");
+    expect(m.get("String")).toContain("cm-type");
+    expect(m.get("?")).toContain("nfe-tok-modifier");
+    expect(m.get("default")).toContain("cm-attribute");
+    expect(m.get("autoincrement")).toContain("nfe-tok-function");
+    expect(m.get("ADMIN")).toContain("nfe-tok-constant");
+    // The keywords are anonymous in the grammar: no token class; the view marks them (PRISMA_KEYWORD) at a line's start only.
+    expect(m.get("generator") ?? null).toBeNull();
+    const kw = (line: string) => (PRISMA_KEYWORD.lastIndex = 0, PRISMA_KEYWORD.test(line));
+    expect(kw("model Note {")).toBe(true);
+    expect(kw("enum Role {")).toBe(true);
+    expect(kw("  type  String")).toBe(false);
+    expect(kw("modelling")).toBe(false);
   });
 
   it("txt2tags: comments, headings, list marks, inline markup, links, separators", () => {

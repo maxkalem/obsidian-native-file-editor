@@ -10,6 +10,13 @@ import type { RunnerDef } from "./runners";
  * `start()` and never to a process or a worker; a test drives it with a fake
  * handle. Output is appended as text (`createSpan` with `text`, then
  * `textContent`), one span per run of the same kind; never `innerHTML`.
+ *
+ * Two views, Output and Log, so that an unexpected output can be explained
+ * without DevTools. Output is what the program or page shows; Log
+ * is what happened around it: the command line and the `[…]` info lines, and
+ * for a page everything its reporter posts back (mhtml.ts `pageReporter`:
+ * console, errors, policy refusals, the load line), each frame with the run's
+ * token. The Log tab counts the errors while Output is showing.
  */
 
 export interface RunPanelDeps {
@@ -66,12 +73,23 @@ export class RunPanel {
   private readonly statusEl: HTMLElement;
   private readonly outputEl: HTMLElement;
   private readonly wrapEl: HTMLElement;
+  private readonly logEl: HTMLElement;
+  private readonly logWrapEl: HTMLElement;
+  private readonly outputTab: HTMLButtonElement;
+  private readonly logTab: HTMLButtonElement;
+  private view: "output" | "log" = "output";
+  private logErrors = 0;
+  /** The token of the page shown now; a message without it is somebody else's. */
+  private pageToken: string | null = null;
+  private readonly onMessage = (evt: { data?: unknown }) => this.receiveMessage(evt.data);
   private handle: ExecuteHandle | null = null;
   private startedAt = 0;
   private ticker: number | null = null;
   private lastKind: RunOutput["kind"] | null = null;
   private lastSpan: HTMLElement | null = null;
   private text = "";
+  /** The Log as one string, for Copy while the Log is showing. */
+  private logText = "";
   private frame: HTMLIFrameElement | null = null;
   /** What the panel shows, for the remembered height. */
   private kind: "text" | "page" = "text";
@@ -111,6 +129,12 @@ export class RunPanel {
     this.runButton.addEventListener("click", () => (this.handle ? this.stop() : void this.run()));
     this.select = head.createEl("select", { cls: "nfe-run-select dropdown" });
     this.select.setAttribute("aria-label", "Runner");
+    const tabs = head.createDiv({ cls: "nfe-run-tabs" });
+    this.outputTab = tabs.createEl("button", { cls: "nfe-run-tab is-active", text: "Output" });
+    this.outputTab.addEventListener("click", () => this.setView("output"));
+    this.logTab = tabs.createEl("button", { cls: "nfe-run-tab", text: "Log" });
+    this.logTab.setAttribute("aria-label", "What happened around the run: the command, the page's console, errors and policy refusals");
+    this.logTab.addEventListener("click", () => this.setView("log"));
     this.statusEl = head.createSpan({ cls: "nfe-run-status", text: "" });
     const spacer = head.createSpan({ cls: "nfe-run-spacer" });
     spacer.setText("");
@@ -118,9 +142,11 @@ export class RunPanel {
     clear.addEventListener("click", () => this.clear());
     if (deps.copy) {
       const copy = head.createEl("button", { cls: "nfe-run-tool", text: "Copy" });
-      copy.addEventListener("click", () => deps.copy?.(this.text));
+      copy.setAttribute("aria-label", "Copy the view that is showing: the output, or the whole log");
+      // Copies what is on screen: the Log when the Log tab is active, else the output.
+      copy.addEventListener("click", () => deps.copy?.(this.view === "log" ? this.logText : this.text));
     }
-    // A square icon, not a word: the same x the search panel closes with (USER, 2026-09-09).
+    // A square icon, not a word: the same x the search panel closes with.
     const close = head.createEl("button", { cls: "clickable-icon nfe-run-close" });
     setIcon(close, "x");
     close.setAttribute("aria-label", "Close the output panel");
@@ -128,6 +154,10 @@ export class RunPanel {
     close.addEventListener("click", () => deps.onClose());
     this.wrapEl = this.rootEl.createDiv({ cls: "nfe-run-output-wrap" });
     this.outputEl = this.wrapEl.createEl("pre", { cls: "nfe-run-output" });
+    this.logWrapEl = this.rootEl.createDiv({ cls: "nfe-run-output-wrap nfe-run-log-wrap nfe-hidden" });
+    this.logEl = this.logWrapEl.createEl("pre", { cls: "nfe-run-output nfe-run-log" });
+    // The page's reports arrive at Obsidian's window (window.top of every frame, nested ones included).
+    (globalThis as { window?: { addEventListener?: (t: string, fn: (e: { data?: unknown }) => void) => void } }).window?.addEventListener?.("message", this.onMessage);
     this.refreshRunners();
     this.applyHeight(this.deps.height?.get("text") ?? DEFAULT_PANEL_HEIGHT.text);
   }
@@ -200,8 +230,45 @@ export class RunPanel {
     this.handle?.stop();
   }
 
+  /** Output or Log in the body; the tab says which. */
+  setView(view: "output" | "log"): void {
+    this.view = view;
+    this.wrapEl.toggleClass("nfe-hidden", view !== "output");
+    this.logWrapEl.toggleClass("nfe-hidden", view !== "log");
+    this.outputTab.toggleClass("is-active", view === "output");
+    this.logTab.toggleClass("is-active", view === "log");
+  }
+
+  /** A line into the Log; an error or a policy refusal is counted on the tab. */
+  log(text: string, level: "info" | "error" = "info"): void {
+    const line = text.endsWith("\n") ? text : `${text}\n`;
+    this.logText += line;
+    this.logEl.createSpan({ cls: level === "error" ? "nfe-run-stderr" : "nfe-run-info", text: line });
+    if (level === "error") {
+      this.logErrors++;
+      this.logTab.setText(`Log (${this.logErrors})`);
+      this.logTab.addClass("has-errors");
+    }
+    if (this.view === "log") this.logWrapEl.scrollTop = this.logWrapEl.scrollHeight;
+  }
+
+  /** A message from a page frame (or a nested one): kept only with this run's token. */
+  receiveMessage(data: unknown): void {
+    if (!data || typeof data !== "object") return;
+    const m = data as { nfe?: unknown; level?: unknown; text?: unknown };
+    if (m.nfe !== this.pageToken || this.pageToken === null || typeof m.text !== "string") return;
+    const level = typeof m.level === "string" ? m.level : "log";
+    this.log(`[page ${level}] ${m.text}`, level === "error" || level === "csp" ? "error" : "info");
+  }
+
   clear(): void {
     this.outputEl.empty();
+    this.logEl.empty();
+    this.logText = "";
+    this.logErrors = 0;
+    this.logTab.setText("Log");
+    this.logTab.removeClass("has-errors");
+    this.pageToken = null;
     this.frame?.remove();
     this.frame = null;
     this.rootEl.removeClass("nfe-run-page-mode");
@@ -215,14 +282,17 @@ export class RunPanel {
   destroy(): void {
     this.stop();
     this.stopTicker();
+    (globalThis as { window?: { removeEventListener?: (t: string, fn: (e: { data?: unknown }) => void) => void } }).window?.removeEventListener?.("message", this.onMessage);
     this.rootEl.remove();
   }
 
   private append(out: RunOutput): void {
     if (out.kind === "page") {
-      this.showPage(out.text);
+      this.showPage(out.text, out.token ?? null);
       return;
     }
+    // Info lines (the command, the sandbox header, truncation) go to the Log as well; a page shows only the page.
+    if (out.kind === "info") this.log(out.text);
     this.text += out.text;
     if (this.lastSpan && this.lastKind === out.kind) {
       this.lastSpan.textContent = (this.lastSpan.textContent ?? "") + out.text;
@@ -240,16 +310,18 @@ export class RunPanel {
    * origin with no way to Obsidian's window, storage or Electron; no forms,
    * popups, navigation or modals), and the document as `srcdoc`, whose CSP
    * (run/mhtml.ts) lets nothing load from anywhere. Scripts were off until
-   * 2026-09-07; the user's pages are interactive (a sudoku), and a script in
+   * 2026-09-07; saved pages are interactive (a sudoku, say), and a script in
    * an opaque origin without network is what the JavaScript sandbox already
    * grants a Worker. The panel grows to page size while it shows one.
    */
-  private showPage(html: string): void {
+  private showPage(html: string, token: string | null): void {
     this.frame?.remove();
+    this.pageToken = token;
     const frame = this.wrapEl.createEl("iframe", { cls: "nfe-run-frame" });
     frame.setAttribute("sandbox", "allow-scripts");
     frame.setAttribute("referrerpolicy", "no-referrer");
     frame.setAttribute("title", "Page");
+    frame.addEventListener("load", () => this.log("[frame] the page's frame finished loading"));
     frame.srcdoc = html;
     this.frame = frame;
     this.rootEl.addClass("nfe-run-page-mode");

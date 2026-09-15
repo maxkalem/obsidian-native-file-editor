@@ -10,7 +10,7 @@ What the current build does not do, and why. Items leave this list when the code
 - A direction forced on one line from the context menu ("This line") lives with the open editor: a plain text file has no place to store it, so it is gone after the file is closed, as in Obsidian's own editor. Several cursors follow Notepad++: Alt+drag over a shorter line keeps the caret at the rectangle's column past the line's end (drawn as a phantom; the first keystroke pads with spaces), and the arrows stop at each line's ends. What is not there: the arrows do not walk further into that virtual space, Backspace there does nothing, and Alt+Shift+arrows are CodeMirror's move/copy line, not a keyboard rectangle.
 - Word completion (Ctrl+Space) offers the words of the open file and whatever the language's grammar contributes; there is no project-wide index and nothing pops up while typing.
 - The GraphQL mode is keywords, strings, comments, numbers and names (types capitalised, fields otherwise); it knows no schema.
-- The Elixir grammar (`lezer-elixir`) is 145 KB of parse tables, a tenth of `main.js`, parsed at every start like every other grammar (`npm run size`). It stays because the user asked for Elixir; it is the first candidate if the device measurements ask for a smaller bundle.
+- The Elixir grammar (`lezer-elixir`) is 145 KB of parse tables, a tenth of `main.js`, parsed at every start like every other grammar (`npm run size`). It stays because Elixir is in the starting set; it is the first candidate if the memory measurements ask for a smaller bundle.
 - A legacy stream mode highlights keywords, strings, comments and numbers; it has no grammar, so nesting, folding and indentation are coarser than in a lezer language.
 - The `.log` mode is this plugin's own and knows the common shapes (ISO timestamps, `LEVEL`, `[thread]`, `key=value`, stack frames). A log in another shape highlights less.
 - Every bundled grammar is parsed when Obsidian loads the plugin (about 1 MB of `main.js`, 40% of it the legacy modes); there is no code splitting in an Obsidian plugin. `npm run size` prints the per-package cost.
@@ -34,7 +34,7 @@ What the current build does not do, and why. Items leave this list when the code
 
 ## Run
 
-- Desktop only: no process API exists on mobile, and the JavaScript sandbox, which would work there, is not offered on mobile either in this version (spec constraint; open item).
+- Desktop only: no process API exists on mobile, and the JavaScript sandbox, which would work there, is not offered on mobile either in this version (open item).
 - The plugin runs what the runner names. Whether `python` is Python 3, whether `node` is new enough for `--experimental-strip-types`, whether `cc` exists, is the machine's business; a missing tool is reported as "not found" in the panel.
 - Errors are not mapped back to editor lines: the panel shows the interpreter's text as it is.
 - The JavaScript sandbox counts `setTimeout`/`setInterval` to know when a script is done; a script that keeps an interval alive runs until the timeout. Promises resolve before the check, so `await`ed work is included. `import`/`export` syntax is not accepted (a classic worker); scripts needing modules or Node APIs go to the Node runner.
