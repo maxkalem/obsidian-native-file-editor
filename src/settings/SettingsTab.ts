@@ -193,14 +193,28 @@ function runnerRow(deps: SettingsTabDeps, index: number): SettingGroupItem {
               field = t;
               t.setValue(line);
               t.inputEl.addClass("nfe-setting-argv");
+              // Enter keeps the field open on a bad line so it can be fixed;
+              // Escape, and leaving the field with a bad line, put the saved
+              // line back (2026-09-16, the user: an emptied field had no way
+              // out, every blur brought the same notice again).
               t.inputEl.addEventListener("keydown", (e: KeyboardEvent) => {
-                if (e.key === "Enter") commit();
+                if (e.key === "Enter") commit(true);
+                else if (e.key === "Escape") {
+                  e.preventDefault();
+                  cancel();
+                }
               });
-              t.inputEl.addEventListener("blur", () => commit());
+              t.inputEl.addEventListener("blur", () => commit(false));
             });
             field?.inputEl.focus();
           })
       );
+      const cancel = () => {
+        if (!field) return;
+        field.inputEl.remove();
+        field = null;
+        editing = false;
+      };
       setting.addExtraButton((b) =>
         b
           .setIcon("trash")
@@ -212,21 +226,27 @@ function runnerRow(deps: SettingsTabDeps, index: number): SettingGroupItem {
             deps.refresh();
           })
       );
-      const commit = () => {
+      /** `stay`: on a bad line keep editing (Enter); otherwise give the line up and put the saved one back (blur). */
+      const commit = (stay: boolean) => {
         if (!field) return;
+        const value = field.inputEl.value;
         if (def.steps) {
-          const steps = parseStepsLine(field.inputEl.value);
+          const steps = parseStepsLine(value);
           if (steps.length === 0 || steps.some((s) => (s[0] ?? "").includes("{file}"))) {
-            deps.notice("Native File Editor: each step needs a program first, then its arguments; steps are separated by &&.");
+            deps.notice(`Native File Editor: each step needs a program first, then its arguments; steps are separated by &&.${stay ? "" : ` Kept: ${line}`}`);
+            if (!stay) cancel();
             return;
           }
+          field = null;
           save({ ...def, steps });
         } else {
-          const argv = parseArgvLine(field.inputEl.value);
+          const argv = parseArgvLine(value);
           if (argv.length === 0 || (argv[0] ?? "").includes("{file}")) {
-            deps.notice("Native File Editor: the command line needs a program first, then its arguments.");
+            deps.notice(`Native File Editor: the command line needs a program first, then its arguments.${stay ? "" : ` Kept: ${line}`}`);
+            if (!stay) cancel();
             return;
           }
+          field = null;
           save({ ...def, argv });
         }
         deps.refresh();

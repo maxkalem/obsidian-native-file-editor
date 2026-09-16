@@ -1,6 +1,7 @@
 import { setIcon } from "obsidian";
 import type { Timers } from "../core/autosave";
 import type { ExecuteHandle } from "./execute";
+import { pageDocument } from "./mhtml";
 import type { RunOutput } from "./runner";
 import type { RunnerDef } from "./runners";
 
@@ -11,12 +12,20 @@ import type { RunnerDef } from "./runners";
  * handle. Output is appended as text (`createSpan` with `text`, then
  * `textContent`), one span per run of the same kind; never `innerHTML`.
  *
- * Two views, Output and Log, so that an unexpected output can be explained
- * without DevTools. Output is what the program or page shows; Log
- * is what happened around it: the command line and the `[…]` info lines, and
- * for a page everything its reporter posts back (mhtml.ts `pageReporter`:
- * console, errors, policy refusals, the load line), each frame with the run's
- * token. The Log tab counts the errors while Output is showing.
+ * Two views, Output and Log. Output is the RESULT: a rendered page, or what
+ * the program hands out (a process's stdout, a sandbox script's
+ * `postMessage`) — rendered in the page frame when it is an SVG or HTML
+ * document, shown as text otherwise. Log is the CONSOLE, the whole run in
+ * order: the command line and the `[…]` info lines, the program's console
+ * (`console.log` as well as `warn`/`error`, a process's stderr, its stdout
+ * again when it is text), a page's reports (mhtml.ts `pageReporter`:
+ * console, errors, policy refusals, the load line, each frame with the run's
+ * token) and the outcome as the last line. The split is the user's
+ * (2026-09-16): "console.log це буквально вивід який має попадати в лог", and
+ * Output is for something to look at. A run opens on the Log and switches to
+ * Output when a result arrives, unless the user picked a view meanwhile. The
+ * Log tab counts the problems while Output is showing. Text goes in through
+ * `createSpan`/`textContent`; never `innerHTML`.
  */
 
 export interface RunPanelDeps {
@@ -58,12 +67,23 @@ export function panelFractionAt(pointerY: number, paneTop: number, paneHeight: n
 /** How often the elapsed-time label refreshes while a run is going. */
 const TICK_MS = 250;
 
+/** The kind of content a runner puts in the panel, for the remembered height. */
+function kindOf(def: RunnerDef | null): "text" | "page" {
+  return def?.kind === "page" ? "page" : "text";
+}
+
 /** One class per printed output kind, as plain literals so the styles test sees them. */
 const OUTPUT_CLASS: Readonly<Record<Exclude<RunOutput["kind"], "page">, string>> = {
   stdout: "nfe-run-stdout",
+  console: "nfe-run-stdout",
   stderr: "nfe-run-stderr",
   info: "nfe-run-info",
 };
+
+/** stdout that starts like this is a document to render, not text to print: an SVG, or an HTML page. */
+const DOCUMENT_START = /^\s*(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*(?:<!doctype\s+html|<html[\s>]|<svg[\s>])/i;
+/** How much of stdout to see before deciding whether it is a document. */
+const DOCUMENT_PROBE = 512;
 
 export class RunPanel {
   readonly rootEl: HTMLElement;
@@ -87,11 +107,38 @@ export class RunPanel {
   private ticker: number | null = null;
   private lastKind: RunOutput["kind"] | null = null;
   private lastSpan: HTMLElement | null = null;
+  /** The program's output as text (the Output view), for Copy. */
   private text = "";
+  /** stdout is held back while it may still be a document: "document" collects in `text` and renders when the run ends, "text" flows to the view as it comes. */
+  private docMode: "undecided" | "text" | "document" = "undecided";
   /** The Log as one string, for Copy while the Log is showing. */
   private logText = "";
+  /** The span a program stream (console, stderr, stdout) is being written into, so consecutive chunks join; null once a panel line follows. */
+  private logStreamSpan: HTMLElement | null = null;
+  private logStreamKind: RunOutput["kind"] | null = null;
+  /** The user clicked a tab during this run: the panel stops switching views on its own. */
+  private viewPinned = false;
+  private tokenCounter = 0;
+
+  /** A program stream into the Log as it comes: consecutive chunks of one kind share a span. */
+  private logStream(kind: "stdout" | "stderr" | "console", text: string): void {
+    this.logText += text;
+    if (this.logStreamSpan && this.logStreamKind === kind) this.logStreamSpan.textContent = (this.logStreamSpan.textContent ?? "") + text;
+    else {
+      this.logStreamSpan = this.logEl.createSpan({ cls: OUTPUT_CLASS[kind], text });
+      this.logStreamKind = kind;
+    }
+    if (this.view === "log") this.logWrapEl.scrollTop = this.logWrapEl.scrollHeight;
+  }
   private frame: HTMLIFrameElement | null = null;
-  /** What the panel shows, for the remembered height. */
+  /**
+   * What the selected runner shows (text output, a rendered page), for the
+   * remembered height: read once when the panel is built, written by a drag.
+   * The height itself never moves after that on its own: not on Run, not on
+   * Clear, not when a page replaces text (2026-09-15, the user: a height he
+   * dragged was reset by every Run and Clear while text and page swapped
+   * their remembered values).
+   */
   private kind: "text" | "page" = "text";
   /** The height in force, as a share of the pane. */
   private fraction = DEFAULT_PANEL_HEIGHT.text;
@@ -131,10 +178,11 @@ export class RunPanel {
     this.select.setAttribute("aria-label", "Runner");
     const tabs = head.createDiv({ cls: "nfe-run-tabs" });
     this.outputTab = tabs.createEl("button", { cls: "nfe-run-tab is-active", text: "Output" });
-    this.outputTab.addEventListener("click", () => this.setView("output"));
+    this.outputTab.setAttribute("aria-label", "The result: a page, or what the program wrote out");
+    this.outputTab.addEventListener("click", () => this.setView("output", true));
     this.logTab = tabs.createEl("button", { cls: "nfe-run-tab", text: "Log" });
-    this.logTab.setAttribute("aria-label", "What happened around the run: the command, the page's console, errors and policy refusals");
-    this.logTab.addEventListener("click", () => this.setView("log"));
+    this.logTab.setAttribute("aria-label", "The console: the command, everything the program logged, a page's errors and refusals, the outcome");
+    this.logTab.addEventListener("click", () => this.setView("log", true));
     this.statusEl = head.createSpan({ cls: "nfe-run-status", text: "" });
     const spacer = head.createSpan({ cls: "nfe-run-spacer" });
     spacer.setText("");
@@ -159,20 +207,14 @@ export class RunPanel {
     // The page's reports arrive at Obsidian's window (window.top of every frame, nested ones included).
     (globalThis as { window?: { addEventListener?: (t: string, fn: (e: { data?: unknown }) => void) => void } }).window?.addEventListener?.("message", this.onMessage);
     this.refreshRunners();
-    this.applyHeight(this.deps.height?.get("text") ?? DEFAULT_PANEL_HEIGHT.text);
+    this.kind = kindOf(this.selectedRunner());
+    this.applyHeight(this.deps.height?.get(this.kind) ?? DEFAULT_PANEL_HEIGHT[this.kind]);
   }
 
   /** The panel's height as a CSS custom property the stylesheet reads; the class rule stays in styles.css. */
   private applyHeight(fraction: number): void {
     this.fraction = fraction;
     this.rootEl.style.setProperty("--nfe-run-height", `${Math.round(fraction * 1000) / 10}%`);
-  }
-
-  /** Text and a page have their own remembered heights; switching kinds switches the height. */
-  private setKind(kind: "text" | "page"): void {
-    if (this.kind === kind) return;
-    this.kind = kind;
-    this.applyHeight(this.deps.height?.get(kind) ?? DEFAULT_PANEL_HEIGHT[kind]);
   }
 
   get isRunning(): boolean {
@@ -202,6 +244,11 @@ export class RunPanel {
     const def = this.selectedRunner();
     if (!def) return;
     this.clear();
+    // The drag that may follow remembers the height for what this run shows.
+    this.kind = kindOf(def);
+    // The console first; the result switches the view when it arrives.
+    this.viewPinned = false;
+    this.setView("log");
     this.startedAt = this.deps.now();
     this.runButton.setText("Stop");
     this.runButton.addClass("nfe-run-running");
@@ -216,13 +263,34 @@ export class RunPanel {
     this.runButton.setText("Run");
     this.runButton.removeClass("nfe-run-running");
     const seconds = (result.ms / 1000).toFixed(result.ms < 10000 ? 2 : 1);
+    // A run that did not end well says so in the error colour, and the Log
+    // gets the outcome as its last line, counted on the tab when it is bad,
+    // the way a page's refusals are (2026-09-16, the user: with the Log
+    // showing, a traceback and "exit 1" looked like nothing had happened;
+    // then: the Log tab lighting up, as it does for a page, is the logical
+    // place). Stopped by hand is not an error.
+    let status: string;
+    let bad: boolean;
     if (result.error !== null) {
       this.append({ kind: "info", text: `[could not start: ${result.error}]\n` });
-      this.setStatus(`failed to start`);
-    } else if (result.stopped) this.setStatus(`stopped after ${seconds} s`);
-    else if (result.timedOut) this.setStatus(`timed out after ${seconds} s`);
-    else if (result.steps > 1 && result.step < result.steps) this.setStatus(`step ${result.step} of ${result.steps} exited with ${result.exitCode}, ${seconds} s`);
-    else this.setStatus(`exit ${result.exitCode ?? "?"}, ${seconds} s${result.truncated ? ", output truncated" : ""}`);
+      status = "failed to start";
+      bad = true;
+    } else if (result.stopped) {
+      status = `stopped after ${seconds} s`;
+      bad = false;
+    } else if (result.timedOut) {
+      status = `timed out after ${seconds} s`;
+      bad = true;
+    } else if (result.steps > 1 && result.step < result.steps) {
+      status = `step ${result.step} of ${result.steps} exited with ${result.exitCode}, ${seconds} s`;
+      bad = true;
+    } else {
+      status = `exit ${result.exitCode ?? "?"}, ${seconds} s${result.truncated ? ", output truncated" : ""}`;
+      bad = result.exitCode !== 0 || result.truncated;
+    }
+    if (this.docMode !== "text") this.flushHeldOutput(result.truncated);
+    this.setStatus(status, bad);
+    this.log(`[${status}]`, bad ? "error" : "info");
     this.refreshRunners();
   }
 
@@ -230,8 +298,9 @@ export class RunPanel {
     this.handle?.stop();
   }
 
-  /** Output or Log in the body; the tab says which. */
-  setView(view: "output" | "log"): void {
+  /** Output or Log in the body; the tab says which. `byUser`: a click, which pins the view for the rest of the run. */
+  setView(view: "output" | "log", byUser = false): void {
+    if (byUser) this.viewPinned = true;
     this.view = view;
     this.wrapEl.toggleClass("nfe-hidden", view !== "output");
     this.logWrapEl.toggleClass("nfe-hidden", view !== "log");
@@ -241,6 +310,15 @@ export class RunPanel {
 
   /** A line into the Log; an error or a policy refusal is counted on the tab. */
   log(text: string, level: "info" | "error" = "info"): void {
+    if (this.logStreamSpan) {
+      // A panel line starts on its own line, whatever the program's last chunk ended with.
+      if (!this.logText.endsWith("\n")) {
+        this.logStreamSpan.textContent = `${this.logStreamSpan.textContent ?? ""}\n`;
+        this.logText += "\n";
+      }
+      this.logStreamSpan = null;
+      this.logStreamKind = null;
+    }
     const line = text.endsWith("\n") ? text : `${text}\n`;
     this.logText += line;
     this.logEl.createSpan({ cls: level === "error" ? "nfe-run-stderr" : "nfe-run-info", text: line });
@@ -265,6 +343,8 @@ export class RunPanel {
     this.outputEl.empty();
     this.logEl.empty();
     this.logText = "";
+    this.logStreamSpan = null;
+    this.logStreamKind = null;
     this.logErrors = 0;
     this.logTab.setText("Log");
     this.logTab.removeClass("has-errors");
@@ -272,10 +352,10 @@ export class RunPanel {
     this.frame?.remove();
     this.frame = null;
     this.rootEl.removeClass("nfe-run-page-mode");
-    this.setKind("text");
     this.lastKind = null;
     this.lastSpan = null;
     this.text = "";
+    this.docMode = "undecided";
     if (!this.handle) this.setStatus("");
   }
 
@@ -291,17 +371,70 @@ export class RunPanel {
       this.showPage(out.text, out.token ?? null);
       return;
     }
-    // Info lines (the command, the sandbox header, truncation) go to the Log as well; a page shows only the page.
-    if (out.kind === "info") this.log(out.text);
+    // The Log is the console: a panel line, or the program's own stream. Nothing here is counted on the tab; the count is problems (a bad outcome, a page's errors and refusals).
+    if (out.kind === "info") {
+      this.log(out.text);
+      return;
+    }
+    if (out.kind === "console" || out.kind === "stderr") {
+      this.logStream(out.kind, out.text);
+      return;
+    }
+    // stdout is the result: held back until it is clear whether it is a document (rendered when the run ends) or text (shown as it comes, in the Log too).
+    if (this.docMode === "text") {
+      this.appendText(out.text);
+      return;
+    }
     this.text += out.text;
-    if (this.lastSpan && this.lastKind === out.kind) {
-      this.lastSpan.textContent = (this.lastSpan.textContent ?? "") + out.text;
+    if (this.docMode === "document") return;
+    const probe = this.text.slice(0, DOCUMENT_PROBE);
+    if (DOCUMENT_START.test(probe)) this.docMode = "document";
+    else if (this.text.length >= DOCUMENT_PROBE || (/\S/.test(probe) && !/^\s*</.test(probe)) || /<[^>]*>[\s\S]*\n/.test(probe)) this.flushHeldOutput(false);
+    // Else: blank so far, or a `<` with nothing decisive after it yet; wait for more (or for the end of the run).
+  }
+
+  /** What was held back turns out to be text (or the run is over): into the view. A held document renders instead. */
+  private flushHeldOutput(truncated: boolean): void {
+    const held = this.text;
+    this.text = "";
+    if (this.docMode === "document" && !truncated) {
+      this.docMode = "text";
+      this.renderDocument(held);
+      return;
+    }
+    this.docMode = "text";
+    if (held.length > 0) this.appendText(held);
+  }
+
+  /** A chunk of text output into the Output view (one span per run of stdout) and the Log. */
+  private appendText(chunk: string): void {
+    this.text += chunk;
+    this.logStream("stdout", chunk);
+    if (this.lastSpan && this.lastKind === "stdout") {
+      this.lastSpan.textContent = (this.lastSpan.textContent ?? "") + chunk;
     } else {
-      this.lastSpan = this.outputEl.createSpan({ cls: OUTPUT_CLASS[out.kind], text: out.text });
-      this.lastKind = out.kind;
+      this.lastSpan = this.outputEl.createSpan({ cls: OUTPUT_CLASS.stdout, text: chunk });
+      this.lastKind = "stdout";
     }
     const wrap = this.outputEl.parentElement;
     if (wrap) wrap.scrollTop = wrap.scrollHeight;
+    if (!this.viewPinned) this.setView("output");
+  }
+
+  /**
+   * stdout that was a document: rendered in the page frame with the policy
+   * and a token of this panel's, so a script inside it reports to the Log
+   * like any page. An XML prolog is dropped: the frame parses srcdoc as
+   * HTML and would show it as text.
+   */
+  private renderDocument(doc: string): void {
+    const kind = /^\s*(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(doc) ? "SVG" : "HTML";
+    this.log(`[output] ${kind} document, ${(doc.length / 1024).toFixed(0)} KB, rendered`);
+    const token = `nfe-out-${this.deps.now()}-${++this.tokenCounter}`;
+    const body = doc.replace(/^\s*<\?xml[^>]*>/i, "");
+    // A bare SVG gets a page around it with a title (the load line names it) and no margin; an HTML document is its own page.
+    const html = kind === "SVG" ? `<!doctype html><html><head><title>SVG output</title><style>body{margin:0}</style></head><body>${body}</body></html>` : body;
+    this.showPage(pageDocument(html, token), token);
   }
 
   /**
@@ -312,7 +445,8 @@ export class RunPanel {
    * (run/mhtml.ts) lets nothing load from anywhere. Scripts were off until
    * 2026-09-07; saved pages are interactive (a sudoku, say), and a script in
    * an opaque origin without network is what the JavaScript sandbox already
-   * grants a Worker. The panel grows to page size while it shows one.
+   * grants a Worker. The panel keeps whatever height it has; a page runner
+   * opens the panel at the remembered page height (the constructor).
    */
   private showPage(html: string, token: string | null): void {
     this.frame?.remove();
@@ -325,12 +459,15 @@ export class RunPanel {
     frame.srcdoc = html;
     this.frame = frame;
     this.rootEl.addClass("nfe-run-page-mode");
-    this.setKind("page");
+    // The page is the output (Copy hands it over); nothing is held back any more.
+    this.docMode = "text";
     this.text = html;
+    if (!this.viewPinned) this.setView("output");
   }
 
-  private setStatus(text: string): void {
+  private setStatus(text: string, error = false): void {
     this.statusEl.setText(text);
+    this.statusEl.toggleClass("is-error", error);
   }
 
   private tick(): void {

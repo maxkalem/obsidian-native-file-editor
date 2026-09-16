@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { OBSIDIAN_OWNED_EXTENSIONS } from "../src/constants";
 import { __allEntries, languageFor, registeredExtensions, resolveLanguage } from "../src/highlight/registry";
+import { tokenize } from "../src/highlight/highlighter";
 
 /**
  * What the two plugins this one replaces register, read 2026-09-04. A user
@@ -78,5 +79,17 @@ describe("language registry", () => {
     expect(registeredExtensions().length).toBeGreaterThan(200);
     expect(__allEntries().filter((e) => e.source === "lezer").length).toBeGreaterThanOrEqual(14);
     expect(__allEntries().filter((e) => e.source === "legacy").length).toBeGreaterThanOrEqual(90);
+  });
+});
+
+describe("JSON Lines", () => {
+  it(".jsonl and .ndjson open as JSON, and lang-json colours every line of a multi-value file", () => {
+    expect(languageFor("jsonl")?.name).toBe("JSON");
+    expect(languageFor("ndjson")?.name).toBe("JSON");
+    const resolved = resolveLanguage(languageFor("jsonl") as never);
+    const tokens = tokenize('{"a": 1}\n{"a": 2, "b": [true, null]}\n', resolved!.language) ?? [];
+    expect(tokens.filter((t) => t.text === "\"a\"").every((t) => t.classes?.includes("nfe-tok-property"))).toBe(true);
+    expect(tokens.find((t) => t.text === "2")?.classes).toContain("nfe-tok-number");
+    expect(tokens.find((t) => t.text === "null")?.classes).toContain("nfe-tok-constant");
   });
 });

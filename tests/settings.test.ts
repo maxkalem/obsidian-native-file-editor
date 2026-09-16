@@ -83,7 +83,7 @@ describe("settings tab definitions", () => {
     const actions: string[] = [];
     const notices: string[] = [];
     const device = new DeviceLocalStore("v", new MapStorage());
-    const dialogs = { folder: null as string | null, file: null as string | null, language: null as string | null, text: null as string | null };
+    const dialogs = { folder: null as string | null, file: null as string | null, language: null as string | null, text: null as string | null, confirm: true, asked: [] as string[] };
     /** What Obsidian would say holds a chord (`Ctrl+B` → ["Toggle bold"]); empty by default. */
     const obsidianKeys: Record<string, string[]> = {};
     const shell: DesktopShell = {
@@ -106,6 +106,7 @@ describe("settings tab definitions", () => {
       tableLanguages: () => ["Batch"],
       pickLanguage: async () => dialogs.language,
       promptText: async () => dialogs.text,
+      confirm: async (title, description, button) => (dialogs.asked.push(`${title} | ${description} | ${button}`), dialogs.confirm),
       reread: async () => void actions.push("reread"),
       createExamplePalette: async (l) => void actions.push(`palette ${l}`),
       createExampleLanguage: async (l) => void actions.push(`language ${l}`),
@@ -342,9 +343,34 @@ describe("settings tab definitions", () => {
     row.texts[0]!.inputEl.value = '"C:\\Python312\\python.exe" -u {file} --flag';
     __fire(row.texts[0]!.inputEl, "keydown", { key: "Enter" });
     expect(h.device.get().runners[0]?.argv).toEqual(["C:\\Python312\\python.exe", "-u", "{file}", "--flag"]);
-    row.texts[0]!.inputEl.value = "";
-    __fire(row.texts[0]!.inputEl, "keydown", { key: "Enter" });
-    expect(h.notices.at(-1)).toMatch(/needs a program/);
+    // A saved line is done with: the row is re-rendered, the old field is dead.
+    const notices0 = h.notices.length;
+    __fire(row.texts[0]!.inputEl, "blur", {});
+    expect(h.notices.length).toBe(notices0);
+    const row2 = renderRows(buildDefinitions(h.deps)).find((r) => r.name === "Python")!.setting;
+    row2.__click("Edit the command line");
+    row2.texts[0]!.inputEl.value = "";
+    __fire(row2.texts[0]!.inputEl, "keydown", { key: "Enter" });
+    expect(h.notices.at(-1)).toMatch(/needs a program first, then its arguments\.$/);
+    // Enter on a bad line keeps the field; leaving it puts the saved line back, once, and Escape cancels outright (2026-09-16: an emptied field had no way out).
+    expect(row2.texts[0]!.inputEl.parent).not.toBeNull();
+    __fire(row2.texts[0]!.inputEl, "blur", {});
+    expect(h.notices.at(-1)).toMatch(/Kept: C:\\Python312\\python\.exe -u \{file\} --flag$/);
+    expect(row2.texts[0]!.inputEl.parent).toBeNull();
+    expect(h.device.get().runners[0]?.argv).toEqual(["C:\\Python312\\python.exe", "-u", "{file}", "--flag"]);
+    const notices = h.notices.length;
+    __fire(row2.texts[0]!.inputEl, "blur", {});
+    expect(h.notices.length).toBe(notices);
+    row2.__click("Edit the command line");
+    expect(row2.texts).toHaveLength(2);
+    row2.texts[1]!.inputEl.value = "garbage {file}";
+    __fire(row2.texts[1]!.inputEl, "keydown", { key: "Escape" });
+    expect(row2.texts[1]!.inputEl.parent).toBeNull();
+    expect(h.notices.length).toBe(notices);
+    expect(h.device.get().runners[0]?.argv).toEqual(["C:\\Python312\\python.exe", "-u", "{file}", "--flag"]);
+    // The pencil opens again after a cancel.
+    row2.__click("Edit the command line");
+    expect(row2.texts).toHaveLength(3);
     renderRows(buildDefinitions(h.deps)).find((r) => r.name === "JavaScript")!.setting.__click("Remove this interpreter");
     expect(h.device.get().runners.map((r) => r.language)).toEqual(["Python", "Batch"]);
   });
@@ -459,16 +485,31 @@ describe("settings tab definitions", () => {
     expect(h.current().customExtensions).toEqual({});
   });
 
-  it("the Plugin group: Reload calls back; Reset forgets this device's state", () => {
+  it("the Plugin group: Reload calls back; Reset asks first and forgets this device's state only on yes", async () => {
     const h = harness();
     h.device.update({ runEnabled: true, runners: [{ language: "Python", name: "p", argv: ["python", "{file}"] }], largeFileBytes: 5 });
     const group = buildDefinitions(h.deps).find((d) => "heading" in d && d.heading === "Plugin") as { items: Array<{ name: string; action?: () => void }> };
     expect(group.items.map((i) => i.name)).toEqual(["Reload plugin", "Reset this device's settings"]);
     group.items[0]?.action?.();
     expect(h.actions).toEqual(["reload"]);
+    // Dismissed (Escape, the X, a tap outside): nothing happens, no notice.
+    h.dialogs.confirm = false;
     group.items[1]?.action?.();
+    await tick();
+    expect(h.dialogs.asked).toEqual(["Reset this device's settings? | Native File Editor forgets what it keeps for this device: 1 interpreter, the Run switch, the timeout and output limit, the large-file limit and the remembered panel heights and modes. Shared settings in data.json are not touched. There is no undo. | Reset"]);
+    expect(h.device.get()).toMatchObject({ runEnabled: true, largeFileBytes: 5 });
+    expect(h.device.get().runners).toHaveLength(1);
+    expect(h.notices.some((n) => /device settings reset/.test(n))).toBe(false);
+    // Confirmed: reset, and the notice.
+    h.dialogs.confirm = true;
+    group.items[1]?.action?.();
+    await tick();
     expect(h.device.get()).toMatchObject({ runEnabled: false, runners: [], largeFileBytes: DEFAULT_LARGE_FILE_BYTES });
     expect(h.notices.at(-1)).toMatch(/device settings reset/);
+    // With no interpreter the question says so.
+    group.items[1]?.action?.();
+    await tick();
+    expect(h.dialogs.asked.at(-1)).toContain("the interpreters (none now)");
   });
 
   it("rejects out-of-range and wrong-typed writes without saving", async () => {

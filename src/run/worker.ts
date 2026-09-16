@@ -4,9 +4,11 @@ import { OutputCap, type RunHandle, type RunResult, type WorkerRequest, type Wor
  * The JavaScript sandbox: the file runs in a Web Worker built from a Blob, in
  * Obsidian's own engine, on every platform. A Worker has no DOM, no Obsidian
  * API, no `require`; the prelude below also removes the network and script
- * loading from its global scope, so what remains is the language and the
- * console. `console.*` calls and uncaught errors come back as messages;
- * `terminate()` ends it on timeout or Stop.
+ * loading from its global scope, so what remains is the language, the
+ * console and `postMessage`. `console.*` calls and uncaught errors come back
+ * as messages for the Log; what the script posts itself is its output, for
+ * the Output view (an SVG or HTML string is rendered there); `terminate()`
+ * ends it on timeout or Stop.
  *
  * "Done" is when the script's synchronous part has run and no timer it set is
  * still pending: the prelude counts `setTimeout`/`setInterval` and posts
@@ -90,7 +92,7 @@ export class BlobWorkerRunner implements WorkerRunner {
         }
         resolve({ exitCode, timedOut, stopped, truncated: cap.truncated, ms: now() - started, error });
       };
-      const emit = (kind: "stdout" | "stderr", text: string) => {
+      const emit = (kind: "stdout" | "stderr" | "console", text: string) => {
         if (finished) return;
         const admitted = cap.admit(text);
         if (admitted === null) return;
@@ -107,13 +109,31 @@ export class BlobWorkerRunner implements WorkerRunner {
         return;
       }
       worker.onmessage = (ev) => {
-        const m = ev.data as WorkerMessage;
+        const m = ev.data as WorkerMessage | unknown;
+        // Whatever the script itself posts is its output (a Worker's
+        // `postMessage` is its channel to the host, as stdout is a
+        // process's): a string as it is, anything else as JSON. The prelude's
+        // own messages carry a `type` of ours; console lines are the Log's.
+        if (typeof m === "string") {
+          emit("stdout", m.endsWith("\n") ? m : `${m}\n`);
+          return;
+        }
         if (!m || typeof m !== "object") return;
-        if (m.type === "log") emit(m.level === "error" || m.level === "warn" ? "stderr" : "stdout", m.text);
-        else if (m.type === "error") {
+        const msg = m as Partial<WorkerMessage> & { type?: unknown };
+        if (msg.type === "log" && typeof msg.text === "string") emit(msg.level === "error" || msg.level === "warn" ? "stderr" : "console", msg.text);
+        else if (msg.type === "error" && typeof msg.text === "string") {
           sawError = true;
-          emit("stderr", m.text);
-        } else if (m.type === "done") finish(sawError ? 1 : 0);
+          emit("stderr", msg.text);
+        } else if (msg.type === "done") finish(sawError ? 1 : 0);
+        else {
+          let text: string;
+          try {
+            text = JSON.stringify(m);
+          } catch {
+            text = String(m);
+          }
+          emit("stdout", `${text}\n`);
+        }
       };
       worker.onerror = (ev) => {
         sawError = true;

@@ -47,10 +47,19 @@ const log = () => new Logger({ sink: null, timers: { setTimeout: () => 0, clearT
 afterEach(() => __clearVaultLanguages());
 
 describe("registerVaultLanguage and registerCustomExtension", () => {
-  it("a vault definition wins for its extensions while it is registered, and the bundled claim comes back when it is cleared", () => {
-    const r = registerVaultLanguage({ id: "x", name: "Xlang", extensions: ["xlang", "py", "xl"], caseInsensitive: false, commentLine: "#", commentStart: null, commentEnd: null, sets: [["keyword", "let"]] });
+  it("a vault definition wins for its extensions while it is registered, keeps a grammar's extension unless it says replace, and the bundled claim comes back when it is cleared", () => {
+    // Without `replace`, a grammar's extension (.py is lang-python) is kept; a tier-4 keyword table's (.bat is Batch) and an unclaimed one are taken.
+    const shy = registerVaultLanguage({ id: "y", name: "Ylang", extensions: ["ylang", "py", "bat"], caseInsensitive: false, commentLine: "#", commentStart: null, commentEnd: null, sets: [["keyword", "let"]] });
+    expect(shy.entry.extensions).toEqual(["ylang", "bat"]);
+    expect(shy.kept).toEqual(['.py (Python is a grammar; add "replace": true to take it over)']);
+    expect(shy.displaced).toEqual([".bat (was Batch)"]);
+    expect(languageFor("py")?.name).toBe("Python");
+    expect(languageFor("bat")?.name).toBe("Ylang");
+    __clearVaultLanguages();
+    const r = registerVaultLanguage({ id: "x", name: "Xlang", extensions: ["xlang", "py", "xl"], caseInsensitive: false, commentLine: "#", commentStart: null, commentEnd: null, sets: [["keyword", "let"]], replace: true });
     expect(r.entry.extensions).toEqual(["xlang", "py", "xl"]);
     expect(r.displaced).toEqual([".py (was Python)"]);
+    expect(r.kept).toEqual([]);
     expect(languageFor("xlang")?.source).toBe("vault");
     expect(languageFor("py")?.name).toBe("Xlang");
     expect(languageNamed("xlang")?.name).toBe("Xlang");
@@ -97,16 +106,22 @@ describe("loadVaultLanguages", () => {
     t.put(`${FOLDER}/hollywood.json`, hollywood);
     t.put(`${FOLDER}/broken.json`, "{ not json");
     t.put(`${FOLDER}/noname.json`, '{"extensions":["zz"]}');
-    t.put(`${FOLDER}/mypy.json`, '{"name":"My Python","extensions":["py"],"sets":[["keyword","def"]]}');
+    t.put(`${FOLDER}/mypy.json`, '{"name":"My Python","extensions":["py"],"sets":[["keyword","def"]],"replace":true}');
+    // Without `replace`, a table aimed at a grammar's extension takes nothing and is a problem, not a silent downgrade (2026-09-17).
+    t.put(`${FOLDER}/shy.json`, '{"name":"Shy","extensions":["ts"],"sets":[["keyword","let"]]}');
+    t.put(`${FOLDER}/empty.json`, '{"name":"Empty","extensions":["emp"]}');
     t.put(`${FOLDER}/readme.md`, "# ignored");
     const l = log();
     const r = await loadVaultLanguages({ transport: t, folder: FOLDER, customExtensions: { xl: "Python", bad: "Nope" }, log: l });
     expect(r.registered).toEqual(["Hollywood (.hws)", "My Python (.py); replaces .py (was Python)"]);
     expect(r.problems).toEqual([
       expect.stringMatching(/^\.obsidian\/plugins\/native-file-editor\/languages\/broken\.json: /),
+      `${FOLDER}/empty.json: no keyword sets and no patterns: files would show only comments; add sets`,
       `${FOLDER}/noname.json: name is missing`,
+      `${FOLDER}/shy.json: nothing taken: .ts (TypeScript is a grammar; add "replace": true to take it over)`,
       'custom type .bad: no language named "Nope"',
     ]);
+    expect(languageFor("ts")?.name).toBe("TypeScript");
     expect(r.customTypes).toEqual([".xl -> Python"]);
     expect(languageFor("hws")?.name).toBe("Hollywood");
     expect(languageFor("py")?.name).toBe("My Python");

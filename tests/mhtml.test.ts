@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PAGE_CSP, extractHtmlFromMhtml, looksLikeMhtml, pageDocument, renderMhtml } from "../src/run/mhtml";
+import { PAGE_CSP, extractHtmlFromMhtml, looksLikeMhtml, pageDocument, pageReporter, renderMhtml } from "../src/run/mhtml";
 
 /** The MHTML unwrapper and the page wrapper behind the in-pane page view. */
 
@@ -108,7 +108,7 @@ describe("mhtml", () => {
     expect(html).toContain('<img src="https://elsewhere.example/x.png">');
     expect(html).toContain('<a href="https://site.example/page/">home</a>');
     expect(html).not.toContain("cid:");
-    // A nested page (Chrome saves a frame as its own text/html part, referenced by cid:) becomes a data: document with the policy inside; a frame that frames its own ancestor is left alone.
+    // A nested page (Chrome saves a frame as its own text/html part, referenced by cid:) becomes the frame's srcdoc with the policy inside — not a data: URL, which Chromium drops past 2 MB (an html5up demo frame with its images inlined: 2.6 MB, blank on the device, 2026-09-15); a frame that frames its own ancestor is left alone.
     const nested = [
       "Content-Type: multipart/related; boundary=n",
       "",
@@ -131,11 +131,29 @@ describe("mhtml", () => {
       "--n--",
     ].join("\n");
     const outer = renderMhtml(nested) ?? "";
-    const src = /<iframe src="data:text\/html;base64,([^"]+)"/.exec(outer)?.[1] ?? "";
-    const inner = Buffer.from(src, "base64").toString("utf8");
-    expect(inner).toContain(`<meta http-equiv="Content-Security-Policy" content="${PAGE_CSP}">`);
+    expect(outer).not.toContain("data:text/html");
+    const srcdoc = /<iframe srcdoc="([^"]+)"/.exec(outer)?.[1] ?? "";
+    const inner = srcdoc.replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+    // A srcdoc frame inherits its parent's policy; a meta of its own would make every refusal fire twice (each font twice in the Log, 2026-09-16). The reporter still goes in.
+    expect(inner).not.toContain("Content-Security-Policy");
+    expect(renderMhtml(nested, "tok-1") ?? "").toMatch(/<iframe srcdoc="[^"]*var T=&quot;tok-1&quot;/);
     expect(inner).toContain("<style>b { color: blue }</style>");
     expect(inner).toContain('<iframe src="https://site.example/">');
+    // The attribute's own two characters are escaped and nothing else (a script's `<` and `>` stay); an `&` in the page survives the round trip.
+    expect(srcdoc).toContain("<style>b { color: blue }</style>");
+    expect(srcdoc).toContain("<iframe src=&quot;https://site.example/&quot;>");
+    // A frame this big as a data: URL would be dropped by Chromium; as srcdoc it is just long.
+    const big = nested.replace("<html><head><link", `<html><head><!--${"x".repeat(2_200_000)}--><link`);
+    const bigOuter = renderMhtml(big) ?? "";
+    expect(bigOuter.length).toBeGreaterThan(2_200_000);
+    expect(/<iframe srcdoc="/.test(bigOuter)).toBe(true);
+    expect(bigOuter).not.toContain("data:text/html");
+    // A link to an archived page (not a frame) still gets a data: URL, and that document carries the meta (a data: document may not inherit).
+    const linked = nested.replace('<iframe src="cid:inner@x"></iframe>', '<a href="cid:inner@x">in</a>');
+    const href = /<a href="data:text\/html;base64,([^"]+)">in<\/a>/.exec(renderMhtml(linked) ?? "")?.[1] ?? "";
+    expect(Buffer.from(href, "base64").toString("utf8")).toContain(`<meta http-equiv="Content-Security-Policy" content="${PAGE_CSP}">`);
+    // pageDocument without the policy: the reporter alone.
+    expect(pageDocument("<html><head><title>t</title></head><body/></html>", "tk", false)).toBe(`<html><head>${pageReporter("tk")}<title>t</title></head><body/></html>`);
     // An archive with the page alone comes back untouched; no HTML part, null.
     expect(renderMhtml("Content-Type: multipart/related; boundary=b\n\n--b\nContent-Type: text/html\n\n<i>x</i>\n--b--")).toBe("<i>x</i>");
     expect(renderMhtml("Content-Type: multipart/related; boundary=b\n\n--b\nContent-Type: text/plain\n\nx\n--b--")).toBeNull();

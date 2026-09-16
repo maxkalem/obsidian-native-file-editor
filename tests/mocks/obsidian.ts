@@ -39,7 +39,8 @@ function fakeEl(tag = "div", cls = "", text = ""): Any {
   const el: Any = {
     tagName: tag.toUpperCase(),
     className: cls,
-    style: { setProperty: () => undefined, removeProperty: () => undefined },
+    // Custom properties are kept so a test can read back what a component set (the Run panel's height).
+    style: ((vals = new Map<string, string>()) => ({ setProperty: (k: string, v: string) => void vals.set(k, v), removeProperty: (k: string) => void vals.delete(k), getPropertyValue: (k: string) => vals.get(k) ?? "" }))(),
     focus: () => undefined,
     disabled: false,
     hidden: false,
@@ -110,6 +111,8 @@ function fakeEl(tag = "div", cls = "", text = ""): Any {
     remove: () => {
       const sibs = el.parent?.children;
       if (sibs) sibs.splice(sibs.indexOf(el), 1);
+      // As in the DOM: a removed element has no parent any more.
+      el.parent = null;
     },
     querySelectorAll: (sel: string) => {
       const classes = sel.split(",").map((x) => x.trim().replace(/^\./, ""));

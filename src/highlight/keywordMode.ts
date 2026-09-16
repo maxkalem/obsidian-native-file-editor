@@ -36,6 +36,14 @@ export interface KeywordLanguage {
    * uses them for `:label` and `%VAR%`.
    */
   readonly patterns?: ReadonlyArray<{ readonly regex: string; readonly token: string; readonly sol?: boolean }>;
+  /**
+   * A vault definition only: take an extension over from a bundled grammar
+   * or mode as well. Without it a vault file replaces only keyword-table
+   * languages and other vault files; a grammar's extension is kept, with a
+   * word in the log (2026-09-17, the user: a keyword table replacing Python's
+   * grammar wanted at least a warning).
+   */
+  readonly replace?: boolean;
 }
 
 const TAG_BY_ROLE: Readonly<Record<KeywordRole, string>> = {
@@ -183,6 +191,8 @@ export function parseKeywordLanguage(raw: unknown, fallbackId: string): { langua
       patterns.push({ regex: q.regex, token: q.token, ...(q.sol === true ? { sol: true } : {}) });
     }
   }
+  if (r.replace !== undefined && typeof r.replace !== "boolean") return { error: "replace must be true or false" };
+  if (sets.every(([, words]) => words.trim().length === 0) && patterns.length === 0) return { error: "no keyword sets and no patterns: files would show only comments; add sets" };
   return {
     language: {
       id: typeof r.id === "string" && r.id.length > 0 ? r.id : fallbackId,
@@ -195,6 +205,7 @@ export function parseKeywordLanguage(raw: unknown, fallbackId: string): { langua
       sets,
       ...(commentLines.length > 0 ? { commentLines } : {}),
       ...(patterns.length > 0 ? { patterns } : {}),
+      ...(r.replace === true ? { replace: true } : {}),
     },
   };
 }

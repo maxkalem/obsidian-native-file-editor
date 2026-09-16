@@ -193,7 +193,8 @@ const ENTRIES: readonly LanguageEntry[] = [
   lezer("Python", ["py", "pyw", "pyi"], () => python()),
   lezer("HTML", ["html", "htm", "xhtml", "shtml", "shtm", "xht", "hta", "jsp"], () => html()),
   lezer("CSS", ["css"], () => css()),
-  lezer("JSON", ["json", "jsonc", "json5", "jsonld", "geojson", "webmanifest", "har"], () => json()),
+  // JSON Lines (`.jsonl`, `.ndjson`): one value per line; lang-json recovers after each top-level value and colours every line (2026-09-17, at the user's word).
+  lezer("JSON", ["json", "jsonc", "json5", "jsonld", "geojson", "webmanifest", "har", "jsonl", "ndjson"], () => json()),
   lezer("XML", ["xml", "xsl", "xslt", "xsd", "plist", "csproj", "vbproj", "fsproj", "props", "targets", "xaml", "rss", "atom", "wsdl", "xliff", "xlf", "resx", "nuspec", "opml", "xul", "kml", "mxml", "xsml", "xbl", "sxbl", "sitemap", "gml", "gpx", "vcproj", "vcxproj", "csxproj", "dbproj"], () => xml()),
   lezer("YAML", ["yaml", "yml"], () => yaml()),
   lezer("SQL", ["sql", "ddl", "dml"], () => sql()),
@@ -385,8 +386,19 @@ const DISPLACED: Map<string, LanguageEntry | undefined> = new Map();
  * registers its extensions with Obsidian, or be followed by a registration of
  * the new extensions.
  */
-export function registerVaultLanguage(def: KeywordLanguage): { entry: LanguageEntry; displaced: string[] } {
-  const extensions = [...new Set(def.extensions.map((e) => e.toLowerCase()))];
+export function registerVaultLanguage(def: KeywordLanguage): { entry: LanguageEntry; displaced: string[]; kept: string[] } {
+  const wanted = [...new Set(def.extensions.map((e) => e.toLowerCase()))];
+  // A grammar or a hand-written mode (tiers 1–3 and the plugin's own modes)
+  // is kept unless the definition says `replace`: a keyword table is a
+  // worse highlighter than what it would displace. Keyword-table languages
+  // (tier 4), other vault files and unclaimed extensions are taken over.
+  const kept: string[] = [];
+  const extensions = wanted.filter((ext) => {
+    const previous = BY_EXTENSION.get(ext);
+    if (!previous || def.replace === true || previous.source === "vault" || previous.source === null || isKeywordTable(previous)) return true;
+    kept.push(`.${ext} (${previous.name} is a grammar; add "replace": true to take it over)`);
+    return false;
+  });
   const entry: LanguageEntry = {
     name: def.name,
     extensions,
@@ -402,7 +414,12 @@ export function registerVaultLanguage(def: KeywordLanguage): { entry: LanguageEn
   }
   VAULT_ENTRIES.push(entry);
   if (!BY_NAME.has(entry.name.toLowerCase())) BY_NAME.set(entry.name.toLowerCase(), entry);
-  return { entry, displaced };
+  return { entry, displaced, kept };
+}
+
+/** A tier-4 entry: one of Notepad++'s keyword tables through the generic mode (the only bundled kind a vault table may replace outright). */
+function isKeywordTable(entry: LanguageEntry): boolean {
+  return entry.source === "builtin" && NPP_LANGUAGES.some((l) => l.name === entry.name);
 }
 
 /**

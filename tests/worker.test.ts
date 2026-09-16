@@ -18,7 +18,7 @@ class FakeWorker implements WorkerLike {
     this.terminated++;
   }
   /** What the prelude would post. */
-  emit(m: WorkerMessage): void {
+  emit(m: WorkerMessage | unknown): void {
     this.onmessage?.({ data: m });
   }
 }
@@ -62,18 +62,24 @@ describe("the worker prelude", () => {
 });
 
 describe("BlobWorkerRunner", () => {
-  it("forwards logs by level, ends on done with exit 0, and terminates the worker", async () => {
+  it("forwards the console by level (log/info/debug as console, warn/error as stderr), what the script posts as stdout; ends on done with exit 0 and terminates the worker", async () => {
     const { h, out, worker } = start();
     expect(worker.source.startsWith(WORKER_PRELUDE)).toBe(true);
     worker.emit({ type: "log", level: "log", text: "one\n" });
     worker.emit({ type: "log", level: "warn", text: "careful\n" });
     worker.emit({ type: "log", level: "error", text: "bad\n" });
+    // The script's own postMessage is its output: a string as it is (a newline added), anything else as JSON.
+    worker.emit("<svg xmlns='http://www.w3.org/2000/svg'><circle r='4'/></svg>");
+    worker.emit({ answer: 42 });
+    worker.emit(7);
     worker.emit({ type: "done" });
     const r = await h.done;
     expect(out).toEqual([
-      { kind: "stdout", text: "one\n" },
+      { kind: "console", text: "one\n" },
       { kind: "stderr", text: "careful\n" },
       { kind: "stderr", text: "bad\n" },
+      { kind: "stdout", text: "<svg xmlns='http://www.w3.org/2000/svg'><circle r='4'/></svg>\n" },
+      { kind: "stdout", text: '{"answer":42}\n' },
     ]);
     expect(r).toMatchObject({ exitCode: 0, timedOut: false, stopped: false, truncated: false, error: null });
     expect(worker.terminated).toBe(1);
@@ -119,7 +125,7 @@ describe("BlobWorkerRunner", () => {
     worker.emit({ type: "log", level: "log", text: "0123456789ABCDEF\n" });
     const r = await h.done;
     expect(r.truncated).toBe(true);
-    expect(out[0]).toEqual({ kind: "stdout", text: "0123456789" });
+    expect(out[0]).toEqual({ kind: "console", text: "0123456789" });
     expect(worker.terminated).toBe(1);
   });
 

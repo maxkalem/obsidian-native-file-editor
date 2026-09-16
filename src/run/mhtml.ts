@@ -98,6 +98,11 @@ function absolute(ref: string, base: string | null): string {
   }
 }
 
+/** A document as the value of a double-quoted attribute (`srcdoc`): the two characters that would end it. */
+function escapeAttribute(html: string): string {
+  return html.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+}
+
 /** `url(...)` references inside a stylesheet or a style attribute, rewritten through `lookup`. */
 function rewriteCssUrls(css: string, base: string | null, lookup: (url: string) => string | null): string {
   return css.replace(/url\(\s*(["']?)([^"')]+)\1\s*\)/gi, (whole, quote: string, ref: string) => {
@@ -130,10 +135,12 @@ function rewriteCssImports(css: string, base: string | null, lookup: (url: strin
  * `href`, `poster`, `data`, `srcset`, `style` attributes and `url()` inside
  * styles; stylesheets as `<style>` blocks (a `<link rel=stylesheet>` to a
  * part becomes one, an `@import` of a part becomes its text); a frame whose
- * source is an archived `text/html` part gets that part as a `data:` document
- * of its own, carrying the same policy (`pageDocument`), so nothing nested
- * reaches the network either. A reference the archive does not hold is left
- * as it is and stays blank in the frame. Null when there is no HTML part.
+ * source is an archived `text/html` part gets that part as its `srcdoc`, a
+ * document of its own under the same policy (inherited: a srcdoc frame
+ * takes its parent's), so nothing nested reaches the network either
+ * (`srcdoc` rather than a `data:` URL because Chromium drops a navigation
+ * to a URL over 2 MB). A reference the archive does not hold is left as it
+ * is and stays blank in the frame. Null when there is no HTML part.
  */
 export function renderMhtml(text: string, token?: string): string | null {
   const parts = parseMhtml(text);
@@ -170,7 +177,26 @@ function renderPart(htmlPart: MhtmlPart, resources: readonly MhtmlPart[], framin
     const p = partFor(url);
     return p && p.type === "text/css" ? cssOf(p) : null;
   };
-  // Anything else as a data: URI; a nested page as a data: document with the policy inside.
+  // A nested page (a frame Chrome saved as its own part) rendered as a document
+  // of its own; null for a part that frames its own ancestor. As a frame's
+  // `srcdoc` it inherits this page's policy and gets no meta of its own: a
+  // second, identical policy made every refusal fire twice (the user's Log,
+  // 2026-09-16, each font twice). As a `data:` document it carries the meta.
+  const pages = new Map<string, string | null>();
+  const pageOf = (p: MhtmlPart, as: "srcdoc" | "data"): string | null => {
+    const key = `${as}:${resources.indexOf(p)}`;
+    const done = pages.get(key);
+    if (done !== undefined) return done;
+    let doc: string | null = null;
+    if (!framing.has(p)) {
+      const nested = new Set(framing);
+      nested.add(htmlPart);
+      doc = pageDocument(renderPart(p, resources.filter((r) => r !== p), nested, token), token, as === "data");
+    }
+    pages.set(key, doc);
+    return doc;
+  };
+  // Anything else as a data: URI; a nested page as a data: document where only a URL will do.
   const encoded = new Map<MhtmlPart, string>();
   const lookup = (url: string): string | null => {
     const p = partFor(url);
@@ -179,10 +205,9 @@ function renderPart(htmlPart: MhtmlPart, resources: readonly MhtmlPart[], framin
     if (done) return done;
     let uri: string;
     if (p.type === "text/html") {
-      if (framing.has(p)) return null;
-      const nested = new Set(framing);
-      nested.add(htmlPart);
-      uri = `data:text/html;base64,${toBase64(utf8Bytes(pageDocument(renderPart(p, resources.filter((r) => r !== p), nested, token), token)))}`;
+      const doc = pageOf(p, "data");
+      if (doc === null) return null;
+      uri = `data:text/html;base64,${toBase64(utf8Bytes(doc))}`;
     } else if (p.type === "text/css") {
       uri = `data:text/css;base64,${toBase64(utf8Bytes(cssOf(p)))}`;
     } else {
@@ -210,7 +235,18 @@ function renderPart(htmlPart: MhtmlPart, resources: readonly MhtmlPart[], framin
   });
   out = out.replace(attr("src|href|poster|data"), (whole, lead: string, dq: string | undefined, sq: string | undefined) => {
     const ref = dq ?? sq ?? "";
-    const data = lookup(absolute(ref.trim(), base));
+    const url = absolute(ref.trim(), base);
+    // A frame's archived page goes in as `srcdoc`, not a `data:` URL: Chromium
+    // drops a navigation to a URL over 2 MB, and a saved page with its images
+    // inlined passes that easily (an html5up demo frame: 2.6 MB, blank on the
+    // device, 2026-09-15). An attribute has no such limit, and a srcdoc frame
+    // renders under the same policy (a check in Chromium, 2026-09-16).
+    const part = partFor(url);
+    if (part?.type === "text/html" && /^\ssrc\s*=/i.test(lead)) {
+      const doc = pageOf(part, "srcdoc");
+      return doc === null ? whole : `${lead.replace(/src/i, "srcdoc")}"${escapeAttribute(doc)}"`;
+    }
+    const data = lookup(url);
     return data ? `${lead}${quoted(dq, data)}` : whole;
   });
   out = out.replace(attr("srcset"), (whole, lead: string, dq: string | undefined, sq: string | undefined) => {
@@ -264,8 +300,10 @@ export function pageReporter(token: string): string {
  * The document handed to the sandboxed iframe: the page with a policy that
  * lets nothing load from anywhere (ADR-001: no network, ever): inline
  * scripts and styles, `data:` scripts, `data:`/`blob:` images and media,
- * `data:` fonts, `data:` frames (an archive's nested pages, each carrying
- * this policy again). A `<script src>` or `fetch` to any URL is refused by
+ * `data:` fonts, `data:` frames (an archive's nested pages go in as
+ * `srcdoc`, which no frame-src source has to name and which inherits this
+ * policy, so they carry no meta of their own; `data:` stays for a link to
+ * one, with the meta inside, since a `data:` document may not inherit). A `<script src>` or `fetch` to any URL is refused by
  * the browser; `eval` is allowed because the frame's origin is opaque and
  * there is nothing to reach. The frame itself (RunPanel.showPage) grants
  * scripts and nothing else.
@@ -279,8 +317,8 @@ export function pageReporter(token: string): string {
  */
 export const PAGE_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' data:; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; frame-src data:;";
 
-export function pageDocument(html: string, token?: string): string {
-  const csp = `<meta http-equiv="Content-Security-Policy" content="${PAGE_CSP}">${token ? pageReporter(token) : ""}`;
+export function pageDocument(html: string, token?: string, policy = true): string {
+  const csp = `${policy ? `<meta http-equiv="Content-Security-Policy" content="${PAGE_CSP}">` : ""}${token ? pageReporter(token) : ""}`;
   // The page's own policy would ALSO apply (two meta policies intersect);
   // offline in a sandbox, the plugin's policy is the one that matters, so
   // the page's is dropped.

@@ -68,7 +68,11 @@ export async function loadVaultLanguages(input: VaultLanguagesInput): Promise<Va
         continue;
       }
       const result = registerVaultLanguage(parsed.language);
-      registered.push(`${result.entry.name} (${result.entry.extensions.map((e) => `.${e}`).join(", ")})${result.displaced.length > 0 ? `; replaces ${result.displaced.join(", ")}` : ""}`);
+      if (result.entry.extensions.length === 0) {
+        problems.push(`${path}: nothing taken: ${result.kept.join(", ")}`);
+        continue;
+      }
+      registered.push(`${result.entry.name} (${result.entry.extensions.map((e) => `.${e}`).join(", ")})${result.displaced.length > 0 ? `; replaces ${result.displaced.join(", ")}` : ""}${result.kept.length > 0 ? `; kept ${result.kept.join(", ")}` : ""}`);
     }
   }
 

@@ -179,6 +179,21 @@ describe("plugin load", () => {
     head.children.length = 0;
   });
 
+  it("takes the palette <style> out of the head on unload", async () => {
+    const head = (globalThis as unknown as { activeDocument: { head: { children: Array<{ id?: string }> } } }).activeDocument.head;
+    head.children.length = 0;
+    const app = makeApp({});
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, {} as never));
+    await plugin.onload();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(head.children.map((c) => c.id)).toEqual([PALETTE_STYLE_ID]);
+    plugin.onunload();
+    expect(head.children).toEqual([]);
+    // A second unload, or one before any palette was set, is harmless.
+    plugin.onunload();
+    expect(head.children).toEqual([]);
+  });
+
   it("adds New file to a folder's context menu and opens the dialog with the extensions", async () => {
     const app = makeApp({});
     const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, {} as never));

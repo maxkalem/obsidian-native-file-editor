@@ -670,6 +670,11 @@
   white-space: nowrap;
 }
 
+/* A run that ended badly (a non-zero exit, a timeout, a failed start, output cut): the status in the error colour, whichever view is showing. */
+.nfe-text-content .nfe-run-status.is-error {
+  color: var(--text-error);
+}
+
 .nfe-text-content .nfe-run-spacer {
   flex: 1 1 auto;
 }

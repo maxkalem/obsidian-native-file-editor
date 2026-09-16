@@ -4,8 +4,16 @@
  * tests drive the panel with a fake.
  */
 
-/** `page`: the text is an HTML document to render in the panel's sandboxed frame, not to print. */
-export type OutputKind = "stdout" | "stderr" | "info" | "page";
+/**
+ * `stdout` is the program's result: what a process writes to stdout, what a
+ * sandbox script hands out with `postMessage`; the panel shows it in Output
+ * (rendered when it is an SVG or HTML document) and in the Log. `console` is
+ * a script's `console.log/info/debug`, `stderr` its `console.warn/error` or
+ * a process's stderr: the Log only. `info` is the panel's own line (the
+ * command, the sandbox header, a truncation): the Log only. `page`: the text
+ * is an HTML document to render in Output, not to print.
+ */
+export type OutputKind = "stdout" | "stderr" | "console" | "info" | "page";
 
 export interface RunOutput {
   readonly kind: OutputKind;
