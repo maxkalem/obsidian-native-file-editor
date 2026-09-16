@@ -14,7 +14,7 @@ import {
 import { PaletteLoader } from "./palette/loader";
 import { createDesktopShell, reloadPlugin } from "./platform/desktopShell";
 import { setupRun } from "./run/setup";
-import { pickLanguage, promptText } from "./ui/pickers";
+import { confirm, pickLanguage, promptText } from "./ui/pickers";
 import { DocumentStyleSink } from "./ui/styleSink";
 import { readThemeColours } from "./ui/themeColours";
 import { BUILD_STAMP } from "./build";
@@ -406,6 +406,7 @@ export default class NativeFileEditorPlugin extends Plugin {
         tableLanguages: () => allLanguageNames().filter((n) => keywordTableFor(n) !== null),
         pickLanguage: (languages, placeholder) => pickLanguage(this.app, languages, placeholder),
         promptText: (title, description, placeholder) => promptText(this.app, title, description, placeholder),
+        confirm: (title, description, button) => confirm(this.app, title, description, button),
         reread: () => this.reread(false),
         createExamplePalette: (language) => this.createExamplePalette(language),
         createExampleLanguage: (language) => this.createExampleLanguage(language),

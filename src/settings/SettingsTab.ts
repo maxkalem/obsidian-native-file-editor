@@ -35,6 +35,8 @@ export interface SettingsTabDeps {
   readonly tableLanguages: () => string[];
   readonly pickLanguage: (languages: string[], placeholder: string) => Promise<string | null>;
   readonly promptText: (title: string, description: string, placeholder: string) => Promise<string | null>;
+  /** A yes-or-nothing question before something irreversible; false on Escape, the X or a tap outside. */
+  readonly confirm: (title: string, description: string, button: string) => Promise<boolean>;
   /** Read the language and palette folders again and register anything new. */
   readonly reread: () => Promise<void>;
   readonly createExamplePalette: (language: string) => Promise<void>;
@@ -640,11 +642,20 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
         },
         {
           name: "Reset this device's settings",
-          desc: "Forgets what is stored for this device in Obsidian's local storage, which a reinstall does not touch: the interpreters, the Run switch and limits, the large-file limit, remembered modes. Shared settings in data.json stay.",
+          desc: "Forgets what is stored for this device in Obsidian's local storage, which a reinstall does not touch: the interpreters, the Run switch and limits, the large-file limit, remembered modes. Shared settings in data.json stay. Asks first.",
           action: () => {
-            deps.device.reset();
-            deps.refresh();
-            deps.notice("Native File Editor: device settings reset.");
+            void (async () => {
+              const runners = deps.device.get().runners.length;
+              const yes = await deps.confirm(
+                "Reset this device's settings?",
+                `Native File Editor forgets what it keeps for this device: ${runners === 0 ? "the interpreters (none now)" : `${runners} interpreter${runners === 1 ? "" : "s"}`}, the Run switch, the timeout and output limit, the large-file limit and the remembered panel heights and modes. Shared settings in data.json are not touched. There is no undo.`,
+                "Reset"
+              );
+              if (!yes) return;
+              deps.device.reset();
+              deps.refresh();
+              deps.notice("Native File Editor: device settings reset.");
+            })();
           },
         },
       ],

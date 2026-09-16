@@ -103,3 +103,55 @@ export class TextPromptModal extends Modal {
 export function promptText(app: App, title: string, description: string, placeholder: string): Promise<string | null> {
   return new Promise((resolve) => new TextPromptModal(app, title, description, placeholder, resolve).open());
 }
+
+/**
+ * A yes-or-nothing question before something that cannot be undone: the
+ * title, what will happen, and ONE button in the warning colour. No Cancel
+ * button, as in every dialog of this plugin: Escape, the X and a tap outside
+ * are the no (2026-09-17, at the user's word, for "Reset this device's
+ * settings").
+ */
+export class ConfirmModal extends Modal {
+  private done = false;
+  private readonly onDone: (yes: boolean) => void;
+  private readonly title: string;
+  private readonly description: string;
+  private readonly button: string;
+
+  constructor(app: App, title: string, description: string, button: string, onDone: (yes: boolean) => void) {
+    super(app);
+    this.title = title;
+    this.description = description;
+    this.button = button;
+    this.onDone = onDone;
+  }
+
+  override onOpen(): void {
+    this.titleEl.setText(this.title);
+    this.contentEl.addClass("nfe-modal");
+    this.contentEl.createDiv({ cls: "nfe-modal-note", text: this.description });
+    const actions = this.contentEl.createDiv({ cls: "nfe-modal-actions" });
+    const yes = actions.createEl("button", { cls: "mod-warning", text: this.button });
+    yes.addEventListener("click", () => this.finish(true));
+  }
+
+  private finish(yes: boolean): void {
+    if (this.done) return;
+    this.done = true;
+    this.onDone(yes);
+    this.close();
+  }
+
+  override onClose(): void {
+    activeWindow.setTimeout(() => {
+      if (!this.done) {
+        this.done = true;
+        this.onDone(false);
+      }
+    }, 0);
+  }
+}
+
+export function confirm(app: App, title: string, description: string, button: string): Promise<boolean> {
+  return new Promise((resolve) => new ConfirmModal(app, title, description, button, resolve).open());
+}

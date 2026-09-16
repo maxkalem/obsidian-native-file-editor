@@ -1,7 +1,7 @@
 {
   "id": "native-file-editor",
   "name": "Native File Editor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "1.13.0",
   "description": "Open and edit code, text and Office files in place. CodeMirror editor for every text file type, Word, Excel and PowerPoint rendered from their own bytes. No network, no external office suite, a backup before every write.",
   "author": "maxkalem",
