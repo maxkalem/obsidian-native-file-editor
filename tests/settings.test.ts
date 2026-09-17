@@ -266,11 +266,12 @@ describe("settings tab definitions", () => {
   it("the Run group exists on the desktop only; its rows hide until Run is on; there is no interpreter until one is added", async () => {
     desktop = false;
     expect(JSON.stringify(buildDefinitions(harness().deps))).not.toContain("Enable Run");
+    expect(JSON.stringify(buildDefinitions(harness().deps))).not.toContain("Interpreters");
     desktop = true;
     const h = harness();
     let defs = buildDefinitions(h.deps);
     expect(JSON.stringify(defs)).toContain("Enable Run");
-    expect(JSON.stringify(defs)).not.toContain("Interpreters");
+    expect(visibleOf(defs, "Interpreters")).toBe(false);
     expect(JSON.stringify(defs)).not.toContain("Reset interpreters");
     expect(visibleOf(defs, "Timeout (seconds)")).toBe(false);
     expect(visibleOf(defs, "Add interpreter…")).toBe(false);
@@ -280,18 +281,26 @@ describe("settings tab definitions", () => {
     defs = buildDefinitions(h.deps);
     expect(visibleOf(defs, "Timeout (seconds)")).toBe(true);
     expect(visibleOf(defs, "Add interpreter…")).toBe(true);
+    expect(visibleOf(defs, "Interpreters")).toBe(true);
     const run = defs.find((d) => "heading" in d && d.heading === "Run (this device)") as { items: Array<{ name: string }> };
-    expect(run.items.map((i) => i.name)).toEqual(["Enable Run", "Timeout (seconds)", "Output limit (KB)", "Add interpreter…"]);
+    expect(run.items.map((i) => i.name)).toEqual(["Enable Run", "Timeout (seconds)", "Output limit (KB)", "Interpreters"]);
+    expect(defs.some((d) => "name" in d && d.name === "Interpreters")).toBe(false);
     await writeSettingValue("device.runTimeoutS", 5, h.deps);
     await writeSettingValue("device.runOutputCapKb", 64, h.deps);
     expect(h.device.get()).toMatchObject({ runEnabled: true, runTimeoutMs: 5000, runOutputCapBytes: 65536 });
   });
 
-  it("Add offers only languages without an interpreter, then the program; rows sit at the bottom of the Run group with folder, pencil and trash", async () => {
+  it("interpreters live on their own page; adding, editing and removing update device-local rows and the page count", async () => {
     const h = harness();
+    const page = () => {
+      const run = buildDefinitions(h.deps).find((d) => "heading" in d && d.heading === "Run (this device)") as unknown as { items: Array<Record<string, unknown>> };
+      return run.items.find((d) => d.type === "page" && d.name === "Interpreters") as { displayValue: () => string; items: Array<{ items: Array<{ name: string; action?: () => void }> }> };
+    };
+    expect(page().displayValue()).toBe("None");
     h.device.update({ runEnabled: true, runners: [{ language: "Python", name: "python", argv: ["python", "{file}"] }] });
-    const runGroup = () => buildDefinitions(h.deps).find((d) => "heading" in d && d.heading === "Run (this device)") as { items: Array<{ name: string; action?: () => void }> };
-    expect(runGroup().items.map((i) => i.name)).toEqual(["Enable Run", "Timeout (seconds)", "Output limit (KB)", "Python", "Add interpreter…"]);
+    const runGroup = () => page().items[0]!;
+    expect(runGroup().items.map((i) => i.name)).toEqual(["Python", "Add interpreter…"]);
+    expect(page().displayValue()).toBe("1 interpreter");
     // The picker's list excludes Python; the standard command's arguments follow the picked program.
     let offered: string[] = [];
     h.deps = { ...h.deps, pickLanguage: async (languages) => ((offered = languages), h.dialogs.language) };
@@ -373,11 +382,18 @@ describe("settings tab definitions", () => {
     expect(row2.texts).toHaveLength(3);
     renderRows(buildDefinitions(h.deps)).find((r) => r.name === "JavaScript")!.setting.__click("Remove this interpreter");
     expect(h.device.get().runners.map((r) => r.language)).toEqual(["Python", "Batch"]);
+    expect(page().displayValue()).toBe("2 interpreters");
   });
+
+  function keysGroup(deps: SettingsTabDeps) {
+    return buildDefinitions(deps).find((d) => "heading" in d && d.heading === "Keys") as { items: Array<{ type?: string; name?: string }> };
+  }
 
   it("hotkeys live on their own page: a row per action with its key, a recorder that saves the next chord, a reset, and the conflict named", async () => {
     const h = harness();
-    const page = () => buildDefinitions(h.deps).find((d) => "type" in d && d.type === "page" && (d as { name?: string }).name === "Hotkeys") as unknown as { displayValue: () => string; items: Array<{ items: unknown[] }> };
+    const page = () => keysGroup(h.deps).items.find((d) => d.type === "page" && d.name === "Hotkeys") as unknown as { displayValue: () => string; items: Array<{ items: unknown[] }> };
+    expect(keysGroup(h.deps).items.map((item) => item.name)).toEqual(["Keys and regular expressions", "Hotkeys"]);
+    expect(buildDefinitions(h.deps).some((d) => "name" in d && d.name === "Hotkeys")).toBe(false);
     expect(page().displayValue()).toBe("defaults");
     let rows = renderRows(page().items[0]!.items as never);
     const descOf = (r: { setting: Setting }) => __textOf(r.setting.descEl);
@@ -420,7 +436,7 @@ describe("settings tab definitions", () => {
   it("an editor-bound action on a key Obsidian holds shows the holder as a warning, at recording time and on the row; a Scope-bound one does not", async () => {
     const h = harness();
     h.obsidianKeys["Ctrl+B"] = ["Toggle bold"];
-    const page = () => buildDefinitions(h.deps).find((d) => "type" in d && d.type === "page" && (d as { name?: string }).name === "Hotkeys") as unknown as { items: Array<{ items: unknown[] }> };
+    const page = () => keysGroup(h.deps).items.find((d) => d.type === "page" && d.name === "Hotkeys") as unknown as { items: Array<{ items: unknown[] }> };
     let rows = renderRows(page().items[0]!.items as never);
     const descOf = (r: { setting: Setting }) => __textOf(r.setting.descEl);
     // Add cursor above (inside the text) onto Ctrl+B: Obsidian's bold runs first, so the row says so in the warning colour and the notice too; saved all the same.
@@ -457,7 +473,7 @@ describe("settings tab definitions", () => {
     item.render(aboveAgain.setting);
     expect(aboveAgain.setting.settingEl.hasClass("nfe-hotkey-conflict")).toBe(false);
     // The page's entry carries Obsidian's warning indicator while a row needs a look (Search still on Ctrl+B), none at the defaults.
-    const status = () => (buildDefinitions(h.deps).find((d) => "type" in d && d.type === "page" && (d as { name?: string }).name === "Hotkeys") as unknown as { status: () => string | null }).status();
+    const status = () => (keysGroup(h.deps).items.find((d) => d.type === "page" && d.name === "Hotkeys") as unknown as { status: () => string | null }).status();
     expect(status()).toBe("warning");
     await h.deps.saveSettings({ ...h.current(), hotkeys: { win: {}, mac: {}, linux: {} } });
     expect(status()).toBe(null);

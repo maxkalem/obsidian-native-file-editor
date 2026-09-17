@@ -448,7 +448,7 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
         { name: "Tab inserts spaces", control: { type: "toggle", key: "shared.tabInsertsSpaces" } },
       ],
     },
-    // The guide's row stands next to the Hotkeys page it describes, in a group of its own.
+    // The guide and the Hotkeys page entry share the Keys group.
     {
       type: "group",
       heading: "Keys",
@@ -458,33 +458,33 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
           desc: "Every key the editor answers to, and what the .* switch in the search panel understands, with the searches people reach for. The same guide is behind the ? in the pane's head bar.",
           action: () => deps.regexHelp(),
         },
-      ],
-    },
-    // Its own page, as File types is: the row on the main page says how many keys differ from the defaults.
-    {
-      type: "page",
-      name: "Hotkeys",
-      desc: "Every key this plugin takes, and your changes to them. Defaults and changes are per platform (Windows and Linux, macOS), so a remap here does not land on another kind of machine. The guide behind the ? in the pane's head bar shows the same keys.",
-      displayValue: () => {
-        const changed = Object.keys(deps.settings().hotkeys[platformOf(Platform)]).length;
-        return changed === 0 ? "defaults" : `${changed} changed`;
-      },
-      // Obsidian's own indicator on the entry when a row inside needs a look: two actions on one key, or a changed key Obsidian holds.
-      status: () => (hotkeysNeedAttention(deps) ? "warning" : null),
-      items: [
+        // Its own page, as File types is: the row on the main page says how many keys differ from the defaults.
         {
-          type: "group",
-          heading: "Keys",
+          type: "page",
+          name: "Hotkeys",
+          desc: "Every key this plugin takes, and your changes to them. Defaults and changes are per platform (Windows and Linux, macOS), so a remap here does not land on another kind of machine. The guide behind the ? in the pane's head bar shows the same keys.",
+          displayValue: () => {
+            const changed = Object.keys(deps.settings().hotkeys[platformOf(Platform)]).length;
+            return changed === 0 ? "defaults" : `${changed} changed`;
+          },
+          // Obsidian's own indicator on the entry when a row inside needs a look: two actions on one key, or a changed key Obsidian holds.
+          status: () => (hotkeysNeedAttention(deps) ? "warning" : null),
           items: [
             {
-              name: "How to change one",
-              desc: "The pencil records the next key combination you press for that row (Escape cancels); the arrow puts the default back. A change applies to panes opened afterwards. Keys that act inside the text (cursors, lines, block comment) cannot take a combination Obsidian keeps for itself; such a row shows the holder in the warning colour.",
-              render: (setting: Setting) => {
-                setting.setName("How to change one");
-                setting.setDesc("The pencil records the next key combination you press for that row (Escape cancels); the arrow puts the default back. A change applies to panes opened afterwards. Keys that act inside the text (cursors, lines, block comment) cannot take a combination Obsidian keeps for itself; such a row shows the holder in the warning colour.");
-              },
+              type: "group",
+              heading: "Keys",
+              items: [
+                {
+                  name: "How to change one",
+                  desc: "The pencil records the next key combination you press for that row (Escape cancels); the arrow puts the default back. A change applies to panes opened afterwards. Keys that act inside the text (cursors, lines, block comment) cannot take a combination Obsidian keeps for itself; such a row shows the holder in the warning colour.",
+                  render: (setting: Setting) => {
+                    setting.setName("How to change one");
+                    setting.setDesc("The pencil records the next key combination you press for that row (Escape cancels); the arrow puts the default back. A change applies to panes opened afterwards. Keys that act inside the text (cursors, lines, block comment) cannot take a combination Obsidian keeps for itself; such a row shows the holder in the warning colour.");
+                  },
+                },
+                ...HOTKEY_ACTIONS.map((a) => hotkeyRow(deps, a)),
+              ],
             },
-            ...HOTKEY_ACTIONS.map((a) => hotkeyRow(deps, a)),
           ],
         },
       ],
@@ -543,7 +543,7 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
             items: [
               {
                 name: "Enable Run",
-                desc: "Adds a Run button to the head bar and the commands Run file and Stop run. JavaScript runs in a sandbox inside Obsidian and web pages render inside Obsidian; any other language runs through an interpreter you add below, on this device, with your permissions, only when you press Run. Off by default; nothing ever runs on its own.",
+                desc: "Adds a Run button to the head bar and the commands Run file and Stop run. JavaScript runs in a sandbox inside Obsidian and web pages render inside Obsidian; any other language runs through an interpreter you add on the Interpreters page, on this device, with your permissions, only when you press Run. Off by default; nothing ever runs on its own.",
                 control: { type: "toggle", key: "device.runEnabled" },
               },
               {
@@ -558,26 +558,44 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
                 control: { type: "number", key: "device.runOutputCapKb", min: 1, step: 64 },
                 visible: runOn,
               },
-              ...runnerItems.map((item) => ({ ...item, visible: runOn })),
               {
-                name: "Add interpreter…",
-                desc: `One per language: pick the language, then the program that runs its files. The program replaces what the plugin does by itself for that language (the JavaScript sandbox, the page view). Languages that already have an interpreter are not offered.${deps.shell ? "" : " Needs the desktop app."}`,
-                action: () => {
-                  void (async () => {
-                    const taken = new Set(deps.device.get().runners.map((r) => r.language));
-                    const language = await deps.pickLanguage(
-                      deps.languages().filter((l) => !taken.has(l)),
-                      "Language to run"
-                    );
-                    if (language === null) return;
-                    const shell = deps.shell;
-                    const program = shell ? await shell.pickFile(STANDARD_COMMANDS[language]?.[0] ?? "") : null;
-                    if (program === null) return;
-                    deps.device.update({ runners: [...deps.device.get().runners, runnerForProgram(language, program)] });
-                    deps.refresh();
-                  })();
-                },
+                type: "page",
+                name: "Interpreters",
+                desc: "Programs that run your files on this device. Add a language, choose its program, or edit an existing command line.",
                 visible: runOn,
+                displayValue: () => {
+                  const count = deps.device.get().runners.length;
+                  return count === 0 ? "None" : `${count} interpreter${count === 1 ? "" : "s"}`;
+                },
+                items: [
+                  {
+                    type: "group",
+                    heading: "Interpreters (this device)",
+                    items: [
+                      ...runnerItems.map((item) => ({ ...item, visible: runOn })),
+                      {
+                        name: "Add interpreter…",
+                        desc: `One per language: pick the language, then the program that runs its files. The program replaces what the plugin does by itself for that language (the JavaScript sandbox, the page view). Languages that already have an interpreter are not offered.${deps.shell ? "" : " Needs the desktop app."}`,
+                        action: () => {
+                          void (async () => {
+                            const taken = new Set(deps.device.get().runners.map((r) => r.language));
+                            const language = await deps.pickLanguage(
+                              deps.languages().filter((l) => !taken.has(l)),
+                              "Language to run"
+                            );
+                            if (language === null) return;
+                            const shell = deps.shell;
+                            const program = shell ? await shell.pickFile(STANDARD_COMMANDS[language]?.[0] ?? "") : null;
+                            if (program === null) return;
+                            deps.device.update({ runners: [...deps.device.get().runners, runnerForProgram(language, program)] });
+                            deps.refresh();
+                          })();
+                        },
+                        visible: runOn,
+                      },
+                    ],
+                  },
+                ],
               },
             ],
           },
