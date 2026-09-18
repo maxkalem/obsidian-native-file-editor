@@ -86,8 +86,6 @@ describe("settings tab definitions", () => {
     const dialogs = { folder: null as string | null, file: null as string | null, language: null as string | null, text: null as string | null, confirm: true, asked: [] as string[] };
     /** What Obsidian would say holds a chord (`Ctrl+B` → ["Toggle bold"]); empty by default. */
     const obsidianKeys: Record<string, string[]> = {};
-    /** The localization file in force, as the plugin would report it. */
-    const localization: { current: { name: string; translated: number; total: number } | null } = { current: null };
     const shell: DesktopShell = {
       openPath: async (p) => (actions.push(`open ${p}`), null),
       pickFolder: async () => dialogs.folder,
@@ -103,8 +101,6 @@ describe("settings tab definitions", () => {
       paletteFolder: () => ".obsidian/plugins/native-file-editor/palettes",
       languageFolder: () => ".obsidian/plugins/native-file-editor/languages",
       dictionaryFolder: () => ".obsidian/plugins/native-file-editor/dictionaries",
-      pluginFolder: () => ".obsidian/plugins/native-file-editor",
-      localization: () => localization.current,
       shell: shellPresent ? shell : null,
       ensureFolder: async (p) => void actions.push(`mkdir ${p}`),
       languages: () => ["Python", "JavaScript", "Batch"],
@@ -124,7 +120,7 @@ describe("settings tab definitions", () => {
       notice: (m: string) => void notices.push(m),
       refresh: () => void actions.push("refresh"),
     };
-    return { deps, device, current: () => current, actions, notices, dialogs, obsidianKeys, localization };
+    return { deps, device, current: () => current, actions, notices, dialogs, obsidianKeys };
   }
 
   /** The options of the dropdown whose control key is `key`. */
@@ -250,33 +246,6 @@ describe("settings tab definitions", () => {
     row.__click("Choose folder");
     await tick();
     expect(h.current().dictionaryFolder).toBe("Dictionaries");
-  });
-
-  it("the Localization row says whether a file is in force, and rereads it", async () => {
-    const h = harness();
-    let row = renderRows(buildDefinitions(h.deps)).find((r) => r.name === "Localization")?.setting;
-    if (!row) throw new Error("no localization row");
-    // No file: the row says where to put one.
-    expect(row.descText).toContain(".obsidian/plugins/native-file-editor/localization.json");
-    expect(row.buttons.map((b) => b.text)).toEqual(["Open folder", "Reread"]);
-    h.actions.length = 0;
-    row.__click("Open folder");
-    await tick();
-    expect(h.actions).toEqual(["open /vault/.obsidian/plugins/native-file-editor"]);
-    // A file in force: its name and how much of the plugin it covers.
-    h.localization.current = { name: "Українська", translated: 120, total: 350 };
-    row = renderRows(buildDefinitions(h.deps)).find((r) => r.name === "Localization")?.setting;
-    expect(row?.descText).toContain("Українська, 120 of 350 strings translated");
-    h.actions.length = 0;
-    row?.__click("Reread");
-    await tick();
-    expect(h.actions).toEqual(["reread", "refresh"]);
-  });
-
-  it("there is no language to choose: the file alone decides", () => {
-    const h = harness();
-    expect(controlKeys(buildDefinitions(h.deps))).not.toContain("shared.uiLanguage");
-    expect(JSON.stringify(buildDefinitions(h.deps))).not.toContain("Automatic");
   });
 
   it("a folder row has choose, reread and create-example buttons on the desktop; choose creates the current folder first and opens the dialog there", async () => {

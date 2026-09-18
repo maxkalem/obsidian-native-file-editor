@@ -64,9 +64,9 @@ export function createSearchPanel(view: EditorView, deps: SearchPanelDeps): Pane
 
   const findInput = el(rows.find, "input", "nfe-search-field");
   findInput.type = "text";
-  findInput.placeholder = "Find";
+  findInput.placeholder = t("search.find");
   findInput.setAttribute("main-field", "true");
-  findInput.setAttribute("aria-label", "Find");
+  findInput.setAttribute("aria-label", t("search.find"));
 
   const buttons: Array<{ el: HTMLButtonElement; spec: ButtonSpec }> = [];
   const button = (parent: HTMLElement, spec: ButtonSpec): HTMLButtonElement => {
@@ -116,8 +116,8 @@ export function createSearchPanel(view: EditorView, deps: SearchPanelDeps): Pane
   if (rows.replace) {
     replaceInput = el(rows.replace, "input", "nfe-search-field");
     replaceInput.type = "text";
-    replaceInput.placeholder = "Replace";
-    replaceInput.setAttribute("aria-label", "Replace");
+    replaceInput.placeholder = t("search.replace");
+    replaceInput.setAttribute("aria-label", t("search.replace"));
     button(rows.replace, REPLACE);
     button(rows.replace, REPLACE_ALL);
   }

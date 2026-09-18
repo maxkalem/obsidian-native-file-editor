@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { __findAllByClass, __fire, __notices, __textOf } from "./mocks/obsidian";
+import { setLocale } from "../src/core/i18n";
 import { RegexHelpModal } from "../src/ui/RegexHelpModal";
+
+afterEach(() => setLocale(null));
 
 type Cell = { children: Array<{ textContent: string; hasClass: (c: string) => boolean }>; textContent: string };
 type Table = { children: Array<{ children: Cell[] }> };
@@ -45,6 +48,39 @@ describe("RegexHelpModal", () => {
     expect(text).toContain("Shift+Alt+↑ a cursor on the line above");
     expect(text).toContain("Ctrl+Shift+F open the search panel");
     expect(text).not.toContain("Ctrl+Alt+↑");
+  });
+
+  it("speaks the localization file's language: headings, meanings and the Replace note, with the patterns untouched", () => {
+    setLocale({
+      code: "custom",
+      name: "Тест",
+      strings: {
+        "guide.title": "Клавіші та регулярні вирази",
+        "guide.keys.heading": "Клавіші в редакторі",
+        "hotkey.group.search": "Пошук",
+        "hotkey.search.meaning": "відкрити панель пошуку",
+        "guide.keys.contextMenu": "контекстне меню",
+        "guide.key.rightClick": "Правий клік",
+        "guide.syntax.any": "будь-який один символ",
+        "guide.example.dottedDate.replace": "$3-$2-$1 — перетворює її",
+        "guide.replace": "Замінити на: {note}",
+      },
+    });
+    const modal = new RegexHelpModal({} as never);
+    modal.onOpen();
+    const text = __textOf(modal.contentEl);
+    expect(modal.titleEl.textContent).toBe("Клавіші та регулярні вирази");
+    expect(text).toContain("Клавіші в редакторі");
+    expect(text).toContain("Пошук");
+    expect(text).toContain("відкрити панель пошуку");
+    expect(text).toContain("Правий клік");
+    expect(text).toContain("контекстне меню");
+    expect(text).toContain("будь-який один символ");
+    expect(text).toContain("Замінити на: $3-$2-$1 — перетворює її");
+    // A key the file leaves out stays English, and no pattern is translated.
+    expect(text).toContain("Common searches");
+    expect(text).toContain("\\d{4}-\\d{2}-\\d{2}");
+    expect(text).not.toContain("any one character except a line break");
   });
 
   it("a click on a pattern copies it and says so", async () => {

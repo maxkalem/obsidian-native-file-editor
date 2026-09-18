@@ -586,7 +586,7 @@ export class TextView extends FileView {
     menu.addItem((item) =>
       item
         .setSection("action")
-        .setTitle("Rename...")
+        .setTitle(t("menu.rename"))
         .setIcon("lucide-edit-3")
         .onClick(() => this.nfeDeps.rename?.(file))
     );
@@ -908,7 +908,7 @@ export class TextView extends FileView {
     const buttons = this.nfeHeadEl.createDiv({ cls: "nfe-head-buttons" });
     if (this.nfeRunAvailable()) {
       // Accent colour only while the panel is open (a run is always inside an open panel).
-      const runBtn = buttons.createEl("button", { cls: "nfe-mode-button nfe-run-head-button", text: "Run" });
+      const runBtn = buttons.createEl("button", { cls: "nfe-mode-button nfe-run-head-button", text: t("run.button") });
       runBtn.toggleClass("is-active", this.runPanelOpen);
       setIcon(runBtn.createSpan({ cls: "nfe-mode-icon" }), "play");
       runBtn.addEventListener("click", () => void this.runFile());

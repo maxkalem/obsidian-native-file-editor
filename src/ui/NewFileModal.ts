@@ -120,7 +120,7 @@ export class NewFileModal extends Modal {
       warnedFor = null;
       warnEl.addClass("nfe-hidden");
       warnEl.setText("");
-      create.setText("Create");
+      create.setText(t("button.create"));
     };
     /**
      * The extension the file gets: the type field's when it has text (the
@@ -138,7 +138,7 @@ export class NewFileModal extends Modal {
       return { extension: own, base: sanitizeBaseName(nameEl.value, own) };
     };
     const actions = this.contentEl.createDiv({ cls: "nfe-modal-actions" });
-    const create = actions.createEl("button", { text: "Create", cls: "mod-cta" });
+    const create = actions.createEl("button", { text: t("button.create"), cls: "mod-cta" });
     const submit = () => {
       const choice = decide();
       if (choice === null) return;

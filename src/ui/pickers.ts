@@ -1,4 +1,5 @@
 import { type App, FuzzySuggestModal, Modal, Setting } from "obsidian";
+import { t } from "../core/i18n";
 
 /**
  * Two small dialogs the settings tab needs: pick a language from a list, and
@@ -77,9 +78,9 @@ export class TextPromptModal extends Modal {
       });
     });
     const actions = this.contentEl.createDiv({ cls: "nfe-modal-actions" });
-    const ok = actions.createEl("button", { cls: "mod-cta", text: "OK" });
+    const ok = actions.createEl("button", { cls: "mod-cta", text: t("button.ok") });
     ok.addEventListener("click", () => this.finish(true));
-    const cancel = actions.createEl("button", { text: "Cancel" });
+    const cancel = actions.createEl("button", { text: t("button.cancel") });
     cancel.addEventListener("click", () => this.finish(false));
   }
 

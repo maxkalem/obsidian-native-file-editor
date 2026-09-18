@@ -42,7 +42,7 @@ Settings, Native File Editor, Languages, **Use custom languages**; the folder ro
 
 ## The plugin's language
 
-Settings, Native File Editor, **Language**. The plugin is English until a file called `localization.json` sits in its own folder (`.obsidian/plugins/native-file-editor/`); then that file's text is used. **Open folder** shows the folder, **Reread** reads the file again after you edit it, and the row says which language is in force and how much of the plugin it covers. There is no language to pick: the file is the choice. Take `locales/english.json` from the repository as the thing to translate, or `locales/uk.json` as a finished Ukrainian one. [localization.md](localization.md) has the details.
+The plugin is English until a file called `localization.json` sits in its own folder (`.obsidian/plugins/native-file-editor/`); then that file's text is used, and anything it does not translate stays English. There is no setting and no language to pick: the file is the choice. Put it there and restart the plugin — Settings, Native File Editor, Plugin, **Reload plugin**. Take `locales/english.json` from the repository as the thing to translate, or `locales/uk.json` as a finished Ukrainian one. [localization.md](localization.md) has the details.
 
 ## Dictionaries for Unwrap lines
 

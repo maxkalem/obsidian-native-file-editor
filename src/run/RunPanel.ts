@@ -176,7 +176,7 @@ export class RunPanel {
     this.runButton = head.createEl("button", { cls: "nfe-run-button", text: t("run.button") });
     this.runButton.addEventListener("click", () => (this.handle ? this.stop() : void this.run()));
     this.select = head.createEl("select", { cls: "nfe-run-select dropdown" });
-    this.select.setAttribute("aria-label", "Runner");
+    this.select.setAttribute("aria-label", t("run.runner"));
     const tabs = head.createDiv({ cls: "nfe-run-tabs" });
     this.outputTab = tabs.createEl("button", { cls: "nfe-run-tab is-active", text: t("run.tab.output") });
     this.outputTab.setAttribute("aria-label", t("run.tab.output.tooltip"));
@@ -251,7 +251,7 @@ export class RunPanel {
     this.viewPinned = false;
     this.setView("log");
     this.startedAt = this.deps.now();
-    this.runButton.setText("Stop");
+    this.runButton.setText(t("run.stop"));
     this.runButton.addClass("nfe-run-running");
     this.setStatus("running");
     this.tick();
@@ -261,7 +261,7 @@ export class RunPanel {
     if (this.handle !== handle) return;
     this.handle = null;
     this.stopTicker();
-    this.runButton.setText("Run");
+    this.runButton.setText(t("run.button"));
     this.runButton.removeClass("nfe-run-running");
     const seconds = (result.ms / 1000).toFixed(result.ms < 10000 ? 2 : 1);
     // A run that did not end well says so in the error colour, and the Log

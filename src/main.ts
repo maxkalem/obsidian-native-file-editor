@@ -43,17 +43,14 @@ import { addWordToLanguage, loadVaultLanguages, writeExampleLanguage } from "./h
 import { allTextLanguageNames } from "./fmt/dictionary";
 import { addWordToDictionary, loadVaultDictionaries, writeExampleDictionary } from "./fmt/vaultDictionaries";
 import { wordAtPosition } from "./core/words";
-import { EN_CATALOGUE, plural, t } from "./core/i18n";
-import { LOCALIZATION_FILE, type Localization, loadLocalization } from "./core/localization";
+import { plural, t } from "./core/i18n";
+import { LOCALIZATION_FILE, loadLocalization } from "./core/localization";
 import { AddToDictionaryModal, type DictionaryChoice } from "./ui/AddToDictionaryModal";
 import { NewFileModal } from "./ui/NewFileModal";
 import { RegexHelpModal } from "./ui/RegexHelpModal";
 import { type BakedHotkey, type Chord, bakedMatches, platformOf } from "./core/hotkeys";
 import { TextView } from "./ui/TextView";
 import { codeMirrorFactory } from "./ui/codemirror";
-
-/** How many strings the plugin has, for the settings row that says how much of it a file translates. */
-const EN_KEY_COUNT = Object.keys(EN_CATALOGUE).length;
 
 /** The name of a dictionary's list, as the notice after "Add to dictionary…" shows it. */
 function listName(list: "prefixes" | "suffixes" | "words"): string {
@@ -177,8 +174,6 @@ export default class NativeFileEditorPlugin extends Plugin {
   private nfeStyleSink!: DocumentStyleSink;
   /** Extensions registered with Obsidian so far; a reread registers only what is new. */
   private readonly nfeRegistered = new Set<string>();
-  /** The localization file in force, or null when the plugin is in English; set by every load and reread. */
-  private nfeLocalization: Localization | null = null;
 
   override async onload(): Promise<void> {
     // Two measurements worth having in every log, taken here
@@ -461,8 +456,6 @@ export default class NativeFileEditorPlugin extends Plugin {
         paletteFolder: () => this.paletteFolder(),
         languageFolder: () => this.languageFolder(),
         dictionaryFolder: () => this.dictionaryFolder(),
-        pluginFolder: () => this.pluginFolder(),
-        localization: () => (this.nfeLocalization === null ? null : { name: this.nfeLocalization.name, translated: this.nfeLocalization.translated, total: EN_KEY_COUNT }),
         shell,
         ensureFolder: (vaultPath) => this.nfeTransport.mkdir(vaultPath),
         languages: () => allLanguageNames(),
@@ -570,7 +563,6 @@ export default class NativeFileEditorPlugin extends Plugin {
    */
   private async loadLocale(): Promise<void> {
     const report = await loadLocalization(this.nfeTransport, this.pluginFolder(), this.nfeLog);
-    this.nfeLocalization = report.localization;
     if (report.problem !== null) new Notice(t("notice.locale.problem", { file: LOCALIZATION_FILE, error: report.problem }), 8000);
   }
 
@@ -591,7 +583,6 @@ export default class NativeFileEditorPlugin extends Plugin {
    * as the yield rule says. Open panes keep their language until reopened.
    */
   async reread(announce: boolean): Promise<void> {
-    await this.loadLocale();
     await this.loadLanguages();
     await this.loadDictionaries();
     const owned = readOwnedExtensions(this.app);

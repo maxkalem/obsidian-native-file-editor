@@ -2,7 +2,6 @@ import { type App, Platform, type Plugin, PluginSettingTab, type Setting, type S
 import { type Chord, HOTKEY_ACTIONS, type HotkeyAction, type HotkeyPlatform, chordConflicts, chordFor, chordOfEvent, chordText, defaultChord, describeChord, hotkeyMeaning, hotkeyName, platformOf } from "../core/hotkeys";
 import { registeredExtensions } from "../highlight/registry";
 import { plural, t } from "../core/i18n";
-import { LOCALIZATION_FILE } from "../core/localization";
 import type { DesktopShell } from "../platform/desktopShell";
 import { type RunnerDef, STANDARD_COMMANDS, formatArgvLine, formatStepsLine, parseArgvLine, parseStepsLine, runnerForProgram } from "../run/runners";
 import type { DeviceLocalStore } from "./DeviceLocalStore";
@@ -29,10 +28,6 @@ export interface SettingsTabDeps {
   readonly paletteFolder: () => string;
   readonly languageFolder: () => string;
   readonly dictionaryFolder: () => string;
-  /** The plugin's own folder, where `localization.json` lives. */
-  readonly pluginFolder: () => string;
-  /** The localization file in force: its name and how much of the plugin it translates; null when there is none. */
-  readonly localization: () => { name: string; translated: number; total: number } | null;
   /** Native dialogs and "open in explorer"; null on mobile, where the rows show the path without buttons. */
   readonly shell: DesktopShell | null;
   /** Create a vault folder if it is missing. */
@@ -418,36 +413,6 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
   const runOn = () => deps.device.get().runEnabled;
 
   return [
-    {
-      type: "group",
-      heading: t("settings.language.heading"),
-      items: [
-        {
-          name: t("settings.language.name"),
-          desc: t("settings.language.desc"),
-          render: (setting: Setting) => {
-            const current = deps.localization();
-            setting.setName(t("settings.language.name"));
-            setting.setDesc(current === null ? t("settings.language.none", { file: `${deps.pluginFolder()}/${LOCALIZATION_FILE}` }) : t("settings.language.inForce", { language: current.name, translated: current.translated, total: current.total }));
-            const shell = deps.shell;
-            if (shell) {
-              setting.addButton((b) =>
-                b
-                  .setButtonText(t("button.openFolder"))
-                  .setTooltip(t("settings.language.openFolder.tooltip"))
-                  .onClick(() => void shell.openPath(shell.toAbsolute(deps.pluginFolder())))
-              );
-            }
-            setting.addButton((b) =>
-              b
-                .setButtonText(t("button.reread"))
-                .setTooltip(t("settings.language.reread.tooltip"))
-                .onClick(() => void deps.reread().then(() => deps.refresh()))
-            );
-          },
-        },
-      ],
-    },
     {
       type: "group",
       heading: t("settings.opening.heading"),
