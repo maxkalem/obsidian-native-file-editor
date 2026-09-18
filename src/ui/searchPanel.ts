@@ -1,3 +1,4 @@
+import { t } from "../core/i18n";
 import { SearchQuery, closeSearchPanel, findNext, findPrevious, getSearchQuery, replaceAll, replaceNext, selectMatches, setSearchQuery } from "@codemirror/search";
 import type { EditorView, Panel, ViewUpdate } from "@codemirror/view";
 import { setIcon } from "obsidian";
@@ -40,14 +41,14 @@ interface ButtonSpec {
 const NEXT: ButtonSpec = { label: "Next", shortcut: { action: "find-next" }, run: findNext };
 const PREVIOUS: ButtonSpec = { label: "Previous", shortcut: { action: "find-previous" }, run: findPrevious };
 const ALL: ButtonSpec = {
-  label: "Select all",
+  label: t("search.selectAll"),
   shortcut: { action: "select-all-matches" },
   run: selectMatches,
-  hint: "every match becomes a cursor and the text takes the focus; what you type then changes all of them (Escape: one cursor)",
+  hint: t("search.selectAll.tooltip"),
   focus: "editor",
 };
 const REPLACE: ButtonSpec = { label: "Replace", shortcut: { fixed: "Enter" }, run: replaceNext };
-const REPLACE_ALL: ButtonSpec = { label: "Replace all", shortcut: { action: "replace-all" }, run: replaceAll };
+const REPLACE_ALL: ButtonSpec = { label: t("search.replaceAll"), shortcut: { action: "replace-all" }, run: replaceAll };
 
 export function createSearchPanel(view: EditorView, deps: SearchPanelDeps): Panel {
   const dom = view.dom.ownerDocument.createElement("div");
@@ -98,13 +99,13 @@ export function createSearchPanel(view: EditorView, deps: SearchPanelDeps): Pane
     });
     toggles.push({ el: b, key });
   };
-  toggle("case-sensitive", "Match case", "caseSensitive");
-  toggle("regex", "Regular expression", "regexp");
-  toggle("whole-word", "Whole word", "wholeWord");
+  toggle("case-sensitive", t("search.matchCase"), "caseSensitive");
+  toggle("regex", t("search.regexp"), "regexp");
+  toggle("whole-word", t("search.wholeWord"), "wholeWord");
   const close = el(rows.find, "button", "clickable-icon nfe-search-close");
   close.type = "button";
   setIcon(close, "x");
-  close.setAttribute("aria-label", "Close (Escape)");
+  close.setAttribute("aria-label", t("search.close"));
   close.setAttribute("data-tooltip-position", "top");
   close.addEventListener("click", () => {
     closeSearchPanel(view);

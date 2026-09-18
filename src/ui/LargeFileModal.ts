@@ -1,3 +1,4 @@
+import { t } from "../core/i18n";
 import { type App, Modal } from "obsidian";
 
 export function formatBytes(n: number): string {
@@ -20,7 +21,7 @@ export class LargeFileModal extends Modal {
 
   constructor(app: App, opts: { sizeBytes: number; thresholdBytes: number; onEdit: () => void }) {
     super(app);
-    this.title = "Large file";
+    this.title = t("largeFile.title");
     this.sizeBytes = opts.sizeBytes;
     this.thresholdBytes = opts.thresholdBytes;
     this.onEdit = opts.onEdit;
@@ -30,14 +31,14 @@ export class LargeFileModal extends Modal {
     this.titleEl.setText(this.title);
     this.contentEl.addClass("nfe-modal");
     this.contentEl.createEl("p", {
-      text: `This file is ${formatBytes(this.sizeBytes)}, above the ${formatBytes(this.thresholdBytes)} limit for opening in the editor. It is shown as a preview. Editing a file this size can be slow and use a lot of memory, especially on a phone.`,
+      text: t("largeFile.body", { size: formatBytes(this.sizeBytes), limit: formatBytes(this.thresholdBytes) }),
     });
     this.contentEl.createEl("p", {
-      text: "The limit is a per-device setting of Native File Editor.",
+      text: t("largeFile.limitNote"),
       cls: "nfe-modal-note",
     });
     const actions = this.contentEl.createDiv({ cls: "nfe-modal-actions" });
-    const btn = actions.createEl("button", { text: "Edit anyway", cls: "mod-cta" });
+    const btn = actions.createEl("button", { text: t("largeFile.editAnyway"), cls: "mod-cta" });
     btn.addEventListener("click", () => {
       this.close();
       this.onEdit();

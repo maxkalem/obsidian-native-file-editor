@@ -26,12 +26,15 @@ export const __openedModals: string[] = [];
 export const __modalTitles: string[] = [];
 /** Modals opened, so a test can drive onOpen() and tap their buttons. */
 export const __modalInstances: Any[] = [];
+/** Every Setting built, in order, so a test can read the rows a modal made. */
+export const __settingInstances: Any[] = [];
 
 export function __resetObsidianMock(): void {
   __notices.length = 0;
   __openedModals.length = 0;
   __modalTitles.length = 0;
   __modalInstances.length = 0;
+  __settingInstances.length = 0;
   __setPlatformDesktop(true);
 }
 
@@ -479,6 +482,7 @@ export class Setting {
     this.settingEl = adopt(containerEl, fakeEl("div", "setting-item"));
     this.descEl = adopt(this.settingEl, fakeEl("div", "setting-item-description"));
     this.controlEl = adopt(this.settingEl, fakeEl("div", "setting-item-control"));
+    __settingInstances.push(this);
   }
   setName(n: string): this {
     this.nameText = n;
@@ -535,6 +539,29 @@ export class Setting {
   addToggle(cb: (c: Any) => void): this {
     cb({ setValue: () => undefined, onChange: () => undefined });
     return this;
+  }
+  dropdowns: Array<{ options: Array<[string, string]>; value: string; onChange: ((v: string) => void) | null }> = [];
+  addDropdown(cb: (c: Any) => void): this {
+    const selectEl = adopt(this.controlEl, fakeEl("select"));
+    const entry: { options: Array<[string, string]>; value: string; onChange: ((v: string) => void) | null } = { options: [], value: "", onChange: null };
+    this.dropdowns.push(entry);
+    const comp: Any = {
+      selectEl,
+      addOption: (value: string, label: string) => (entry.options.push([value, label]), comp),
+      addOptions: (o: Record<string, string>) => (Object.entries(o).forEach(([v, l]) => entry.options.push([v, l])), comp),
+      setValue: (v: string) => ((entry.value = v), comp),
+      getValue: () => entry.value,
+      onChange: (fn: (v: string) => void) => ((entry.onChange = fn), comp),
+    };
+    cb(comp);
+    return this;
+  }
+  /** Pick a value in the n-th dropdown as a user would: the value changes and the handler runs. */
+  __choose(index: number, value: string): void {
+    const d = this.dropdowns[index];
+    if (!d) throw new Error(`no dropdown ${index}`);
+    d.value = value;
+    d.onChange?.(value);
   }
   /** Click the button whose tooltip or text contains `what`. */
   __click(what: string): void {

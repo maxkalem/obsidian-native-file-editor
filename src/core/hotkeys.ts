@@ -319,3 +319,23 @@ export function normalizeHotkeys(raw: unknown): HotkeyOverrides {
     linux: normalizePlatformHotkeys(obj.linux, "linux"),
   };
 }
+
+import { t } from "./i18n";
+
+/**
+ * The name, the meaning and the group of an action, translated. These three
+ * are the only keys this plugin builds at run time (`hotkey.<id>.name`), and
+ * they are safe because the set of ids is fixed and `tests/i18n.test.ts`
+ * asserts that every one of them is in the English catalogue.
+ */
+export function hotkeyName(action: HotkeyAction): string {
+  return t(`hotkey.${action.id}.name`);
+}
+
+export function hotkeyMeaning(action: HotkeyAction): string {
+  return t(`hotkey.${action.id}.meaning`);
+}
+
+export function hotkeyGroupName(group: HotkeyAction["group"]): string {
+  return t(`hotkey.group.${group.toLowerCase().replace(/ /g, "-")}`);
+}

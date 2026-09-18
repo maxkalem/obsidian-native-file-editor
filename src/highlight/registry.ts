@@ -452,6 +452,17 @@ export function __clearVaultLanguages(): void {
   VAULT_ENTRIES.length = 0;
 }
 
+/**
+ * The languages that are prose rather than code: the ones where a paragraph
+ * is text to read, so "Unwrap lines" applies. A file with no language (an
+ * extension nothing claims) counts as prose too; see `isProseLanguage`.
+ */
+const PROSE_LANGUAGE_NAMES: ReadonlySet<string> = new Set(["Plain text", "Markdown", "txt2tags", "Textile"]);
+
+export function isProseLanguage(name: string | null): boolean {
+  return name === null || PROSE_LANGUAGE_NAMES.has(name);
+}
+
 /** Every extension the registry knows, lower-case, without the dot. */
 export function registeredExtensions(): string[] {
   return [...BY_EXTENSION.keys()];

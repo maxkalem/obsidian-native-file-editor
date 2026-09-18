@@ -69,10 +69,10 @@ export class TextPromptModal extends Modal {
     this.titleEl.setText(this.title);
     this.contentEl.addClass("nfe-modal");
     this.contentEl.createDiv({ cls: "nfe-modal-note", text: this.description });
-    new Setting(this.contentEl).addText((t) => {
-      t.setPlaceholder(this.placeholder);
-      t.onChange((v) => (this.value = v));
-      t.inputEl.addEventListener("keydown", (e: KeyboardEvent) => {
+    new Setting(this.contentEl).addText((field) => {
+      field.setPlaceholder(this.placeholder);
+      field.onChange((v) => (this.value = v));
+      field.inputEl.addEventListener("keydown", (e: KeyboardEvent) => {
         if (e.key === "Enter") this.finish(true);
       });
     });

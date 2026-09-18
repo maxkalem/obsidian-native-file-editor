@@ -1,3 +1,4 @@
+import { t } from "../core/i18n";
 import { type App, Modal } from "obsidian";
 import { type ExtensionOption, chosenExtension, filterExtensions, newFilePath, ownExtension, sanitizeBaseName, typedExtension } from "../core/newFile";
 import { __allEntries } from "../highlight/registry";
@@ -9,7 +10,7 @@ export interface NewFileChoice {
 }
 
 /**
- * "New file" for any type this plugin edits: a name, and a type found by
+ * t("newFile.title") for any type this plugin edits: a name, and a type found by
  * typing into a filter (the letters in order: `tt` shows `.txt`, `.http`,
  * `.targets`; a language name works too) and picked from the list under it
  * with the arrow keys, Enter or a click. One action, no Cancel button;
@@ -30,7 +31,7 @@ export interface NewFileChoice {
 /** How many matches the list shows at once; the rest scroll. */
 const LIST_ROWS = 8;
 export class NewFileModal extends Modal {
-  readonly title = "New file";
+  readonly title = t("newFile.title");
   private readonly folder: string;
   private readonly lastExtension: string;
   private readonly exists: (path: string) => boolean;
@@ -67,16 +68,16 @@ export class NewFileModal extends Modal {
     this.contentEl.addClass("nfe-modal");
     this.contentEl.createEl("p", {
       cls: "nfe-modal-note",
-      text: `Creating in ${this.folder === "" || this.folder === "/" ? "the vault root" : this.folder}`,
+      text: t("newFile.creatingIn", { folder: this.folder === "" || this.folder === "/" ? t("newFile.vaultRoot") : this.folder }),
     });
     const row = this.contentEl.createDiv({ cls: "nfe-newfile-row" });
-    const nameEl = row.createEl("input", { cls: "nfe-newfile-name", type: "text", placeholder: "File name, e.g. notes or notes.ts" });
+    const nameEl = row.createEl("input", { cls: "nfe-newfile-name", type: "text", placeholder: t("newFile.name.placeholder") });
     const extEl = row.createEl("input", {
       cls: "nfe-newfile-ext",
       type: "text",
-      placeholder: this.lastExtension ? `Extension or language (last: .${this.lastExtension})` : "Extension or language",
+      placeholder: this.lastExtension ? t("newFile.type.nameWithLast", { extension: this.lastExtension }) : t("newFile.type.name"),
     });
-    extEl.setAttribute("aria-label", "Type letters of the extension or language: tt finds txt, http, targets");
+    extEl.setAttribute("aria-label", t("newFile.type.desc"));
     extEl.setAttribute("spellcheck", "false");
     const listEl = this.contentEl.createDiv({ cls: "nfe-newfile-list nfe-hidden" });
     listEl.style.setProperty("--nfe-list-rows", String(LIST_ROWS));
@@ -104,7 +105,7 @@ export class NewFileModal extends Modal {
           nameEl.focus();
         });
       });
-      if (shown.length === 0) listEl.createDiv({ cls: "nfe-newfile-item nfe-newfile-none", text: "No file type matches" });
+      if (shown.length === 0) listEl.createDiv({ cls: "nfe-newfile-item nfe-newfile-none", text: t("newFile.type.none") });
     };
     const filter = () => {
       listShown = true;
@@ -151,13 +152,13 @@ export class NewFileModal extends Modal {
         warnedFor = warnKey;
         warnEl.setText(
           dotFile
-            ? `.${extension} is a dot-file: Obsidian hides it, so it will not appear in the file explorer and Native File Editor cannot open it. The file is created all the same.`
+            ? t("newFile.warn.dotFile", { extension })
             : extension.length === 0
-              ? "Native File Editor does not open a file without an extension. The file is created all the same; Obsidian decides what opens it."
-              : `Native File Editor does not open .${extension} files. The file is created all the same; Obsidian decides what opens it.`
+              ? t("newFile.warn.noExtension")
+              : t("newFile.warn.unknown", { extension })
         );
         warnEl.removeClass("nfe-hidden");
-        create.setText("Create anyway");
+        create.setText(t("newFile.create.anyway"));
         return;
       }
       const path = newFilePath(this.folder, base, extension, this.exists);

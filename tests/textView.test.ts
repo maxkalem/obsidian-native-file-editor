@@ -136,6 +136,18 @@ class FakeEditor implements EditorHandle {
   insertText(text: string): void {
     this.actions.push(`insert:${text}`);
   }
+  cursorWord = "";
+  wordAtCursor(): string {
+    return this.cursorWord;
+  }
+  transformLines(transform: (text: string, atDocumentStart: boolean, document: string) => string | null): boolean {
+    this.actions.push("transformLines");
+    const after = transform(this.text, true, this.text);
+    if (after === null || after === this.text) return false;
+    this.text = after;
+    this.options.onChange();
+    return true;
+  }
   setLineDirection(d: "ltr" | "rtl" | null): void {
     this.lineDir = d;
     this.actions.push(`lineDir:${d}`);
@@ -488,9 +500,30 @@ describe("TextView", () => {
       "Comment ▸ Toggle line comment (Ctrl+/) | Toggle block comment (Alt+A)",
       "Word completion (Ctrl+Space)",
       expect.stringMatching(/^Insert ▸ Date {2}\d{4}-\d{2}-\d{2} \| Date and time {2}\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/),
+      "Unwrap lines",
+      "Wrap lines…",
       "This line ▸ Direction by content | Left to right | Right to left",
       "---",
       'Search the web for "hello world, a long selection…"',
+    ]);
+    // The dictionary item appears only when the plugin can open the dialog, and carries the selection or the word at the cursor.
+    const words: Array<[string, string | null]> = [];
+    (h.view as unknown as { nfeDeps: object }).nfeDeps = { ...(h.view as unknown as { nfeDeps: object }).nfeDeps, addToDictionary: (w: string, l: string | null) => void words.push([w, l]) };
+    let withDictionary = new Menu();
+    h.view.nfeFillContextMenu(withDictionary as never, ed, { text: "кое-что\nсказал", empty: false });
+    withDictionary.items.find((i) => i.title?.startsWith("Add"))?.click();
+    ed.cursorWord = "непере";
+    withDictionary = new Menu();
+    h.view.nfeFillContextMenu(withDictionary as never, ed, { text: "", empty: true });
+    expect(withDictionary.items.find((i) => i.title?.startsWith("Add"))?.title).toBe('Add "непере" to dictionary…');
+    withDictionary.items.find((i) => i.title?.startsWith("Add"))?.click();
+    ed.cursorWord = "";
+    withDictionary = new Menu();
+    h.view.nfeFillContextMenu(withDictionary as never, ed, { text: "", empty: true });
+    expect(withDictionary.items.find((i) => i.title === "Add to dictionary…")).toBeDefined();
+    expect(words).toEqual([
+      ["кое-что", null],
+      ["непере", null],
     ]);
     const direction = menu.items.find((i) => i.title === "This line")!.submenu!;
     expect(direction.items.map((i) => i.checked)).toEqual([false, false, true]);
@@ -526,6 +559,50 @@ describe("TextView", () => {
       Menu.prototype.showAtMouseEvent = original;
     }
     expect(shown).toEqual([evt]);
+  });
+
+  it("Unwrap lines: offered for prose in the editor only, joins the wrapped lines as one edit and says what it did", async () => {
+    const wrapped = ["Title", "The first line of a paragraph that a mail client cut at seventy-two columns", "and the second line of it, which also runs on to the very end of the row", "and stops."].join("\n");
+    const h = harness();
+    h.transport.files.set("a.txt", utf8(wrapped));
+    h.transport.files.set("b.ts", utf8(wrapped));
+    await h.view.__load(new TFile("a.txt"));
+    await h.view.setMode("edit");
+    const ed = h.lastEditor();
+    let menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, ed, { text: "", empty: true });
+    const item = menu.items.find((i) => i.title === "Unwrap lines");
+    expect(item?.icon).toBe("unfold-horizontal");
+    expect(menu.items.find((i) => i.title === "Wrap lines…")?.icon).toBe("wrap-text");
+    __notices.length = 0;
+    item?.click();
+    expect(ed.actions).toEqual(["transformLines"]);
+    expect(ed.getText()).toBe(["Title", "The first line of a paragraph that a mail client cut at seventy-two columns and the second line of it, which also runs on to the very end of the row and stops."].join("\n"));
+    expect(__notices).toEqual(["Unwrap lines: 2 line breaks removed at a wrap width of 75."]);
+    // A second run finds nothing and says so, without an edit.
+    __notices.length = 0;
+    item?.click();
+    expect(ed.actions).toEqual(["transformLines", "transformLines"]);
+    expect(__notices).toEqual(["Unwrap lines: this does not look like wrapped prose (width 159); select the paragraphs to unwrap and try again."]);
+    // Wrap lines… asks for the width in a modal, then cuts the long line back.
+    __openedModals.length = 0;
+    __modalInstances.length = 0;
+    __notices.length = 0;
+    menu.items.find((i) => i.title === "Wrap lines…")?.click();
+    expect(__openedModals).toEqual(["WrapLinesModal"]);
+    const modal = __modalInstances[0] as { onOpen(): void; width: number; breakWords: boolean; finish(): void };
+    modal.onOpen();
+    modal.width = 60;
+    modal.finish();
+    expect(ed.getText().split("\n").every((l) => l.length <= 60)).toBe(true);
+    expect(ed.getText().split("\n")[0]).toBe("Title");
+    expect(__notices).toEqual(["Wrap lines: 1 line cut at 60 characters, 2 line breaks added."]);
+    // Code is not prose: no entry for a TypeScript file.
+    await h.view.__load(new TFile("b.ts"));
+    await h.view.setMode("edit");
+    menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, h.lastEditor(), { text: "", empty: true });
+    expect(menu.items.some((i) => i.title === "Unwrap lines" || i.title === "Wrap lines…")).toBe(false);
   });
 
   it("the pane menu carries Edit/Preview, Search and a checked Word wrap that switches live and is stored", async () => {

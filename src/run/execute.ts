@@ -1,3 +1,4 @@
+import { plural, t } from "../core/i18n";
 import type { ProcessRunner, RunHandle, RunOutput, RunResult, TempDirs, WorkerRunner } from "./runner";
 import { looksLikeMhtml, pageDocument, renderMhtml } from "./mhtml";
 import { type RunContext, type RunnerDef, expandArg, expandArgv, refusePath, stepsOf, validateRunner } from "./runners";
@@ -50,8 +51,8 @@ export function precheck(req: ExecuteRequest, deps: ExecuteDeps): string | null 
   if (req.def.kind === "worker" || req.def.kind === "page") return null;
   const bad = refusePath(req.file) ?? refusePath(req.dir);
   if (bad) return bad;
-  if (!deps.processes) return "running a program needs the desktop app";
-  if (stepsOf(req.def).some((s) => s.some((a) => a.includes("{tmp}"))) && !deps.tempDirs) return "this runner needs a temp directory, which is not available here";
+  if (!deps.processes) return t("run.error.desktopOnly");
+  if (stepsOf(req.def).some((s) => s.some((a) => a.includes("{tmp}"))) && !deps.tempDirs) return t("run.error.noTempDir");
   return null;
 }
 

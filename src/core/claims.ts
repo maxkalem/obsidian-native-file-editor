@@ -1,3 +1,4 @@
+import { plural, t } from "../core/i18n";
 import { OBSIDIAN_OWNED_EXTENSIONS } from "../constants";
 
 /**
@@ -67,5 +68,5 @@ export function describeYielded(yielded: ReadonlyArray<{ ext: string; viewType: 
     byOwner.set(y.viewType, list);
   }
   const parts = [...byOwner.entries()].map(([owner, exts]) => `${exts.join(", ")} to ${owner}`);
-  return `Native File Editor left ${parts.join("; ")}. Take them over per extension in its settings.`;
+  return t("notice.yielded", { parts: parts.join("; ") });
 }

@@ -1,3 +1,4 @@
+import { t } from "../core/i18n";
 import { type App, Modal } from "obsidian";
 
 /**
@@ -19,7 +20,7 @@ export class ReadOnlyModal extends Modal {
 
   constructor(app: App, opts: { fileName: string; copyName: string; encoding: string; onCopy: () => void; onEditAs: () => void }) {
     super(app);
-    this.title = "Read-only file";
+    this.title = t("readOnly.title");
     this.fileName = opts.fileName;
     this.copyName = opts.copyName;
     this.encoding = opts.encoding;
@@ -31,19 +32,19 @@ export class ReadOnlyModal extends Modal {
     this.titleEl.setText(this.title);
     this.contentEl.addClass("nfe-modal");
     this.contentEl.createEl("p", {
-      text: `${this.fileName} is not valid UTF-8. It is shown decoded as ${this.encoding}, which is a guess, so it opened read-only: writing a guess back could change bytes you never touched.`,
+      text: t("readOnly.body", { file: this.fileName, encoding: this.encoding }),
     });
     this.contentEl.createEl("p", {
-      text: `Create UTF-8 copy writes ${this.copyName} beside it and opens the copy in the editor; the original is left alone. Edit as ${this.encoding} edits the original and writes it back in that encoding; a character the encoding has no byte for stops the save until it is removed.`,
+      text: t("readOnly.choices", { copy: this.copyName, encoding: this.encoding }),
       cls: "nfe-modal-note",
     });
     const actions = this.contentEl.createDiv({ cls: "nfe-modal-actions" });
-    const copy = actions.createEl("button", { text: "Create UTF-8 copy", cls: "mod-cta" });
+    const copy = actions.createEl("button", { text: t("readOnly.createCopy"), cls: "mod-cta" });
     copy.addEventListener("click", () => {
       this.close();
       this.onCopy();
     });
-    const edit = actions.createEl("button", { text: `Edit as ${this.encoding}` });
+    const edit = actions.createEl("button", { text: t("readOnly.editAs", { encoding: this.encoding }) });
     edit.addEventListener("click", () => {
       this.close();
       this.onEditAs();

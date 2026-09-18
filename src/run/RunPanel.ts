@@ -1,3 +1,4 @@
+import { t } from "../core/i18n";
 import { setIcon } from "obsidian";
 import type { Timers } from "../core/autosave";
 import type { ExecuteHandle } from "./execute";
@@ -150,7 +151,7 @@ export class RunPanel {
     // The handle above the head: drag it to resize; the height is a share of
     // the pane so it survives a window resize, and is remembered per kind.
     const handle = this.rootEl.createDiv({ cls: "nfe-run-handle" });
-    handle.setAttribute("aria-label", "Drag to resize the output panel");
+    handle.setAttribute("aria-label", t("run.resize"));
     handle.addEventListener("pointerdown", (evt: PointerEvent) => {
       evt.preventDefault();
       (handle as HTMLElement & { setPointerCapture?: (id: number) => void }).setPointerCapture?.(evt.pointerId);
@@ -172,32 +173,32 @@ export class RunPanel {
       handle.addEventListener("pointercancel", up);
     });
     const head = this.rootEl.createDiv({ cls: "nfe-run-head" });
-    this.runButton = head.createEl("button", { cls: "nfe-run-button", text: "Run" });
+    this.runButton = head.createEl("button", { cls: "nfe-run-button", text: t("run.button") });
     this.runButton.addEventListener("click", () => (this.handle ? this.stop() : void this.run()));
     this.select = head.createEl("select", { cls: "nfe-run-select dropdown" });
     this.select.setAttribute("aria-label", "Runner");
     const tabs = head.createDiv({ cls: "nfe-run-tabs" });
-    this.outputTab = tabs.createEl("button", { cls: "nfe-run-tab is-active", text: "Output" });
-    this.outputTab.setAttribute("aria-label", "The result: a page, or what the program wrote out");
+    this.outputTab = tabs.createEl("button", { cls: "nfe-run-tab is-active", text: t("run.tab.output") });
+    this.outputTab.setAttribute("aria-label", t("run.tab.output.tooltip"));
     this.outputTab.addEventListener("click", () => this.setView("output", true));
-    this.logTab = tabs.createEl("button", { cls: "nfe-run-tab", text: "Log" });
-    this.logTab.setAttribute("aria-label", "The console: the command, everything the program logged, a page's errors and refusals, the outcome");
+    this.logTab = tabs.createEl("button", { cls: "nfe-run-tab", text: t("run.tab.log") });
+    this.logTab.setAttribute("aria-label", t("run.tab.log.tooltip"));
     this.logTab.addEventListener("click", () => this.setView("log", true));
     this.statusEl = head.createSpan({ cls: "nfe-run-status", text: "" });
     const spacer = head.createSpan({ cls: "nfe-run-spacer" });
     spacer.setText("");
-    const clear = head.createEl("button", { cls: "nfe-run-tool", text: "Clear" });
+    const clear = head.createEl("button", { cls: "nfe-run-tool", text: t("run.clear") });
     clear.addEventListener("click", () => this.clear());
     if (deps.copy) {
-      const copy = head.createEl("button", { cls: "nfe-run-tool", text: "Copy" });
-      copy.setAttribute("aria-label", "Copy the view that is showing: the output, or the whole log");
+      const copy = head.createEl("button", { cls: "nfe-run-tool", text: t("run.copy") });
+      copy.setAttribute("aria-label", t("run.copy.tooltip"));
       // Copies what is on screen: the Log when the Log tab is active, else the output.
       copy.addEventListener("click", () => deps.copy?.(this.view === "log" ? this.logText : this.text));
     }
     // A square icon, not a word: the same x the search panel closes with.
     const close = head.createEl("button", { cls: "clickable-icon nfe-run-close" });
     setIcon(close, "x");
-    close.setAttribute("aria-label", "Close the output panel");
+    close.setAttribute("aria-label", t("run.close.tooltip"));
     close.setAttribute("data-tooltip-position", "top");
     close.addEventListener("click", () => deps.onClose());
     this.wrapEl = this.rootEl.createDiv({ cls: "nfe-run-output-wrap" });
@@ -230,7 +231,7 @@ export class RunPanel {
     if (runners.some((r) => r.name === previous)) this.select.value = previous;
     this.select.toggleClass("nfe-hidden", runners.length < 2);
     this.runButton.disabled = runners.length === 0 && this.handle === null;
-    this.runButton.title = runners.length === 0 ? "No runner for this file; add one in settings" : "";
+    this.runButton.title = runners.length === 0 ? t("run.noRunner") : "";
   }
 
   /** The runner picked in the dropdown, or the first, or null. */
@@ -273,19 +274,19 @@ export class RunPanel {
     let bad: boolean;
     if (result.error !== null) {
       this.append({ kind: "info", text: `[could not start: ${result.error}]\n` });
-      status = "failed to start";
+      status = t("run.status.failedToStart");
       bad = true;
     } else if (result.stopped) {
-      status = `stopped after ${seconds} s`;
+      status = t("run.status.stopped", { seconds });
       bad = false;
     } else if (result.timedOut) {
-      status = `timed out after ${seconds} s`;
+      status = t("run.status.timedOut", { seconds });
       bad = true;
     } else if (result.steps > 1 && result.step < result.steps) {
-      status = `step ${result.step} of ${result.steps} exited with ${result.exitCode}, ${seconds} s`;
+      status = t("run.status.step", { step: result.step, steps: result.steps, code: String(result.exitCode), seconds });
       bad = true;
     } else {
-      status = `exit ${result.exitCode ?? "?"}, ${seconds} s${result.truncated ? ", output truncated" : ""}`;
+      status = t("run.status.exit", { code: result.exitCode ?? "?", seconds }) + (result.truncated ? t("run.status.truncated") : "");
       bad = result.exitCode !== 0 || result.truncated;
     }
     if (this.docMode !== "text") this.flushHeldOutput(result.truncated);
@@ -346,7 +347,7 @@ export class RunPanel {
     this.logStreamSpan = null;
     this.logStreamKind = null;
     this.logErrors = 0;
-    this.logTab.setText("Log");
+    this.logTab.setText(t("run.tab.log"));
     this.logTab.removeClass("has-errors");
     this.pageToken = null;
     this.frame?.remove();

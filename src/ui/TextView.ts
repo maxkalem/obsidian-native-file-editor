@@ -6,7 +6,10 @@ import { type CaseKind, formatDate, formatDateTime, menuExcerpt, webSearchUrl } 
 import type { Logger } from "../core/log";
 import { type ViewMode, decideOpenMode } from "../core/openMode";
 import { OBSIDIAN_SCHEME_CLASS } from "../highlight/highlighter";
-import { type ResolvedLanguage, languageFor, resolveLanguage } from "../highlight/registry";
+import { type ResolvedLanguage, isProseLanguage, languageFor, resolveLanguage } from "../highlight/registry";
+import { DEFAULT_UNWRAP_OPTIONS, type UnwrapResult, describeUnwrap, unwrapLines } from "../fmt/unwrap";
+import { type WrapResult, describeWrap, wrapLines } from "../fmt/wrap";
+import { type WrapChoice, WrapLinesModal } from "./WrapLinesModal";
 import {
   type DecodedText,
   UnencodableError,
@@ -26,6 +29,7 @@ import type { RunnerDef } from "../run/runners";
 import type { DeviceLocalStore } from "../settings/DeviceLocalStore";
 import type { SharedSettings } from "../settings/settings";
 import { LargeFileModal, formatBytes } from "./LargeFileModal";
+import { t } from "../core/i18n";
 import type { EditorFactory, EditorHandle, LineDirection, SelectionInfo } from "./editor";
 
 /**
@@ -76,6 +80,8 @@ export interface TextViewDeps {
   readonly openExternal?: (url: string) => void;
   /** The date and the date-and-time as Insert writes them now, in the user's formats. Absent, the fixed ISO-like forms. */
   readonly dateTime?: () => { date: string; dateTime: string };
+  /** "Add to dictionary…" in the context menu: the plugin opens the dialog for this word. Absent, the item is not offered. */
+  readonly addToDictionary?: (word: string, language: string | null) => void;
   /**
    * The read-only modal's "Create UTF-8 copy": whether a vault path is taken,
    * and the write that makes Obsidian index the new file at once. The view
@@ -157,7 +163,7 @@ export class TextView extends FileView {
       void this.toggleMode();
     });
     this.nfeSearchAction = this.addAction("search", "Search", () => this.toggleSearch());
-    this.nfeInvisiblesAction = this.addAction("pilcrow", "Show invisibles", () => this.toggleInvisibles());
+    this.nfeInvisiblesAction = this.addAction("pilcrow", t("view.invisibles.show"), () => this.toggleInvisibles());
     // Obsidian's keymap listens on the window in the capture phase and takes
     // Mod+F for "Search current file" before CodeMirror's keymap sees it; a
     // scope on the view is consulted first while the pane is active, which is
@@ -265,7 +271,7 @@ export class TextView extends FileView {
         this.nfeLanguage = resolveLanguage(entry);
       } catch (e) {
         log.error("lang", `${entry.name} (${entry.source}) failed to load; opening ${file.path} as plain text`, e);
-        new Notice(`Native File Editor: the ${entry.name} language failed to load; ${file.name} opened as plain text.`);
+        new Notice(t("notice.language.failed", { language: entry.name, file: file.name }));
       }
     }
     const settings = this.nfeDeps.settings();
@@ -283,7 +289,7 @@ export class TextView extends FileView {
       `open ${file.path}: ${formatBytes(this.nfeSizeBytes)}, ${describeEncoding(this.nfeDoc.info)}, ${describeLineEnding(this.nfeDoc.info.eol)}, language ${entry ? `${entry.name}/${entry.source ?? "plain"}` : "none"}${this.nfeLanguage ? "" : " (no highlighter)"}, mode ${decision.mode}${decision.large ? " (large)" : ""}`
     );
     if (decision.large) {
-      new Notice(`${file.name} is ${formatBytes(this.nfeSizeBytes)}; opened as a preview.`);
+      new Notice(t("view.largeFile.preview", { file: file.name, size: formatBytes(this.nfeSizeBytes) }));
     }
     this.nfeAutosave = new Autosave({
       delayMs: AUTOSAVE_DELAY_MS,
@@ -300,7 +306,7 @@ export class TextView extends FileView {
           this.nfeRenderHead();
           this.nfeEditor?.markProblem({ line: e.line, column: e.column, length: e.char.length });
         } else {
-          new Notice(`Native File Editor could not save ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+          new Notice(t("notice.save.failed", { file: file.name, error: e instanceof Error ? e.message : String(e) }));
         }
       },
     });
@@ -421,7 +427,7 @@ export class TextView extends FileView {
       if (view instanceof TextView) await view.setMode("edit");
     } catch (e) {
       this.nfeDeps.log.error("view", `${from.path}: UTF-8 copy to ${path} failed`, e);
-      new Notice(`Native File Editor could not create ${path}: ${e instanceof Error ? e.message : String(e)}`);
+      new Notice(t("notice.create.failed", { path, error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -534,13 +540,13 @@ export class TextView extends FileView {
     // for the reading view), the pencil while reading (click to edit).
     const editing = this.nfeMode === "edit";
     setIcon(this.nfeModeAction, editing ? "book-open" : "pencil");
-    setTooltip(this.nfeModeAction, editing ? "Reading view" : "Editing view");
+    setTooltip(this.nfeModeAction, editing ? t("view.mode.preview") : t("view.mode.edit"));
     const open = this.searchOpen;
     setIcon(this.nfeSearchAction, open ? "search-x" : "search");
-    setTooltip(this.nfeSearchAction, open ? "Close search" : "Search");
+    setTooltip(this.nfeSearchAction, open ? t("view.search.close") : "Search");
     this.nfeSearchAction.toggleClass("is-active", open);
     const marks = this.nfeDeps.settings().showInvisibles;
-    setTooltip(this.nfeInvisiblesAction, marks ? "Hide invisibles" : "Show invisibles");
+    setTooltip(this.nfeInvisiblesAction, marks ? t("view.invisibles.hide") : t("view.invisibles.show"));
     this.nfeInvisiblesAction.toggleClass("is-active", marks);
   }
 
@@ -560,7 +566,7 @@ export class TextView extends FileView {
     menu.addItem((item) =>
       item
         .setSection("pane")
-        .setTitle("Reading view")
+        .setTitle(t("view.mode.preview"))
         .setIcon("book-open")
         .setChecked(!editing)
         .onClick(() => void this.setMode("preview"))
@@ -568,7 +574,7 @@ export class TextView extends FileView {
     menu.addItem((item) =>
       item
         .setSection("pane")
-        .setTitle("Editing view")
+        .setTitle(t("view.mode.edit"))
         .setIcon("pencil")
         .setChecked(editing)
         .onClick(() => void this.setMode("edit"))
@@ -587,7 +593,7 @@ export class TextView extends FileView {
     menu.addItem((item) =>
       item
         .setSection("danger")
-        .setTitle("Delete file")
+        .setTitle(t("view.menu.delete"))
         .setIcon("lucide-trash-2")
         .setWarning(true)
         .onClick(() => this.nfeDeps.deleteFile?.(file))
@@ -597,30 +603,30 @@ export class TextView extends FileView {
     const open = this.searchOpen;
     menu.addItem((item) =>
       item
-        .setTitle(open ? "Close search" : "Search")
+        .setTitle(open ? t("view.search.close") : "Search")
         .setIcon(open ? "search-x" : "search")
         .onClick(() => this.toggleSearch())
     );
     const s = this.nfeDeps.settings();
     menu.addItem((item) =>
       item
-        .setTitle("Word wrap")
+        .setTitle(t("view.menu.wordWrap"))
         .setIcon("wrap-text")
         .setChecked(s.wordWrap)
         .onClick(() => this.setWordWrap(!s.wordWrap))
     );
     menu.addItem((item) =>
       item
-        .setTitle("Show invisibles")
+        .setTitle(t("view.invisibles.show"))
         .setIcon("pilcrow")
         .setChecked(s.showInvisibles)
         .onClick(() => this.setShowInvisibles(!s.showInvisibles))
     );
     menu.addSeparator();
     const directions: Array<[SharedSettings["textDirection"], string, string]> = [
-      ["auto", "Direction: by line", "languages"],
-      ["ltr", "Left to right", "pilcrow-left"],
-      ["rtl", "Right to left", "pilcrow-right"],
+      ["auto", t("view.menu.direction"), "languages"],
+      ["ltr", t("menu.direction.ltr"), "pilcrow-left"],
+      ["rtl", t("menu.direction.rtl"), "pilcrow-right"],
     ];
     for (const [value, title, icon] of directions) {
       menu.addItem((item) =>
@@ -635,7 +641,7 @@ export class TextView extends FileView {
       menu.addSeparator();
       menu.addItem((item) =>
         item
-          .setTitle("Run file")
+          .setTitle(t("view.run.button"))
           .setIcon("play")
           .onClick(() => void this.runFile())
       );
@@ -665,40 +671,51 @@ export class TextView extends FileView {
         if (checked !== null) i.setChecked(checked);
       });
     };
-    if (editable && !selection.empty) item("Cut", "scissors", () => void ed.cut());
-    if (!selection.empty) item("Copy", "copy", () => void ed.copy());
-    if (editable) item("Paste", "clipboard-paste", () => void ed.paste());
-    item("Select all", "text-select", () => ed.selectAll());
+    if (editable && !selection.empty) item(t("menu.cut"), "scissors", () => void ed.cut());
+    if (!selection.empty) item(t("menu.copy"), "copy", () => void ed.copy());
+    if (editable) item(t("menu.paste"), "clipboard-paste", () => void ed.paste());
+    item(t("menu.selectAll"), "text-select", () => ed.selectAll());
     menu.addSeparator();
     if (editable) {
-      nfeSubmenu(menu, "Format", "case-sensitive", (sub) => {
+      nfeSubmenu(menu, t("menu.format"), "case-sensitive", (sub) => {
         const cases: Array<[CaseKind, string, string]> = [
-          ["upper", "UPPERCASE", "case-upper"],
-          ["lower", "lowercase", "case-lower"],
-          ["title", "Title Case", "case-sensitive"],
-          ["sentence", "Sentence case", "case-sensitive"],
-          ["invert", "iNVERT cASE", "case-sensitive"],
+          ["upper", t("menu.case.upper"), "case-upper"],
+          ["lower", t("menu.case.lower"), "case-lower"],
+          ["title", t("menu.case.title"), "case-sensitive"],
+          ["sentence", t("menu.case.sentence"), "case-sensitive"],
+          ["invert", t("menu.case.invert"), "case-sensitive"],
         ];
         for (const [kind, title, icon] of cases) sub.addItem((i) => i.setTitle(title).setIcon(icon).onClick(() => ed.changeCase(kind)));
       });
-      nfeSubmenu(menu, "Comment", "message-square-code", (sub) => {
-        sub.addItem((i) => i.setTitle("Toggle line comment (Ctrl+/)").setIcon("message-square-code").onClick(() => this.nfeToggleLineComment()));
-        sub.addItem((i) => i.setTitle("Toggle block comment (Alt+A)").setIcon("message-square-code").onClick(() => this.nfeToggleBlockComment()));
+      nfeSubmenu(menu, t("menu.comment"), "message-square-code", (sub) => {
+        sub.addItem((i) => i.setTitle(t("menu.comment.line")).setIcon("message-square-code").onClick(() => this.nfeToggleLineComment()));
+        sub.addItem((i) => i.setTitle(t("menu.comment.block")).setIcon("message-square-code").onClick(() => this.nfeToggleBlockComment()));
       });
-      item("Word completion (Ctrl+Space)", "list", () => ed.startCompletion());
-      nfeSubmenu(menu, "Insert", "calendar-plus", (sub) => {
+      item(t("menu.completion"), "list", () => ed.startCompletion());
+      nfeSubmenu(menu, t("menu.insert"), "calendar-plus", (sub) => {
         const stamp = () => this.nfeDeps.dateTime?.() ?? { date: formatDate(new Date(this.nfeDeps.now())), dateTime: formatDateTime(new Date(this.nfeDeps.now())) };
         const now = stamp();
-        sub.addItem((i) => i.setTitle(`Date  ${now.date}`).setIcon("calendar").onClick(() => ed.insertText(stamp().date)));
-        sub.addItem((i) => i.setTitle(`Date and time  ${now.dateTime}`).setIcon("clock").onClick(() => ed.insertText(stamp().dateTime)));
+        sub.addItem((i) => i.setTitle(t("menu.insert.date", { value: now.date })).setIcon("calendar").onClick(() => ed.insertText(stamp().date)));
+        sub.addItem((i) => i.setTitle(t("menu.insert.dateTime", { value: now.dateTime })).setIcon("clock").onClick(() => ed.insertText(stamp().dateTime)));
       });
+      if (isProseLanguage(this.nfeLanguage?.entry.name ?? null)) {
+        item(t("menu.unwrap"), "unfold-horizontal", () => this.nfeUnwrapLines());
+        item(t("menu.wrap"), "wrap-text", () => new WrapLinesModal(this.app, (choice) => this.nfeWrapLines(choice)).open());
+      }
+    }
+    const addToDictionary = this.nfeDeps.addToDictionary;
+    if (addToDictionary) {
+      // The selection, or the word the cursor stands in: the dialog's field is
+      // editable either way, so an empty one is still worth opening.
+      const word = selection.empty ? ed.wordAtCursor() : selection.text.trim().split(/\s*\n\s*/)[0] ?? "";
+      item(word.length > 0 ? `Add "${menuExcerpt(word)}" to dictionary…` : t("menu.addToDictionary"), "book-plus", () => addToDictionary(word, this.nfeLanguage?.entry.name ?? null));
     }
     const current = ed.lineDirection();
-    nfeSubmenu(menu, "This line", "pilcrow", (sub) => {
+    nfeSubmenu(menu, t("menu.thisLine"), "pilcrow", (sub) => {
       const directions: Array<[LineDirection, string, string]> = [
-        [null, "Direction by content", "languages"],
-        ["ltr", "Left to right", "pilcrow-left"],
-        ["rtl", "Right to left", "pilcrow-right"],
+        [null, t("menu.direction.auto"), "languages"],
+        ["ltr", t("menu.direction.ltr"), "pilcrow-left"],
+        ["rtl", t("menu.direction.rtl"), "pilcrow-right"],
       ];
       for (const [value, title, icon] of directions) {
         sub.addItem((i) =>
@@ -713,17 +730,47 @@ export class TextView extends FileView {
     const open = this.nfeDeps.openExternal;
     if (open && !selection.empty) {
       menu.addSeparator();
-      item(`Search the web for "${menuExcerpt(selection.text)}"`, "globe", () => open(webSearchUrl(selection.text)));
+      item(t("menu.searchWeb", { text: menuExcerpt(selection.text) }), "globe", () => open(webSearchUrl(selection.text)));
     }
+  }
+
+  /**
+   * "Unwrap lines" on prose: the hard-wrapped lines of the selection (the
+   * whole file when nothing is selected) joined back into paragraphs, one undo
+   * step, and a notice with the count, because a text that changed nothing
+   * must say so rather than look broken.
+   */
+  nfeUnwrapLines(): void {
+    const ed = this.nfeEditor;
+    if (!ed) return;
+    let result: UnwrapResult | null = null;
+    const selection = !ed.selection().empty;
+    ed.transformLines((text, atDocumentStart, document) => {
+      result = unwrapLines(text, { ...DEFAULT_UNWRAP_OPTIONS, markdown: this.nfeLanguage?.entry.name === "Markdown", atDocumentStart, selection, evidenceText: document });
+      return result.text;
+    });
+    new Notice(describeUnwrap(result));
+  }
+
+  /** t("menu.wrap") after the modal: the long lines of the selection (or the file) cut at the chosen width, one undo step, a notice with the count. */
+  nfeWrapLines(choice: WrapChoice): void {
+    const ed = this.nfeEditor;
+    if (!ed) return;
+    let result: WrapResult | null = null;
+    ed.transformLines((text, atDocumentStart) => {
+      result = wrapLines(text, { width: choice.width, breakWords: choice.breakWords, markdown: this.nfeLanguage?.entry.name === "Markdown", atDocumentStart });
+      return result.text;
+    });
+    new Notice(describeWrap(result, choice.width));
   }
 
   /** The language's comment syntax on the selection; a language without one says so instead of doing nothing. */
   nfeToggleLineComment(): void {
-    if (this.nfeEditor && !this.nfeEditor.toggleLineComment()) new Notice(`No line comment is known for ${this.nfeLanguage?.entry.name ?? "plain text"}.`);
+    if (this.nfeEditor && !this.nfeEditor.toggleLineComment()) new Notice(t("notice.comment.line.none", { language: this.nfeLanguage?.entry.name ?? t("language.plainText") }));
   }
 
   nfeToggleBlockComment(): void {
-    if (this.nfeEditor && !this.nfeEditor.toggleBlockComment()) new Notice(`No block comment is known for ${this.nfeLanguage?.entry.name ?? "plain text"}.`);
+    if (this.nfeEditor && !this.nfeEditor.toggleBlockComment()) new Notice(t("notice.comment.block.none", { language: this.nfeLanguage?.entry.name ?? t("language.plainText") }));
   }
 
   /**
@@ -824,7 +871,7 @@ export class TextView extends FileView {
       host.empty();
       this.nfeLanguage = null;
       this.nfeEditor = this.nfeDeps.editorFactory.create(host, { ...options, language: null, languageName: null });
-      new Notice("Native File Editor: highlighting failed for this file; shown as plain text. Details are in the plugin log.");
+      new Notice(t("notice.highlight.failed"));
     }
     if (!readOnly) this.nfeEditor.focus();
     if (panelEl) this.nfeBodyEl.appendChild(panelEl);
@@ -846,16 +893,16 @@ export class TextView extends FileView {
     if (info.lossy) {
       meta.createSpan({
         cls: "nfe-badge nfe-badge-warn",
-        text: "read-only: not valid UTF-8, shown as a guess",
+        text: t("view.badge.decodedByGuess"),
       });
     }
     const problem = this.nfeSaveProblem;
     if (problem) {
       const badge = meta.createSpan({
         cls: "nfe-badge nfe-badge-warn nfe-badge-problem",
-        text: `not saved: "${problem.char}" on line ${problem.line} has no byte in ${problem.encoding}`,
+        text: t("view.badge.notSaved", { char: problem.char, line: problem.line, encoding: problem.encoding }),
       });
-      badge.setAttribute("aria-label", "Click to go to the character. Remove it, or create a UTF-8 copy from the menu.");
+      badge.setAttribute("aria-label", t("view.badge.problemChar"));
       badge.addEventListener("click", () => this.nfeEditor?.markProblem({ line: problem.line, column: problem.column, length: problem.char.length }));
     }
     const buttons = this.nfeHeadEl.createDiv({ cls: "nfe-head-buttons" });
@@ -870,7 +917,7 @@ export class TextView extends FileView {
       // The guide to the keys and the search patterns: a `?` in the head bar, left of the mode button (it sat in the search row before).
       const help = buttons.createEl("button", { cls: "clickable-icon nfe-help-button" });
       setIcon(help, "circle-help");
-      help.setAttribute("aria-label", "Keys and regular expressions");
+      help.setAttribute("aria-label", t("settings.keys.guide.name"));
       help.setAttribute("data-tooltip-position", "top");
       const open = this.nfeDeps.regexHelp;
       help.addEventListener("click", () => open());
@@ -923,7 +970,7 @@ export class TextView extends FileView {
     this.nfeDeps.log.info("view", `${path} was deleted while open`);
     this.nfeAutosave?.cancel();
     await this.nfeTeardown();
-    this.nfeRenderError(`${path} was deleted.`);
+    this.nfeRenderError(t("view.error.deleted", { path }));
   }
 
   /**

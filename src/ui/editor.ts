@@ -88,6 +88,18 @@ export interface EditorHandle {
   startCompletion(): void;
   /** Insert text at every cursor, replacing what is selected. */
   insertText(text: string): void;
+  /**
+   * The lines the main selection touches (the whole document when nothing is
+   * selected), handed to `transform` as one text with `\n` line breaks and
+   * replaced by what comes back, as one undo step; `null` or the same text
+   * changes nothing. `atDocumentStart` says whether the first of those lines is
+   * the document's first, and `document` is the whole text, which a transform
+   * that learns from the words around the selection reads. Returns whether the
+   * document changed.
+   */
+  transformLines(transform: (text: string, atDocumentStart: boolean, document: string) => string | null): boolean;
+  /** The word the main cursor stands in, hyphens and apostrophes included; empty when it stands on none. */
+  wordAtCursor(): string;
   /** Force the direction of the lines the selection touches, or `null` to go back to the content's own. Lives with the editor, not the file. */
   setLineDirection(direction: LineDirection): void;
   /** The forced direction of the line the main cursor is on, or `null`. */

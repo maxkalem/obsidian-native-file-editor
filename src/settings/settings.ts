@@ -46,6 +46,10 @@ export interface SharedSettings {
   languageFolder: string;
   /** Custom languages on or off; off means the folder is not read. */
   customLanguages: boolean;
+  /** The vault folder of JSON text-language dictionaries (the hyphen word lists); empty means the default under the plugin folder. Read at load. */
+  dictionaryFolder: string;
+  /** Custom dictionaries on or off; off means the folder is not read and only the bundled dictionaries apply. */
+  customDictionaries: boolean;
   /** Custom file types: lower-case extension -> the registry language name that opens it. */
   customExtensions: Record<string, string>;
 }
@@ -67,6 +71,8 @@ export const DEFAULT_SETTINGS: SharedSettings = {
   customPalettes: false,
   languageFolder: "",
   customLanguages: false,
+  dictionaryFolder: "",
+  customDictionaries: false,
   customExtensions: {},
 };
 
@@ -118,6 +124,8 @@ export function normalizeSettings(raw: unknown): SharedSettings {
   if (typeof raw.languageFolder === "string" && !raw.languageFolder.includes("..")) out.languageFolder = raw.languageFolder.trim();
   if (typeof raw.customPalettes === "boolean") out.customPalettes = raw.customPalettes;
   if (typeof raw.customLanguages === "boolean") out.customLanguages = raw.customLanguages;
+  if (typeof raw.dictionaryFolder === "string" && !raw.dictionaryFolder.includes("..")) out.dictionaryFolder = raw.dictionaryFolder.trim();
+  if (typeof raw.customDictionaries === "boolean") out.customDictionaries = raw.customDictionaries;
   if (isRecord(raw.customExtensions)) {
     for (const [ext, name] of Object.entries(raw.customExtensions)) {
       if (typeof name === "string" && name.trim().length > 0 && /^[a-z0-9_+-]+$/i.test(ext)) out.customExtensions[ext.toLowerCase()] = name.trim();

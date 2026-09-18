@@ -16,7 +16,7 @@ Nothing is published to the community directory until the whole plan in the READ
 
 `manifest.json` and `styles.css` are edited at the repository root only, and `main.js` is built there (the layout the community-plugins review expects). Every `npm run build` copies all three into `native-file-editor/`, the folder a person copies into `.obsidian/plugins/` for a manual install, so a manual install and a release ship byte-identical files. Never edit the files inside `native-file-editor/` by hand; they are build output, and CI fails when they differ from a fresh build. Every change under `src/` is therefore followed by `npm run build` before the commit.
 
-`copy.bat` and `clean.cmd` at the root install that folder into a vault on this machine: `copy.bat` replaces the three files and keeps settings, `clean.cmd` removes the installed plugin folder first, settings included. Both take the vault path as an argument, from `NFE_VAULT`, or from a git-ignored `local.cmd` holding `set NFE_VAULT=...`. `package-lock.json` is committed so `npm ci` pins the toolchain; without it an esbuild patch release would change `main.js` bytes and turn the freshness check into noise.
+`package-lock.json` is committed so `npm ci` pins the toolchain; without it an esbuild patch release would change `main.js` bytes and turn the freshness check into noise.
 
 ## Cutting a release
 

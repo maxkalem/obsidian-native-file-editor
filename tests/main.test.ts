@@ -179,6 +179,21 @@ describe("plugin load", () => {
     head.children.length = 0;
   });
 
+  it("writes an example dictionary into the default folder, turns the switch on and puts the lists in force", async () => {
+    const app = makeApp({});
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, { id: "native-file-editor" } as never));
+    await plugin.onload();
+    expect(plugin.dictionaryFolder()).toBe(".obsidian/plugins/native-file-editor/dictionaries");
+    __notices.length = 0;
+    await plugin.createExampleDictionary("Finnish");
+    expect(app.adapter.written.some((p) => p.includes("dictionaries/"))).toBe(true);
+    expect(__notices.join(" ")).toContain("dictionaries/Finnish.json");
+    // A language nothing bundles says so instead of writing a file.
+    __notices.length = 0;
+    await plugin.createExampleDictionary("Klingon");
+    expect(__notices.join(" ")).toMatch(/no bundled dictionary/);
+  });
+
   it("takes the palette <style> out of the head on unload", async () => {
     const head = (globalThis as unknown as { activeDocument: { head: { children: Array<{ id?: string }> } } }).activeDocument.head;
     head.children.length = 0;
@@ -221,6 +236,63 @@ describe("plugin load", () => {
     const otherMenu = new Menu();
     (app.workspace as unknown as Events).trigger("file-menu", otherMenu, { path: "x" });
     expect(otherMenu.items).toHaveLength(0);
+  });
+
+  it("adds Unwrap lines to a note's editor menu, acting through Obsidian's editor", async () => {
+    const app = makeApp({});
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, {} as never));
+    await plugin.onload();
+    const lines = ["A paragraph cut by a mail client at seventy-two columns, the first line here", "and the second one, which runs on to the end of the row as well before it", "stops."];
+    const transactions: unknown[] = [];
+    const editor = {
+      somethingSelected: () => false,
+      getCursor: () => ({ line: 0, ch: 0 }),
+      lineCount: () => lines.length,
+      getLine: (n: number) => lines[n] ?? "",
+      getRange: () => lines.join("\n"),
+      getValue: () => lines.join("\n"),
+      getSelection: () => "",
+      transaction: (tx: unknown) => void transactions.push(tx),
+    };
+    const menu = new Menu();
+    (app.workspace as unknown as Events).trigger("editor-menu", menu, editor, { file: new TFile("notes/a.md") });
+    expect(menu.items.map((i) => [i.title, i.icon])).toEqual([
+      ["Unwrap lines (Native File Editor)", "unfold-horizontal"],
+      ["Wrap lines… (Native File Editor)", "wrap-text"],
+      ["Add to dictionary… (Native File Editor)", "book-plus"],
+    ]);
+    __notices.length = 0;
+    menu.items[0]?.click();
+    expect(transactions).toEqual([{ changes: [{ from: { line: 0, ch: 0 }, to: { line: 2, ch: 6 }, text: lines.join(" ") }], selection: undefined }]);
+    expect(__notices).toEqual(["Unwrap lines: 2 line breaks removed at a wrap width of 76."]);
+    // Wrap lines… opens the modal; its choice cuts the long line through the same editor.
+    lines.splice(0, lines.length, lines.join(" "));
+    transactions.length = 0;
+    __notices.length = 0;
+    __openedModals.length = 0;
+    __modalInstances.length = 0;
+    menu.items[1]?.click();
+    expect(__openedModals).toEqual(["WrapLinesModal"]);
+    const modal = __modalInstances[0] as { onOpen(): void; width: number; breakWords: boolean; finish(): void };
+    modal.onOpen();
+    modal.width = 50;
+    modal.finish();
+    expect(transactions).toHaveLength(1);
+    const written = (transactions[0] as { changes: Array<{ text: string }> }).changes[0]?.text ?? "";
+    expect(written.split("\n").every((l) => l.length <= 50)).toBe(true);
+    expect(written.split("\n").join(" ")).toBe(lines[0]);
+    expect(__notices).toEqual([expect.stringMatching(/^Wrap lines: 1 line cut at 50 characters, \d+ line breaks added\.$/)]);
+    // Add to dictionary…: the word the cursor stands in is prefilled.
+    __openedModals.length = 0;
+    __modalInstances.length = 0;
+    menu.items[2]?.click();
+    expect(__openedModals).toEqual(["AddToDictionaryModal"]);
+    expect((__modalInstances[0] as { word: string }).word).toBe("A");
+    // Not a note: nothing added.
+    const other = new Menu();
+    (app.workspace as unknown as Events).trigger("editor-menu", other, editor, { file: new TFile("notes/a.canvas") });
+    (app.workspace as unknown as Events).trigger("editor-menu", other, editor, { file: null });
+    expect(other.items).toHaveLength(0);
   });
 
   it("does not repeat the notice at the next start for the same yielded set, and repeats it when the set changes", async () => {

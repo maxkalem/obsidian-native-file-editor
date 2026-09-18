@@ -1,3 +1,4 @@
+import { plural, t } from "../core/i18n";
 import { autocompletion, completeAnyWord, startCompletion } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab, selectAll, toggleBlockComment, toggleComment } from "@codemirror/commands";
 import { bracketMatching, codeFolding, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
@@ -21,6 +22,7 @@ import {
 } from "@codemirror/view";
 import { changeCase } from "../core/editText";
 import { chordFor, describeChord } from "../core/hotkeys";
+import { wordAtPosition } from "../core/words";
 import { OBSIDIAN_SCHEME_CLASS, nfeHighlighter } from "../highlight/highlighter";
 import { forkLineHighlighter } from "../highlight/obsidianFork";
 import type { EditorFactory, EditorHandle, EditorOptions, LineDirection, SelectionInfo } from "./editor";
@@ -43,7 +45,7 @@ function foldPlaceholder(view: EditorView, onclick: (event: Event) => void): HTM
   span.className = "nfe-fold-placeholder";
   span.textContent = "\u2194";
   span.title = "Unfold";
-  span.setAttribute("aria-label", "folded code");
+  span.setAttribute("aria-label", t("editor.foldedCode"));
   span.onclick = onclick;
   return span;
 }
@@ -340,6 +342,28 @@ export const codeMirrorFactory: EditorFactory = {
       selectAll: () => {
         runStateCommand(selectAll, view);
         view.focus();
+      },
+      wordAtCursor: () => {
+        const head = view.state.selection.main.head;
+        const line = view.state.doc.lineAt(head);
+        return wordAtPosition(line.text, head - line.from);
+      },
+      transformLines: (transform) => {
+        if (options.readOnly) return false;
+        const { state } = view;
+        const range = state.selection.main;
+        const from = range.empty ? 0 : state.doc.lineAt(range.from).from;
+        const to = range.empty ? state.doc.length : state.doc.lineAt(range.to).to;
+        const before = state.sliceDoc(from, to);
+        const after = transform(before, from === 0, state.doc.toString());
+        if (after === null || after === before) return false;
+        view.dispatch({
+          changes: { from, to, insert: after },
+          selection: range.empty ? undefined : EditorSelection.range(from, from + after.length),
+          userEvent: "input.format",
+        });
+        view.focus();
+        return true;
       },
       changeCase: (kind) => {
         if (options.readOnly) return;

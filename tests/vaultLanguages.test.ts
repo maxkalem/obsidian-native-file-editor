@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { Logger } from "../src/core/log";
 import { __clearVaultLanguages, languageFor, languageNamed, registerCustomExtension, registerVaultLanguage, registeredExtensions, resolveLanguage } from "../src/highlight/registry";
-import { exampleLanguageJson, loadVaultLanguages, writeExampleLanguage } from "../src/highlight/vaultLanguages";
+import { addWordToLanguage, exampleLanguageJson, loadVaultLanguages, writeExampleLanguage } from "../src/highlight/vaultLanguages";
 import { type Transport, TransportError } from "../src/platform/transport";
 
 /**
@@ -150,5 +150,34 @@ describe("example definitions", () => {
     const r = await loadVaultLanguages({ transport: t, folder: FOLDER, customExtensions: {}, log: log() });
     expect(r.registered).toEqual(["Batch (.bat, .cmd); replaces .bat (was Batch), .cmd (was Batch)"]);
     expect(languageFor("bat")?.source).toBe("vault");
+  });
+});
+
+describe("addWordToLanguage", () => {
+  it("starts a definition from the plugin's own table and puts the word in the role's set", async () => {
+    const t = new MemoryTransport();
+    const added = await addWordToLanguage(t, FOLDER, "Batch", "keyword", "myverb");
+    expect(added).toMatchObject({ path: `${FOLDER}/batch.json`, role: "keyword", word: "myverb", added: true });
+    const body = JSON.parse(new TextDecoder().decode(t.files.get(`${FOLDER}/batch.json`) ?? new Uint8Array())) as { name: string; sets: Array<[string, string[]]> };
+    expect(body.name).toBe("Batch");
+    const keywords = body.sets.find(([role]) => role === "keyword")?.[1] ?? [];
+    expect(keywords).toContain("myverb");
+    expect(keywords).toContain("echo");
+    // The definition loads and colours the word.
+    const r = await loadVaultLanguages({ transport: t, folder: FOLDER, customExtensions: {}, log: log() });
+    expect(r.problems).toEqual([]);
+    expect(languageFor("bat")?.source).toBe("vault");
+  });
+
+  it("adds a role the definition did not have, keeps a word it already had, and refuses a grammar or a word with a space", async () => {
+    const t = new MemoryTransport();
+    await addWordToLanguage(t, FOLDER, "Batch", "keyword", "myverb");
+    expect(await addWordToLanguage(t, FOLDER, "batch", "keyword", "MYVERB")).toMatchObject({ added: false });
+    const constant = await addWordToLanguage(t, FOLDER, "Batch", "constant", "MYCONST");
+    expect(constant).toMatchObject({ role: "constant", added: true });
+    const body = JSON.parse(new TextDecoder().decode(t.files.get(`${FOLDER}/batch.json`) ?? new Uint8Array())) as { sets: Array<[string, string[]]> };
+    expect(body.sets.find(([role]) => role === "constant")?.[1]).toEqual(["MYCONST"]);
+    expect(await addWordToLanguage(t, FOLDER, "Python", "keyword", "match")).toBeNull();
+    expect(await addWordToLanguage(t, FOLDER, "Batch", "keyword", "two words")).toBeNull();
   });
 });

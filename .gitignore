@@ -5,7 +5,6 @@ node_modules/
 Thumbs.db
 # Scratch output of the e2e runner; fixtures themselves are committed.
 tests/e2e/out/
-# The vault path copy.bat and clean.cmd install into on this machine.
-local.cmd
+# Local working scripts never committed.
 /*.bat
 /*.cmd

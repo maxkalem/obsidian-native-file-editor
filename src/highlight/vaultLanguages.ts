@@ -103,6 +103,74 @@ export function exampleLanguageJson(languageName: string): { fileName: string; j
   return { fileName: `${table.id}.json`, json: `${JSON.stringify(body, null, 2)}\n` };
 }
 
+export interface AddedKeyword {
+  readonly path: string;
+  readonly role: string;
+  readonly word: string;
+  /** False when the definition already held the word in that role: the file is left alone. */
+  readonly added: boolean;
+}
+
+/**
+ * Put one word into a language's definition in the vault: the file whose
+ * `name` is that language, or a new file started from the plugin's own
+ * keyword table, so the definition that replaces the bundled one knows
+ * everything it knew. Only keyword-table and vault languages have word lists;
+ * a grammar returns null. The caller rereads afterwards.
+ */
+export async function addWordToLanguage(transport: Transport, folder: string, languageName: string, role: string, word: string): Promise<AddedKeyword | null> {
+  const entry = word.trim();
+  if (entry.length === 0 || /\s/.test(entry)) return null;
+
+  let path: string | null = null;
+  let body: Record<string, unknown> | null = null;
+  let files: string[] = [];
+  try {
+    files = (await transport.listDir(folder)).files.filter((f) => /\.json$/i.test(f)).sort();
+  } catch {
+    // No folder yet: the first word makes it.
+  }
+  for (const candidate of files) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(new TextDecoder("utf-8").decode(await transport.readBinary(candidate)).replace(/^﻿/, ""));
+    } catch {
+      continue;
+    }
+    const parsed = parseKeywordLanguage(raw, baseName(candidate));
+    if ("error" in parsed || parsed.language.name.toLowerCase() !== languageName.trim().toLowerCase()) continue;
+    path = candidate;
+    body = raw as Record<string, unknown>;
+    break;
+  }
+  if (body === null) {
+    const example = exampleLanguageJson(languageName);
+    if (example === null) return null;
+    body = JSON.parse(example.json) as Record<string, unknown>;
+    path = `${folder}/${example.fileName}`;
+  }
+
+  // `sets` is a list of [role, words] pairs; words may be a list or one
+  // space-separated string, and both shapes are written back as they came.
+  const sets = Array.isArray(body["sets"]) ? [...(body["sets"] as unknown[])] : [];
+  let found = false;
+  for (let i = 0; i < sets.length; i++) {
+    const pair = sets[i];
+    if (!Array.isArray(pair) || pair[0] !== role) continue;
+    found = true;
+    const words = Array.isArray(pair[1]) ? (pair[1] as unknown[]).filter((w): w is string => typeof w === "string") : typeof pair[1] === "string" ? (pair[1] as string).split(/\s+/).filter((w) => w.length > 0) : [];
+    if (words.some((w) => w.toLowerCase() === entry.toLowerCase())) return { path: path as string, role, word: entry, added: false };
+    const next = [...words, entry];
+    sets[i] = [role, typeof pair[1] === "string" ? next.join(" ") : next];
+    break;
+  }
+  if (!found) sets.push([role, [entry]]);
+  body["sets"] = sets;
+  await transport.mkdir(folder);
+  await transport.writeBinaryAtomic(path as string, new TextEncoder().encode(`${JSON.stringify(body, null, 2)}\n`));
+  return { path: path as string, role, word: entry, added: true };
+}
+
 /** Write the example definition for a language into the folder (creating it), replacing an existing file. */
 export async function writeExampleLanguage(transport: Transport, folder: string, languageName: string): Promise<string | null> {
   const example = exampleLanguageJson(languageName);

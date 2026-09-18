@@ -20,6 +20,10 @@ import { readThemeColours } from "./ui/themeColours";
 import { BUILD_STAMP } from "./build";
 import { decideClaims, describeYielded } from "./core/claims";
 import { findStaleFiles } from "./core/staleSweep";
+import { unwrapInNote, wrapInNote } from "./core/unwrapNote";
+import { describeUnwrap } from "./fmt/unwrap";
+import { describeWrap } from "./fmt/wrap";
+import { WrapLinesModal } from "./ui/WrapLinesModal";
 import { Logger, describeError } from "./core/log";
 import type { Timers } from "./core/autosave";
 import { forkTokenOf, ruleOf, tokenize } from "./highlight/highlighter";
@@ -35,12 +39,28 @@ import type { Transport } from "./platform/transport";
 import { DeviceLocalStore } from "./settings/DeviceLocalStore";
 import { NfeSettingsTab } from "./settings/SettingsTab";
 import { DEFAULT_SETTINGS, type SharedSettings, normalizeSettings, resolvePaletteFolder, resolvePluginFolder } from "./settings/settings";
-import { loadVaultLanguages, writeExampleLanguage } from "./highlight/vaultLanguages";
+import { addWordToLanguage, loadVaultLanguages, writeExampleLanguage } from "./highlight/vaultLanguages";
+import { allTextLanguageNames } from "./fmt/dictionary";
+import { addWordToDictionary, loadVaultDictionaries, writeExampleDictionary } from "./fmt/vaultDictionaries";
+import { wordAtPosition } from "./core/words";
+import { EN_CATALOGUE, plural, t } from "./core/i18n";
+import { LOCALIZATION_FILE, type Localization, loadLocalization } from "./core/localization";
+import { AddToDictionaryModal, type DictionaryChoice } from "./ui/AddToDictionaryModal";
 import { NewFileModal } from "./ui/NewFileModal";
 import { RegexHelpModal } from "./ui/RegexHelpModal";
 import { type BakedHotkey, type Chord, bakedMatches, platformOf } from "./core/hotkeys";
 import { TextView } from "./ui/TextView";
 import { codeMirrorFactory } from "./ui/codemirror";
+
+/** How many strings the plugin has, for the settings row that says how much of it a file translates. */
+const EN_KEY_COUNT = Object.keys(EN_CATALOGUE).length;
+
+/** The name of a dictionary's list, as the notice after "Add to dictionary…" shows it. */
+function listName(list: "prefixes" | "suffixes" | "words"): string {
+  if (list === "prefixes") return t("list.prefixes");
+  if (list === "suffixes") return t("list.suffixes");
+  return t("list.words");
+}
 
 /**
  * Obsidian's view registry keeps extension -> view type. It is not in the
@@ -157,6 +177,8 @@ export default class NativeFileEditorPlugin extends Plugin {
   private nfeStyleSink!: DocumentStyleSink;
   /** Extensions registered with Obsidian so far; a reread registers only what is new. */
   private readonly nfeRegistered = new Set<string>();
+  /** The localization file in force, or null when the plugin is in English; set by every load and reread. */
+  private nfeLocalization: Localization | null = null;
 
   override async onload(): Promise<void> {
     // Two measurements worth having in every log, taken here
@@ -184,9 +206,12 @@ export default class NativeFileEditorPlugin extends Plugin {
       log.info("plugin", `transport ${this.nfeTransport.kind}`);
     } catch (e) {
       log.error("plugin", "transport unavailable", e);
-      new Notice(`Native File Editor cannot start: ${e instanceof Error ? e.message : String(e)}`);
+      new Notice(t("notice.cannotStart", { error: e instanceof Error ? e.message : String(e) }));
       return;
     }
+    // The locale before anything builds a string: the first notice, the first
+    // menu and the settings page are already in the user's language.
+    await this.loadLocale();
     log.info("plugin", `@codemirror/language is ${isObsidianStreamFork ? "Obsidian's fork (tokenClassNodeProp + lineHighlighter present)" : "the npm package (no fork exports)"}`);
     log.info("plugin", `stream-language self-test: ${selfTestStreamLanguage()}`);
 
@@ -244,6 +269,7 @@ export default class NativeFileEditorPlugin extends Plugin {
         // an http(s) address to the system browser on every platform. The
         // plugin itself sends nothing; the one line in the log says when.
         dateTime: () => this.dateTimeNow(),
+        addToDictionary: (word, language) => this.openAddToDictionary(word, language),
         openExternal: (url) => {
           log.info("view", `opening the browser for a web search (${url.length} chars)`);
           window.open(url);
@@ -266,7 +292,7 @@ export default class NativeFileEditorPlugin extends Plugin {
     if (run) {
       this.addCommand({
         id: COMMAND_RUN_FILE,
-        name: "Run file",
+        name: t("command.run"),
         checkCallback: (checking) => {
           const view = this.app.workspace.getActiveViewOfType(TextView);
           if (!view || !view.nfeRunAvailable()) return false;
@@ -276,7 +302,7 @@ export default class NativeFileEditorPlugin extends Plugin {
       });
       this.addCommand({
         id: COMMAND_STOP_RUN,
-        name: "Stop run",
+        name: t("command.stop"),
         checkCallback: (checking) => {
           const view = this.app.workspace.getActiveViewOfType(TextView);
           if (!view || !view.running) return false;
@@ -290,6 +316,9 @@ export default class NativeFileEditorPlugin extends Plugin {
     // before the claims below, so their extensions are claimed like any
     // bundled one. A bad file is named once; the load goes on.
     await this.loadLanguages();
+    // The text-language dictionaries decide hyphens in Unwrap; nothing claims
+    // an extension for them, so a failure here costs a word list, not a file.
+    await this.loadDictionaries();
 
     // Cover everything, yield by default: extensions another plugin already
     // serves are left alone, and the notice about it is shown once per change
@@ -343,7 +372,7 @@ export default class NativeFileEditorPlugin extends Plugin {
 
     this.addCommand({
       id: COMMAND_TOGGLE_MODE,
-      name: "Toggle preview and edit",
+      name: t("command.toggleMode"),
       checkCallback: (checking) => {
         const view = this.app.workspace.getActiveViewOfType(TextView);
         if (!view) return false;
@@ -354,35 +383,66 @@ export default class NativeFileEditorPlugin extends Plugin {
 
     this.addCommand({
       id: COMMAND_NEW_FILE,
-      name: "New file",
+      name: t("command.newFile"),
       callback: () => {
         const active = this.app.workspace.getActiveFile();
         this.openNewFileModal(active?.parent?.path ?? "");
       },
     });
 
-    this.addCommand({ id: COMMAND_RELOAD_PALETTES, name: "Reread languages and palettes", callback: () => void this.reread(true) });
+    this.addCommand({ id: COMMAND_RELOAD_PALETTES, name: t("command.reread"), callback: () => void this.reread(true) });
     this.addCommand({
       id: COMMAND_WRITE_EXAMPLE_PALETTE,
-      name: "Create example palette for a language",
+      name: t("command.examplePalette"),
       callback: () => {
         void (async () => {
-          const language = await pickLanguage(this.app, allLanguageNames(), "Language for the example palette (light and dark files)");
+          const language = await pickLanguage(this.app, allLanguageNames(), t("settings.palettes.example.placeholder"));
           if (language !== null) await this.createExamplePalette(language);
         })();
       },
     });
 
-    // A folder gets "New file" inside it; a file gets "New file" beside it.
+    // A folder gets t("command.newFile") inside it; a file gets t("command.newFile") beside it.
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu: Menu, file) => {
         const folder = file instanceof TFolder ? file.path : file instanceof TFile ? (file.parent?.path ?? "") : null;
         if (folder === null) return;
         menu.addItem((item) =>
           item
-            .setTitle(file instanceof TFolder ? "New file (Native File Editor)" : "New file here (Native File Editor)")
+            .setTitle(file instanceof TFolder ? t("menu.newFile") : t("menu.newFileHere"))
             .setIcon("file-plus")
             .onClick(() => this.openNewFileModal(folder))
+        );
+      })
+    );
+
+    // A note's editor menu gets "Unwrap lines": `.md` is Obsidian's own file
+    // type, so the command acts through Obsidian's editor (core/unwrapNote.ts).
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu: Menu, editor, info) => {
+        if (info.file?.extension !== "md") return;
+        menu.addItem((item) =>
+          item
+            .setTitle(t("menu.note.unwrap"))
+            .setIcon("unfold-horizontal")
+            .onClick(() => new Notice(describeUnwrap(unwrapInNote(editor))))
+        );
+        menu.addItem((item) =>
+          item
+            .setTitle(t("menu.note.wrap"))
+            .setIcon("wrap-text")
+            .onClick(() => new WrapLinesModal(this.app, (choice) => new Notice(describeWrap(wrapInNote(editor, choice.width, choice.breakWords), choice.width))).open())
+        );
+        menu.addItem((item) =>
+          item
+            .setTitle(t("menu.note.addToDictionary"))
+            .setIcon("book-plus")
+            .onClick(() => {
+              const selected = editor.getSelection().trim();
+              const cursor = editor.getCursor();
+              const word = selected.length > 0 ? (selected.split(/\s*\n\s*/)[0] ?? "") : wordAtPosition(editor.getLine(cursor.line), cursor.ch);
+              this.openAddToDictionary(word, null);
+            })
         );
       })
     );
@@ -400,6 +460,9 @@ export default class NativeFileEditorPlugin extends Plugin {
         },
         paletteFolder: () => this.paletteFolder(),
         languageFolder: () => this.languageFolder(),
+        dictionaryFolder: () => this.dictionaryFolder(),
+        pluginFolder: () => this.pluginFolder(),
+        localization: () => (this.nfeLocalization === null ? null : { name: this.nfeLocalization.name, translated: this.nfeLocalization.translated, total: EN_KEY_COUNT }),
         shell,
         ensureFolder: (vaultPath) => this.nfeTransport.mkdir(vaultPath),
         languages: () => allLanguageNames(),
@@ -410,11 +473,13 @@ export default class NativeFileEditorPlugin extends Plugin {
         reread: () => this.reread(false),
         createExamplePalette: (language) => this.createExamplePalette(language),
         createExampleLanguage: (language) => this.createExampleLanguage(language),
+        textLanguages: () => allTextLanguageNames(),
+        createExampleDictionary: (language) => this.createExampleDictionary(language),
         regexHelp: () => new RegexHelpModal(this.app, this.nfeSettings.hotkeys).open(),
         obsidianHoldersOf: (chord) => obsidianCommandsOn(this.app, chord, platformOf(Platform) === "mac"),
         reloadPlugin: async () => {
           const err = await reloadPlugin(this.app, PLUGIN_ID);
-          if (err) new Notice(`Native File Editor: reload failed: ${err}`);
+          if (err) new Notice(t("notice.reload.failed", { error: err }));
         },
         isDesktop: () => run !== null,
         notice: (message) => void new Notice(message, 8000),
@@ -495,7 +560,28 @@ export default class NativeFileEditorPlugin extends Plugin {
       customExtensions: this.nfeSettings.customExtensions,
       log: this.nfeLog,
     });
-    if (report.problems.length > 0) new Notice(`Native File Editor: ${report.problems.length} language definition${report.problems.length === 1 ? "" : "s"} not loaded; see the plugin log.`, 8000);
+    if (report.problems.length > 0) new Notice(plural(report.problems.length, "notice.languages.problems.one", "notice.languages.problems.other"), 8000);
+  }
+
+  /**
+   * The plugin's one localization file, read before anything builds a string,
+   * so the first notice and the first menu are already in the user's language.
+   * No file means English, which is the usual case.
+   */
+  private async loadLocale(): Promise<void> {
+    const report = await loadLocalization(this.nfeTransport, this.pluginFolder(), this.nfeLog);
+    this.nfeLocalization = report.localization;
+    if (report.problem !== null) new Notice(t("notice.locale.problem", { file: LOCALIZATION_FILE, error: report.problem }), 8000);
+  }
+
+  /** The vault's text-language dictionaries (when on) into the lexicon Unwrap reads; the notice names how many files failed. */
+  private async loadDictionaries(): Promise<void> {
+    const report = await loadVaultDictionaries({
+      transport: this.nfeTransport,
+      folder: this.nfeSettings.customDictionaries ? this.dictionaryFolder() : null,
+      log: this.nfeLog,
+    });
+    if (report.problems.length > 0) new Notice(plural(report.problems.length, "notice.dictionaries.problems.one", "notice.dictionaries.problems.other"), 8000);
   }
 
   /**
@@ -505,7 +591,9 @@ export default class NativeFileEditorPlugin extends Plugin {
    * as the yield rule says. Open panes keep their language until reopened.
    */
   async reread(announce: boolean): Promise<void> {
+    await this.loadLocale();
     await this.loadLanguages();
+    await this.loadDictionaries();
     const owned = readOwnedExtensions(this.app);
     const fresh = registeredExtensions().filter((ext) => !this.nfeRegistered.has(ext) && (owned[ext] === undefined || owned[ext] === VIEW_TYPE_TEXT) && this.nfeSettings.extensions[ext] !== false);
     if (fresh.length > 0) {
@@ -528,10 +616,10 @@ export default class NativeFileEditorPlugin extends Plugin {
       const written = await this.nfePalettes.writeExample(language, colours);
       if (!this.nfeSettings.customPalettes) await this.saveSettings({ ...this.nfeSettings, customPalettes: true });
       await this.nfePalettes.load();
-      new Notice(`Native File Editor: wrote ${written.map((p) => p.slice(p.lastIndexOf("/") + 1)).join(" and ")} into ${this.paletteFolder()}`);
+      new Notice(t("notice.palette.wrote", { files: written.map((p) => p.slice(p.lastIndexOf("/") + 1)).join(t("word.and")), folder: this.paletteFolder() }));
     } catch (e) {
       this.nfeLog.error("palette", `example for ${language} failed`, e);
-      new Notice(`Native File Editor: could not write the example palette: ${e instanceof Error ? e.message : String(e)}`);
+      new Notice(t("notice.palette.failed", { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -540,15 +628,70 @@ export default class NativeFileEditorPlugin extends Plugin {
     try {
       const path = await writeExampleLanguage(this.nfeTransport, this.languageFolder(), language);
       if (path === null) {
-        new Notice(`Native File Editor: ${language} is a grammar, not a keyword table; only keyword-based languages have an example definition.`);
+        new Notice(t("notice.language.noTable", { language }));
         return;
       }
       if (!this.nfeSettings.customLanguages) await this.saveSettings({ ...this.nfeSettings, customLanguages: true });
       await this.reread(false);
-      new Notice(`Native File Editor: wrote ${path}`);
+      new Notice(t("notice.wrote", { path }));
     } catch (e) {
       this.nfeLog.error("languages", `example for ${language} failed`, e);
-      new Notice(`Native File Editor: could not write the example definition: ${e instanceof Error ? e.message : String(e)}`);
+      new Notice(t("notice.language.exampleFailed", { error: e instanceof Error ? e.message : String(e) }));
+    }
+  }
+
+  /** "Add to dictionary…": the dialog, then the word into the file of the kind it chose, then that folder reread. */
+  openAddToDictionary(word: string, language: string | null): void {
+    new AddToDictionaryModal(this.app, {
+      word,
+      textLanguages: () => allTextLanguageNames(),
+      programmingLanguages: () => allLanguageNames().filter((n) => keywordTableFor(n) !== null),
+      currentLanguage: language,
+      onAdd: (choice) => void this.addWordToVault(choice),
+    }).open();
+  }
+
+  private async addWordToVault(choice: DictionaryChoice): Promise<void> {
+    try {
+      if (choice.kind === "text") {
+        const added = await addWordToDictionary(this.nfeTransport, this.dictionaryFolder(), choice.language, choice.word);
+        if (added === null) {
+          new Notice(t("notice.dictionary.notAWord"));
+          return;
+        }
+        if (!this.nfeSettings.customDictionaries) await this.saveSettings({ ...this.nfeSettings, customDictionaries: true });
+        await this.loadDictionaries();
+        new Notice(added.added ? t("notice.dictionary.added", { word: added.entry, list: listName(added.list), language: choice.language, path: added.path }) : t("notice.dictionary.already", { language: choice.language, word: added.entry }));
+        return;
+      }
+      const added = await addWordToLanguage(this.nfeTransport, this.languageFolder(), choice.language, choice.role, choice.word);
+      if (added === null) {
+        new Notice(t("notice.language.noWordList", { language: choice.language }));
+        return;
+      }
+      if (!this.nfeSettings.customLanguages) await this.saveSettings({ ...this.nfeSettings, customLanguages: true });
+      await this.reread(false);
+      new Notice(added.added ? t("notice.keyword.added", { word: added.word, role: added.role, language: choice.language, path: added.path }) : t("notice.keyword.already", { language: choice.language, word: added.word, role: added.role }));
+    } catch (e) {
+      this.nfeLog.error(choice.kind === "text" ? "dictionaries" : "languages", `adding ${choice.word} to ${choice.language} failed`, e);
+      new Notice(t("notice.word.failed", { error: e instanceof Error ? e.message : String(e) }));
+    }
+  }
+
+  /** The plugin's own word lists for a text language as a JSON file in the dictionaries folder, for the user to extend. */
+  async createExampleDictionary(language: string): Promise<void> {
+    try {
+      const path = await writeExampleDictionary(this.nfeTransport, this.dictionaryFolder(), language);
+      if (path === null) {
+        new Notice(t("notice.dictionary.noBundled", { language }));
+        return;
+      }
+      if (!this.nfeSettings.customDictionaries) await this.saveSettings({ ...this.nfeSettings, customDictionaries: true });
+      await this.loadDictionaries();
+      new Notice(`Native File Editor: wrote ${path}`);
+    } catch (e) {
+      this.nfeLog.error("dictionaries", `example for ${language} failed`, e);
+      new Notice(t("notice.dictionary.exampleFailed", { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -572,6 +715,15 @@ export default class NativeFileEditorPlugin extends Plugin {
 
   languageFolder(): string {
     return resolvePluginFolder(this.nfeSettings.languageFolder, this.app.vault.configDir, PLUGIN_ID, "languages");
+  }
+
+  dictionaryFolder(): string {
+    return resolvePluginFolder(this.nfeSettings.dictionaryFolder, this.app.vault.configDir, PLUGIN_ID, "dictionaries");
+  }
+
+  /** The plugin's own folder: where `localization.json` goes, beside main.js and the log. */
+  pluginFolder(): string {
+    return `${this.app.vault.configDir}/plugins/${PLUGIN_ID}`;
   }
 
   /**
@@ -615,7 +767,7 @@ export default class NativeFileEditorPlugin extends Plugin {
       if (view instanceof TextView) await view.setMode("edit");
     } catch (e) {
       this.nfeLog.error("new-file", `${path} failed`, e);
-      new Notice(`Native File Editor could not create ${path}: ${e instanceof Error ? e.message : String(e)}`);
+      new Notice(t("notice.create.failed", { path, error: e instanceof Error ? e.message : String(e) }));
     }
   }
 }
