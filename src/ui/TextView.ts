@@ -703,11 +703,8 @@ export class TextView extends FileView {
       // language nothing can format: a row that can only say no is noise
       // (USER 2026-09-19). A language that a file WOULD serve keeps its row
       // and explains itself when pressed.
-      const language = this.nfeLanguage?.entry.name ?? null;
-      const extension = this.file?.extension.toLowerCase() ?? "";
-      const formatter = this.nfeDeps.vaultFormatter;
-      const format = planFormat(language, ed.canIndent(), formatter?.serves(extension) === true, formatter?.installable(extension) === true);
-      const compress = planCompress(language);
+      const format = this.nfeFormatPlan();
+      const compress = this.nfeCompressPlan();
       if (format.kind !== "none" || compress.kind !== "none") {
         nfeSubmenu(menu, t("menu.formatGroup"), "align-left", (sub) => {
           if (format.kind !== "none") sub.addItem((i) => i.setTitle(t("menu.formatCode")).setIcon("align-left").onClick(() => this.nfeFormat(format)));
@@ -772,6 +769,26 @@ export class TextView extends FileView {
       menu.addSeparator();
       item(t("menu.searchWeb", { text: menuExcerpt(selection.text) }), "globe", () => open(webSearchUrl(selection.text)));
     }
+  }
+
+  /**
+   * What Format would do to this file right now, and what Compress would.
+   * The context menu and the two commands ask the same pair, so a row that is
+   * absent from the menu is a command that declines, and neither can drift
+   * from the other. `none` means the file is read-only or nothing here can
+   * format this language.
+   */
+  nfeFormatPlan(): FormatPlan {
+    const ed = this.nfeEditor;
+    if (!ed || this.nfeEditorReadOnly) return { kind: "none" };
+    const extension = this.file?.extension.toLowerCase() ?? "";
+    const formatter = this.nfeDeps.vaultFormatter;
+    return planFormat(this.nfeLanguage?.entry.name ?? null, ed.canIndent(), formatter?.serves(extension) === true, formatter?.installable(extension) === true);
+  }
+
+  nfeCompressPlan(): FormatPlan {
+    if (!this.nfeEditor || this.nfeEditorReadOnly) return { kind: "none" };
+    return planCompress(this.nfeLanguage?.entry.name ?? null);
   }
 
   /**

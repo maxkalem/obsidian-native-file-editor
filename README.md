@@ -22,7 +22,7 @@ Files are read from their own bytes and rendered into Obsidian's DOM. There is n
 
 ## Coexistence with other plugins
 
-On load the plugin asks which extensions already have an owner and leaves those alone, with one notice naming what it left and a per-extension toggle in settings to take any of them over deliberately. `CM Code Editor` by @gapmiss does the code half well today, with more lezer grammars, folding, autocomplete and search; Native File Editor adds Office documents, fallback highlighting for extensions no grammar package covers, palettes as editable CSS, and one editor with one backup model across every file type.
+On load the plugin asks which extensions already have an owner and leaves those alone, with one notice naming what it left and a per-extension toggle in settings to take any of them over deliberately. `CM Code Editor` by @gapmiss does the code half well today, with more lezer grammars, folding, autocomplete and search; Native File Editor adds Office documents, fallback highlighting for extensions no grammar package covers, palettes as editable CSS, and one editor for every file type instead of one plugin per format.
 
 Obsidian's file explorer only lists files whose extension is registered by some plugin, or all files when "Detect all file extensions" is on in Files and links. Obsidian's own index can also keep files that a batch rename outside Obsidian removed, and a plugin registering this many extensions makes every such ghost visible; after load, two seconds after a burst of new files (what a batch rename looks like from inside) and on **Reread** the plugin compares its files with the disk and asks Obsidian to drop the ones that no longer exist (`[vault]` lines in the log).
 
@@ -84,7 +84,11 @@ The design and its limits are in [docs/ADR-004-run-code-with-user-interpreters.m
 
 ## Backups
 
-Every write to a user's file is preceded by a backup that can be restored from inside Obsidian. The backup folder lives in the vault (default `.obsidian/plugins/native-file-editor/backups/`), is configurable, and its retention is configurable with an unlimited option. Because it lives in the vault, it syncs with it; the setup guide says how to exclude it.
+Not built yet, and nothing in the plugin writes a backup today.
+
+They belong to the formats an edit can break: a Word, Excel or PowerPoint file is a ZIP archive whose parts refer to one another, so a write that patches one part wrong ruins the document, and the legacy `.doc` and `.xls` containers are worse. Those writers do not exist yet either, and neither ships before the backup does. A text file has no such failure: the editor holds the whole document, a write replaces it whole, and a failed write leaves the original in place because every write goes through a temporary file that is renamed over the target.
+
+When it arrives, the backup folder will live in the vault (default `.obsidian/plugins/native-file-editor/backups/`), be configurable, and keep a configurable number and total size of copies per file, with an unlimited option for each. Because it lives in the vault it syncs with it, and the setup guide will say how to exclude it.
 
 ## Licence
 

@@ -75,8 +75,49 @@ describe("plugin load", () => {
     expect(taken.extensions).not.toContain("log");
     expect(taken.extensions).not.toContain("md");
     expect(__notices).toEqual(["Native File Editor left .log to cm-code-editor. Take them over per extension in its settings."]);
-    expect(plugin.commands.map((c) => c.id)).toEqual(["toggle-mode", "new-file", "reload-palettes", "write-example-palette"]);
+    expect(plugin.commands.map((c) => c.id)).toEqual(["toggle-mode", "format", "compress", "new-file", "reload-palettes", "write-example-palette"]);
     expect(plugin.settingTabs).toHaveLength(1);
+  });
+
+  it("offers Format and Compress as commands with no default key, and each declines unless the active view can do it", async () => {
+    const app = makeApp({});
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, { id: "native-file-editor" } as never));
+    await plugin.onload();
+    const format = plugin.commands.find((c) => c.id === "format");
+    const compress = plugin.commands.find((c) => c.id === "compress");
+    // No `hotkeys` on either: the command exists so a key CAN be bound, and
+    // which key is the user's business (USER 2026-09-19).
+    expect("hotkeys" in (format as object)).toBe(false);
+    expect("hotkeys" in (compress as object)).toBe(false);
+
+    // Nothing active: both decline, and a decline must not act.
+    expect(format?.checkCallback?.(true)).toBe(false);
+    expect(compress?.checkCallback?.(true)).toBe(false);
+
+    // A view whose plan is `none` (a read-only pane, or a language nothing
+    // formats) declines too, exactly as the menu leaves the row out.
+    const calls: string[] = [];
+    let formatKind = "none";
+    let compressKind = "none";
+    const view = {
+      nfeFormatPlan: () => ({ kind: formatKind }),
+      nfeCompressPlan: () => ({ kind: compressKind }),
+      nfeFormat: (plan: { kind: string }) => void calls.push(`format ${plan.kind}`),
+      nfeCompress: (plan: { kind: string }) => void calls.push(`compress ${plan.kind}`),
+    };
+    (app.workspace as Record<string, unknown>).getActiveViewOfType = () => view;
+    expect(format?.checkCallback?.(false)).toBe(false);
+    expect(compress?.checkCallback?.(false)).toBe(false);
+    expect(calls).toEqual([]);
+
+    // A plan that can act: the check says yes and the run does the work once.
+    formatKind = "own";
+    compressKind = "own";
+    expect(format?.checkCallback?.(true)).toBe(true);
+    expect(calls).toEqual([]);
+    expect(format?.checkCallback?.(false)).toBe(true);
+    expect(compress?.checkCallback?.(false)).toBe(true);
+    expect(calls).toEqual(["format own", "compress own"]);
   });
 
   it("writes load, transport, self-test and claims lines to the log file after the flush delay", async () => {

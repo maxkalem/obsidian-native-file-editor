@@ -770,10 +770,23 @@ export async function writeSettingValue(key: string, value: unknown, deps: Setti
     return;
   }
   if (key === "device.runEnabled") {
-    if (typeof value === "boolean") {
-      deps.device.update({ runEnabled: value });
-      deps.refresh();
+    if (typeof value !== "boolean") return;
+    // Switching Run on is the consent to execute a file through a program on
+    // this machine, so the first time it is switched on, this device says what
+    // that means and waits for an answer (USER 2026-09-19). Declining leaves
+    // the switch off: the warning asks, it does not announce. The answer is
+    // remembered only when it was yes, so a decline asks again and an accepted
+    // device is never asked twice, however often Run is switched off and on.
+    if (value && !deps.device.get().runWarningAccepted) {
+      const accepted = await deps.confirm(t("run.warning.title"), t("run.warning.body"), t("run.warning.confirm"));
+      if (!accepted) {
+        deps.refresh();
+        return;
+      }
+      deps.device.update({ runWarningAccepted: true });
     }
+    deps.device.update({ runEnabled: value });
+    deps.refresh();
     return;
   }
   if (key === "device.runTimeoutS") {

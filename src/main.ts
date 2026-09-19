@@ -1,6 +1,8 @@
 import { type App, FileSystemAdapter, type Menu, Notice, Platform, Plugin, type TAbstractFile, TFile, TFolder, type WorkspaceLeaf, moment } from "obsidian";
 import { StreamLanguage } from "@codemirror/language";
 import {
+  COMMAND_COMPRESS,
+  COMMAND_FORMAT,
   COMMAND_NEW_FILE,
   COMMAND_RELOAD_PALETTES,
   COMMAND_RUN_FILE,
@@ -390,6 +392,36 @@ export default class NativeFileEditorPlugin extends Plugin {
         const view = this.app.workspace.getActiveViewOfType(TextView);
         if (!view) return false;
         if (!checking) void view.toggleMode();
+        return true;
+      },
+    });
+
+    // Format and Compress: a command each, with no default key (USER
+    // 2026-09-19). Obsidian binds keys to commands, so without these two the
+    // Hotkeys page has no row and nobody can bind anything; with them the
+    // choice is the user's and the plugin ships nothing bound. Each declines
+    // exactly when its menu row is absent, because both ask the same plan.
+    this.addCommand({
+      id: COMMAND_FORMAT,
+      name: t("command.format"),
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(TextView);
+        if (!view) return false;
+        const plan = view.nfeFormatPlan();
+        if (plan.kind === "none") return false;
+        if (!checking) view.nfeFormat(plan);
+        return true;
+      },
+    });
+    this.addCommand({
+      id: COMMAND_COMPRESS,
+      name: t("command.compress"),
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(TextView);
+        if (!view) return false;
+        const plan = view.nfeCompressPlan();
+        if (plan.kind === "none") return false;
+        if (!checking) view.nfeCompress(plan);
         return true;
       },
     });

@@ -31,6 +31,14 @@ export const COMMAND_WRITE_EXAMPLE_PALETTE = "write-example-palette";
 export const COMMAND_RUN_FILE = "run-file";
 export const COMMAND_STOP_RUN = "stop-run";
 
+/**
+ * Format and Compress; frozen like the others. They ship with no default key:
+ * the command exists so that a key can be bound on Obsidian's Hotkeys page,
+ * and which key that is belongs to the user. One chord, never a sequence.
+ */
+export const COMMAND_FORMAT = "format";
+export const COMMAND_COMPRESS = "compress";
+
 /** Run defaults, per device (ADR-004). */
 export const DEFAULT_RUN_TIMEOUT_MS = 30_000;
 export const DEFAULT_RUN_OUTPUT_CAP_BYTES = 1024 * 1024;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_LARGE_FILE_BYTES } from "../src/constants";
 import { chordText } from "../src/core/hotkeys";
+import { EN } from "../src/i18n/en";
 import { DEFAULT_DEVICE_STATE, DeviceLocalStore, type StorageLike, normalizeDeviceState } from "../src/settings/DeviceLocalStore";
 import { Setting, __fakeEl, __findAllByClass, __fire, __textOf } from "./mocks/obsidian";
 import type { DesktopShell } from "../src/platform/desktopShell";
@@ -327,6 +328,43 @@ describe("settings tab definitions", () => {
     await writeSettingValue("device.runTimeoutS", 5, h.deps);
     await writeSettingValue("device.runOutputCapKb", 64, h.deps);
     expect(h.device.get()).toMatchObject({ runEnabled: true, runTimeoutMs: 5000, runOutputCapBytes: 65536 });
+  });
+
+  it("warns once before Run is switched on, leaves the switch off when the warning is declined, and never asks a second time once accepted", async () => {
+    desktop = true;
+    const h = harness();
+    expect(h.device.get()).toMatchObject({ runEnabled: false, runWarningAccepted: false });
+
+    // Declined: nothing is switched on, nothing is remembered, and the tab is
+    // re-rendered so the switch goes back to off.
+    h.dialogs.confirm = false;
+    await writeSettingValue("device.runEnabled", true, h.deps);
+    expect(h.dialogs.asked).toEqual(["Run programs from this vault? | " + (EN["run.warning.body"] as string) + " | Turn on Run"]);
+    expect(h.device.get()).toMatchObject({ runEnabled: false, runWarningAccepted: false });
+    expect(h.actions).toEqual(["refresh"]);
+
+    // Asked again, because a decline is not an answer to remember.
+    h.dialogs.confirm = true;
+    await writeSettingValue("device.runEnabled", true, h.deps);
+    expect(h.dialogs.asked).toHaveLength(2);
+    expect(h.device.get()).toMatchObject({ runEnabled: true, runWarningAccepted: true });
+
+    // Off and on again on the same device: no second warning.
+    await writeSettingValue("device.runEnabled", false, h.deps);
+    await writeSettingValue("device.runEnabled", true, h.deps);
+    expect(h.dialogs.asked).toHaveLength(2);
+    expect(h.device.get()).toMatchObject({ runEnabled: true, runWarningAccepted: true });
+  });
+
+  it("the accepted warning is device-local, so a reset of this device asks again", async () => {
+    desktop = true;
+    const h = harness();
+    await writeSettingValue("device.runEnabled", true, h.deps);
+    expect(h.device.get().runWarningAccepted).toBe(true);
+    h.device.reset();
+    expect(h.device.get()).toMatchObject({ runEnabled: false, runWarningAccepted: false });
+    await writeSettingValue("device.runEnabled", true, h.deps);
+    expect(h.dialogs.asked).toHaveLength(2);
   });
 
   it("interpreters live on their own page; adding, editing and removing update device-local rows and the page count", async () => {

@@ -347,7 +347,13 @@ export const EN: Readonly<Record<string, string>> = {
   "view.run.button": "Run file",
   "view.search.close": "Close search",
 
+  "run.warning.title": "Run programs from this vault?",
+  "run.warning.body":
+    "Run starts a program on this computer and hands it the open file. The program is one you name in the interpreter list, it runs with your own account and permissions, and nothing here isolates it: it can read and change anything you can. A file you did not write can therefore do anything you could do yourself. Turn this on only for files you would run from a terminal without thinking twice.",
+  "run.warning.confirm": "Turn on Run",
+  "command.compress": "Compress",
   "command.examplePalette": "Create example palette for a language",
+  "command.format": "Format",
   "command.newFile": "New file",
   "command.reread": "Reread languages and palettes",
   "command.run": "Run file",

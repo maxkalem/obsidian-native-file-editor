@@ -27,6 +27,15 @@ export interface DeviceLocalState {
   yieldNoticeKey: string;
   /** Run (ADR-004): off until this device turns it on. */
   runEnabled: boolean;
+  /**
+   * Whether the warning before Run has been accepted on this device. It is set
+   * when the user accepts, never when they decline, so a declined switch asks
+   * again; and once accepted it stays, so switching Run off and on again is
+   * not a second interrogation. Device-local like the rest of Run's state: the
+   * warning is about this machine's interpreters, and another machine has not
+   * been warned.
+   */
+  runWarningAccepted: boolean;
   runTimeoutMs: number;
   runOutputCapBytes: number;
   /** The user's interpreters for this device, one or more per language; starts EMPTY (the sandbox and the page view need none). Paths never leave the device. */
@@ -44,6 +53,7 @@ export const DEFAULT_DEVICE_STATE: DeviceLocalState = {
   lastNewFileExtension: "txt",
   yieldNoticeKey: "",
   runEnabled: false,
+  runWarningAccepted: false,
   runTimeoutMs: DEFAULT_RUN_TIMEOUT_MS,
   runOutputCapBytes: DEFAULT_RUN_OUTPUT_CAP_BYTES,
   runners: [],
@@ -80,6 +90,7 @@ export function normalizeDeviceState(raw: unknown): DeviceLocalState {
   }
   if (typeof raw.yieldNoticeKey === "string") out.yieldNoticeKey = raw.yieldNoticeKey;
   if (typeof raw.runEnabled === "boolean") out.runEnabled = raw.runEnabled;
+  if (typeof raw.runWarningAccepted === "boolean") out.runWarningAccepted = raw.runWarningAccepted;
   if (typeof raw.runTimeoutMs === "number" && Number.isFinite(raw.runTimeoutMs) && raw.runTimeoutMs >= 1000) out.runTimeoutMs = Math.floor(raw.runTimeoutMs);
   if (typeof raw.runOutputCapBytes === "number" && Number.isFinite(raw.runOutputCapBytes) && raw.runOutputCapBytes >= 1024) out.runOutputCapBytes = Math.floor(raw.runOutputCapBytes);
   // Below version 2 the stored list was the old bundled defaults, not the user's: drop it.

@@ -1,7 +1,7 @@
 {
   "name": "native-file-editor",
   "version": "0.2.0",
-  "description": "Obsidian plugin: open and edit code, text and Office files in place, rendered from their own bytes, with no network and a backup before every write.",
+  "description": "Obsidian plugin: open and edit code, text and Office files in place, rendered from their own bytes, with no network and nothing fetched after install.",
   "main": "main.js",
   "type": "module",
   "scripts": {
