@@ -12,7 +12,10 @@
 export const EN: Readonly<Record<string, string>> = {
   // Buttons shared by rows and dialogs.
   "button.add": "Add",
+  "button.apply": "Apply",
   "button.cancel": "Cancel",
+  "button.check": "Check",
+  "button.close": "Close",
   "button.create": "Create",
   "button.ok": "OK",
   "button.reread": "Reread",
@@ -20,6 +23,7 @@ export const EN: Readonly<Record<string, string>> = {
   "button.chooseFolder": "Choose folder…",
   "button.chooseFolder.tooltip": "Pick the folder in the file explorer; the current one is created first and opened",
   "button.createExample": "Create example…",
+  "button.notNow": "Not now",
   "button.createExample.tooltip": "Pick a language; its example file is written into the folder from the plugin's own definition",
 
   // Settings: the groups, in the order the page shows them.
@@ -173,6 +177,29 @@ export const EN: Readonly<Record<string, string>> = {
   "hotkey.toggle-line-comment.meaning": "the language's line comment on the selected lines",
   "hotkey.toggle-line-comment.name": "Toggle line comment",
 
+  // The review step after Unwrap: the words it put together by dropping a
+  // hyphen, against a Hunspell dictionary the user installed.
+  "hunspell.add.tooltip": "Add {word} to the {language} dictionary of this plugin, so Unwrap decides it by itself next time",
+  "hunspell.allKnown.one": "The dictionary knows the word. Nothing to correct.",
+  "hunspell.allKnown.other": "The dictionary knows all {count} words. Nothing to correct.",
+  "hunspell.ask.desc": "Only these words are checked, and only in this file: the dictionary is read once, in pieces, and nothing of it is kept.",
+  "hunspell.ask.one": "Unwrap lines put one word back together by dropping a hyphen. Check it against the dictionary?",
+  "hunspell.ask.other": "Unwrap lines put {count} words back together by dropping a hyphen. Check them against the dictionary?",
+  "hunspell.checking": "Reading {dictionary}…",
+  "hunspell.dictionary.name": "Dictionary",
+  "hunspell.keep": "Keep",
+  "hunspell.keep.tooltip": "Leave {word} as it is",
+  "hunspell.language.desc": "Which of the plugin's own word lists the book button writes to.",
+  "hunspell.language.name": "Add to",
+  "hunspell.restore": "Restore the hyphen",
+  "hunspell.restore.tooltip": "Write {word} instead",
+  "hunspell.row.hyphenKnown": "The dictionary does not know this word, but it knows {word}.",
+  "hunspell.row.neither": "The dictionary knows neither this word nor {word}; it may be a name, or a word it does not carry.",
+  "hunspell.title": "Check against the dictionary",
+  "hunspell.unknown.desc": "A dictionary is evidence, not a verdict: a name or a rare word is unknown to it and still right.",
+  "hunspell.unknown.one": "One word the dictionary does not know.",
+  "hunspell.unknown.other": "{count} words the dictionary does not know.",
+
   // The Keys and regular expressions guide. The patterns themselves are not
   // here: a regular expression is the same in every language. The three key
   // rows that are words rather than keycaps ("Right click") are.
@@ -242,6 +269,11 @@ export const EN: Readonly<Record<string, string>> = {
   "notice.copy.done": "Copied {pattern}",
   "notice.copy.failed": "Copy failed: {error}",
   "notice.copy.noClipboard": "No clipboard here; select the pattern and copy it.",
+  "notice.dictionary.wrote": "Native File Editor: wrote {path}",
+  "notice.hunspell.changed": "The text changed while the dialog was open; nothing was corrected.",
+  "notice.hunspell.problem": "Native File Editor: {file} could not be read ({error}).",
+  "notice.hunspell.restored.one": "One hyphen put back.",
+  "notice.hunspell.restored.other": "{count} hyphens put back.",
   "notice.device.reset": "Native File Editor: device settings reset.",
   "notice.extension.invalid": "Native File Editor: an extension is letters, digits, _ + or -.",
   "notice.folder.outsideVault": "Native File Editor: the folder must be inside the vault.",

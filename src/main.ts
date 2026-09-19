@@ -20,8 +20,10 @@ import { readThemeColours } from "./ui/themeColours";
 import { BUILD_STAMP } from "./build";
 import { decideClaims, describeYielded } from "./core/claims";
 import { findStaleFiles } from "./core/staleSweep";
-import { unwrapInNote, wrapInNote } from "./core/unwrapNote";
-import { describeUnwrap } from "./fmt/unwrap";
+import { restoreInNote, unwrapInNote, wrapInNote } from "./core/unwrapNote";
+import { type RejoinedWord, describeUnwrap } from "./fmt/unwrap";
+import { type HunspellPair, checkWithHunspell, findHunspellDictionaries } from "./fmt/vaultHunspell";
+import { HunspellReviewModal } from "./ui/HunspellReviewModal";
 import { describeWrap } from "./fmt/wrap";
 import { WrapLinesModal } from "./ui/WrapLinesModal";
 import { Logger, describeError } from "./core/log";
@@ -265,6 +267,7 @@ export default class NativeFileEditorPlugin extends Plugin {
         // plugin itself sends nothing; the one line in the log says when.
         dateTime: () => this.dateTimeNow(),
         addToDictionary: (word, language) => this.openAddToDictionary(word, language),
+        reviewJoins: (joins, apply) => void this.offerHunspellReview(joins, apply),
         openExternal: (url) => {
           log.info("view", `opening the browser for a web search (${url.length} chars)`);
           window.open(url);
@@ -420,7 +423,11 @@ export default class NativeFileEditorPlugin extends Plugin {
           item
             .setTitle(t("menu.note.unwrap"))
             .setIcon("unfold-horizontal")
-            .onClick(() => new Notice(describeUnwrap(unwrapInNote(editor))))
+            .onClick(() => {
+              const result = unwrapInNote(editor);
+              new Notice(describeUnwrap(result));
+              if (result.rejoined.length > 0) void this.offerHunspellReview(result.rejoined, (restore) => restoreInNote(editor, result.text, restore));
+            })
         );
         menu.addItem((item) =>
           item
@@ -632,6 +639,40 @@ export default class NativeFileEditorPlugin extends Plugin {
   }
 
   /** "Add to dictionary…": the dialog, then the word into the file of the kind it chose, then that folder reread. */
+  /**
+   * The review step after Unwrap (open item 21). A Hunspell dictionary is the
+   * user's own file, copied into the dictionary folder by hand; when none is
+   * there, nothing is offered and nothing is said, because most people have
+   * none. When one is, the dialog asks before reading it: the file is several
+   * megabytes and belongs to the user.
+   */
+  private async offerHunspellReview(joins: readonly RejoinedWord[], apply: (restore: readonly RejoinedWord[]) => boolean): Promise<void> {
+    let dictionaries: HunspellPair[];
+    try {
+      dictionaries = await findHunspellDictionaries(this.nfeTransport, this.dictionaryFolder());
+    } catch (e) {
+      this.nfeLog.warn("hunspell", `looking for .dic files in ${this.dictionaryFolder()} failed: ${describeError(e)}`);
+      return;
+    }
+    if (dictionaries.length === 0) return;
+    new HunspellReviewModal(this.app, {
+      joins,
+      dictionaries,
+      check: (pair, words) => checkWithHunspell({ transport: this.nfeTransport, pair, words, log: this.nfeLog }),
+      textLanguages: () => allTextLanguageNames(),
+      onApply: (restore) => {
+        if (restore.length === 0) return;
+        if (apply(restore)) new Notice(plural(restore.length, "notice.hunspell.restored.one", "notice.hunspell.restored.other"));
+        else new Notice(t("notice.hunspell.changed"));
+      },
+      onAddWord: (word, language) => void this.addWordToVault({ kind: "text", language, word }),
+      onProblem: (file, error) => {
+        this.nfeLog.warn("hunspell", `${file}: ${error}`);
+        new Notice(t("notice.hunspell.problem", { file, error }), 8000);
+      },
+    }).open();
+  }
+
   openAddToDictionary(word: string, language: string | null): void {
     new AddToDictionaryModal(this.app, {
       word,
@@ -679,7 +720,7 @@ export default class NativeFileEditorPlugin extends Plugin {
       }
       if (!this.nfeSettings.customDictionaries) await this.saveSettings({ ...this.nfeSettings, customDictionaries: true });
       await this.loadDictionaries();
-      new Notice(`Native File Editor: wrote ${path}`);
+      new Notice(t("notice.dictionary.wrote", { path }));
     } catch (e) {
       this.nfeLog.error("dictionaries", `example for ${language} failed`, e);
       new Notice(t("notice.dictionary.exampleFailed", { error: e instanceof Error ? e.message : String(e) }));

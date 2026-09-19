@@ -7,7 +7,7 @@ import type { Logger } from "../core/log";
 import { type ViewMode, decideOpenMode } from "../core/openMode";
 import { OBSIDIAN_SCHEME_CLASS } from "../highlight/highlighter";
 import { type ResolvedLanguage, isProseLanguage, languageFor, resolveLanguage } from "../highlight/registry";
-import { DEFAULT_UNWRAP_OPTIONS, type UnwrapResult, describeUnwrap, unwrapLines } from "../fmt/unwrap";
+import { DEFAULT_UNWRAP_OPTIONS, type RejoinedWord, type UnwrapResult, describeUnwrap, restoreHyphens, unwrapLines } from "../fmt/unwrap";
 import { type WrapResult, describeWrap, wrapLines } from "../fmt/wrap";
 import { type WrapChoice, WrapLinesModal } from "./WrapLinesModal";
 import {
@@ -82,6 +82,13 @@ export interface TextViewDeps {
   readonly dateTime?: () => { date: string; dateTime: string };
   /** "Add to dictionary…" in the context menu: the plugin opens the dialog for this word. Absent, the item is not offered. */
   readonly addToDictionary?: (word: string, language: string | null) => void;
+  /**
+   * After Unwrap put words back together by dropping a hyphen: the plugin
+   * offers to check those words against a Hunspell dictionary, when the user
+   * installed one. `apply` puts the hyphens back into the same region and
+   * answers whether the text was still the one Unwrap had left.
+   */
+  readonly reviewJoins?: (joins: readonly RejoinedWord[], apply: (restore: readonly RejoinedWord[]) => boolean) => void;
   /**
    * The read-only modal's "Create UTF-8 copy": whether a vault path is taken,
    * and the write that makes Obsidian index the new file at once. The view
@@ -750,6 +757,14 @@ export class TextView extends FileView {
       return result.text;
     });
     new Notice(describeUnwrap(result));
+    // The one decision Unwrap cannot always take from the text itself is
+    // whether a hyphen at a line end belonged to the word. Where it dropped
+    // one, a dictionary in the vault can be asked, and the plugin offers it.
+    const review = this.nfeDeps.reviewJoins;
+    const done = result as UnwrapResult | null;
+    if (review && done !== null && done.rejoined.length > 0) {
+      review(done.rejoined, (restore) => ed.transformLines((text) => (text === done.text ? restoreHyphens(text, restore) : null)));
+    }
   }
 
   /** t("menu.wrap") after the modal: the long lines of the selection (or the file) cut at the chosen width, one undo step, a notice with the count. */

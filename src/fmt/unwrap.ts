@@ -51,12 +51,32 @@ export interface UnwrapOptions {
   readonly lexicon?: HyphenLexicon;
 }
 
+/**
+ * A word Unwrap put back together by dropping the hyphen at a line end. It is
+ * the one decision Unwrap makes that a text cannot always settle (a compound
+ * noun and a split word look alike), so the review step against a Hunspell
+ * dictionary asks about exactly these words, and `hyphenAt` is where the
+ * hyphen goes back if the answer is that the word wants it.
+ */
+export interface RejoinedWord {
+  /** The word as it now stands: `ньюйоркської`. */
+  readonly word: string;
+  /** The same word with the hyphen kept: `нью-йоркської`. */
+  readonly hyphenated: string;
+  /** Where the word starts in the result text. */
+  readonly at: number;
+  /** Where the hyphen was, in the result text: putting one character back at this offset restores `hyphenated`. */
+  readonly hyphenAt: number;
+}
+
 export interface UnwrapResult {
   readonly text: string;
   /** How many line breaks were removed. */
   readonly joined: number;
   /** How many of those dropped a hyphen that split a word (only with `joinHyphens`). */
   readonly dehyphenated: number;
+  /** Those words, in the order they appear in the result. */
+  readonly rejoined: readonly RejoinedWord[];
   /** The wrap width the text was measured at, or null when nothing looked hard-wrapped. */
   readonly width: number | null;
   /** Why nothing was joined although lines were there; null when something was, or when there was nothing to measure. */
@@ -117,6 +137,9 @@ const LETTERS_AFTER = /^\s*(\p{L}+)/u;
 const LOWERCASE_START = /^\s*\p{Ll}/u;
 /** A word, with the hyphens that belong to it: what the evidence of the text is counted over. A hyphen at a line end is followed by a break, so it never joins a token. */
 const WORD_TOKEN = /[\p{L}\p{N}]+(?:[-‐‑][\p{L}\p{N}]+)*/gu;
+/** The word a joined line ends with, and the one the next begins with, inner hyphens kept: what the review step asks the dictionary about. */
+const WORD_BEFORE = /[\p{L}\p{N}]+(?:[-‐‑][\p{L}\p{N}]+)*$/u;
+const WORD_AFTER = /^[\p{L}\p{N}]+(?:[-‐‑][\p{L}\p{N}]+)*/u;
 /** A part must be this common at the start or the end of the text's other hyphenated words before it decides a hyphen on its own. */
 const EVIDENCE_PART_WORDS = 2;
 /** Latin vowels, including the Nordic and German ones: a hyphen between two identical vowels is spelling, not a line break (linja-auto, re-elect). */
@@ -421,6 +444,20 @@ export function hyphenAttachment(line: string, next: string, context: HyphenCont
 }
 
 /** The notice after the command: what was joined, or why nothing was. */
+/**
+ * The text with the hyphen put back at each of these joins. The places are
+ * applied from the end, so the offsets recorded against the unwrapped text
+ * still hold while it grows.
+ */
+export function restoreHyphens(text: string, restore: readonly RejoinedWord[]): string {
+  let out = text;
+  for (const join of [...restore].sort((a, b) => b.hyphenAt - a.hyphenAt)) {
+    if (join.hyphenAt < 0 || join.hyphenAt > out.length) continue;
+    out = `${out.slice(0, join.hyphenAt)}-${out.slice(join.hyphenAt)}`;
+  }
+  return out;
+}
+
 export function describeUnwrap(result: UnwrapResult | null): string {
   if (result === null || result.width === null) return t("notice.unwrap.none");
   if (result.refused === "not-prose") return t("notice.unwrap.notProse", { width: result.width });
@@ -450,10 +487,10 @@ export function unwrapLines(text: string, options: UnwrapOptions = DEFAULT_UNWRA
   const lines = text.split(/\r\n|\n/);
   const protectedLine = protectedLines(lines, options);
   const measured = measureWrapWidth(lines, protectedLine);
-  if (measured === null) return { text, joined: 0, dehyphenated: 0, width: null, refused: null };
+  if (measured === null) return { text, joined: 0, dehyphenated: 0, rejoined: [], width: null, refused: null };
   const width = measured.width;
   const { next } = partners(lines, protectedLine);
-  if (!looksLikeProse(lines, protectedLine, next, width, options.selection === true)) return { text, joined: 0, dehyphenated: 0, width, refused: "not-prose" };
+  if (!looksLikeProse(lines, protectedLine, next, width, options.selection === true)) return { text, joined: 0, dehyphenated: 0, rejoined: [], width, refused: "not-prose" };
 
   // The words of the document are read once, not once per hyphen, and from the
   // whole document even when only a selection is being joined.
@@ -464,6 +501,12 @@ export function unwrapLines(text: string, options: UnwrapOptions = DEFAULT_UNWRA
   };
 
   const out: string[] = [];
+  const rejoined: RejoinedWord[] = [];
+  // Where the pieces of the paragraph being built land once it is pushed: a
+  // join is recorded against the paragraph, and only the push knows the
+  // paragraph's own offset in the result.
+  let pending: Array<{ word: string; hyphenated: string; at: number; hyphenAt: number }> = [];
+  let written = 0;
   let joined = 0;
   let dehyphenated = 0;
   // The paragraph being built, and how the coming line attaches to it.
@@ -476,8 +519,16 @@ export function unwrapLines(text: string, options: UnwrapOptions = DEFAULT_UNWRA
     const line = lines[i] ?? "";
     let piece: string;
     if (current === null) piece = line;
-    else if (attach === "dehyphenate") piece = tidy(current).replace(HYPHEN_TAIL, "") + incoming(line);
-    else if (attach === "hyphen") piece = tidy(current) + incoming(line);
+    else if (attach === "dehyphenate") {
+      const left = tidy(current).replace(HYPHEN_TAIL, "");
+      const right = incoming(line);
+      piece = left + right;
+      const before = WORD_BEFORE.exec(left)?.[0] ?? "";
+      const after = WORD_AFTER.exec(right)?.[0] ?? "";
+      if (before.length > 0 && after.length > 0) {
+        pending.push({ word: before + after, hyphenated: `${before}-${after}`, at: left.length - before.length, hyphenAt: left.length });
+      }
+    } else if (attach === "hyphen") piece = tidy(current) + incoming(line);
     else piece = tidy(current) + " " + incoming(line);
     const j = next[i] ?? -1;
     if (j >= 0 && shouldJoin(line, lines[j] ?? "", measured)) {
@@ -490,9 +541,13 @@ export function unwrapLines(text: string, options: UnwrapOptions = DEFAULT_UNWRA
       i = j;
       continue;
     }
-    out.push(current === null ? line : piece);
+    const pushed = current === null ? line : piece;
+    out.push(pushed);
+    for (const join of pending) rejoined.push({ word: join.word, hyphenated: join.hyphenated, at: written + join.at, hyphenAt: written + join.hyphenAt });
+    pending = [];
+    written += pushed.length + eol.length;
     current = null;
     i++;
   }
-  return { text: out.join(eol), joined, dehyphenated, width, refused: null };
+  return { text: out.join(eol), joined, dehyphenated, rejoined, width, refused: null };
 }

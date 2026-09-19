@@ -14,6 +14,12 @@ import {
  * file is part of the one main.js that also runs on a phone, where `require`
  * does not exist.
  */
+/** The part of Node's `FileHandle` the chunked read uses. */
+export interface FileHandle {
+  read(buffer: Uint8Array, offset: number, length: number, position: number | null): Promise<{ bytesRead: number }>;
+  close(): Promise<void>;
+}
+
 export interface NodeModules {
   fs: {
     promises: {
@@ -23,6 +29,7 @@ export interface NodeModules {
       unlink(path: string): Promise<void>;
       readdir(path: string, options: { withFileTypes: true }): Promise<Array<{ name: string; isFile(): boolean; isDirectory(): boolean }>>;
       mkdir(path: string, options: { recursive: true }): Promise<string | undefined>;
+      open(path: string, flags: string): Promise<FileHandle>;
     };
   };
   path: {
@@ -77,6 +84,39 @@ export class DesktopTransport implements Transport {
       if (code === "ENOENT") throw new TransportError("not-found", `File not found: ${vaultPath}`, vaultPath, e);
       if (code === "EISDIR") throw new TransportError("not-a-file", `Not a file: ${vaultPath}`, vaultPath, e);
       throw new TransportError("read-failed", `Cannot read ${vaultPath}`, vaultPath, e);
+    }
+  }
+
+  /**
+   * The file in pieces, through one file handle, so a dictionary of several
+   * megabytes never exists in memory as a whole. Each chunk is a fresh buffer,
+   * because the caller keeps nothing and a reused one would be overwritten
+   * under an asynchronous reader.
+   */
+  async readChunks(vaultPath: string, chunkSize: number, onChunk: (bytes: Uint8Array) => boolean | Promise<boolean>): Promise<void> {
+    const size = Math.max(1, Math.floor(chunkSize));
+    let handle: FileHandle;
+    try {
+      handle = await this.node.fs.promises.open(this.absolute(vaultPath), "r");
+    } catch (e) {
+      const code = errnoCode(e);
+      if (code === "ENOENT") throw new TransportError("not-found", `File not found: ${vaultPath}`, vaultPath, e);
+      if (code === "EISDIR") throw new TransportError("not-a-file", `Not a file: ${vaultPath}`, vaultPath, e);
+      throw new TransportError("read-failed", `Cannot read ${vaultPath}`, vaultPath, e);
+    }
+    try {
+      let position = 0;
+      for (;;) {
+        const buffer = new Uint8Array(size);
+        const { bytesRead } = await handle.read(buffer, 0, size, position);
+        if (bytesRead <= 0) return;
+        position += bytesRead;
+        if ((await onChunk(bytesRead === size ? buffer : buffer.subarray(0, bytesRead))) === false) return;
+      }
+    } catch (e) {
+      throw new TransportError("read-failed", `Cannot read ${vaultPath}`, vaultPath, e);
+    } finally {
+      await handle.close().catch(() => undefined);
     }
   }
 

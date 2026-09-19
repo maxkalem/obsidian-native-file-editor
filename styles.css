@@ -865,3 +865,14 @@
   color: var(--text-warning);
   font-size: var(--font-ui-small);
 }
+
+/* The review after Unwrap: one row per word the dictionary does not know, the
+   word itself first, so a list of twenty is read down the left edge. */
+.nfe-modal.nfe-hunspell {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.nfe-modal.nfe-hunspell .nfe-hunspell-row .setting-item-name {
+  font-family: var(--font-monospace);
+}

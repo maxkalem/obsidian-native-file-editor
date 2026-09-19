@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_UNWRAP_OPTIONS, describeUnwrap, measureWrapWidth, unwrapLines } from "../src/fmt/unwrap";
+import { DEFAULT_UNWRAP_OPTIONS, describeUnwrap, restoreHyphens, measureWrapWidth, unwrapLines } from "../src/fmt/unwrap";
 import { buildLexicon } from "../src/fmt/dictionary";
 
 // A book annotation as a PDF hands it over: a page number, a title and a
@@ -452,5 +452,35 @@ describe("the hyphen decision: the text first, the dictionaries second, the rule
     const document = [...body, selection, "A zog-lin was seen."].join("\n");
     expect(unwrapLines(selection, { ...DEFAULT_UNWRAP_OPTIONS, selection: true }).text.includes("zoglin,")).toBe(true);
     expect(unwrapLines(selection, { ...DEFAULT_UNWRAP_OPTIONS, selection: true, evidenceText: document }).text.includes("zog-lin,")).toBe(true);
+  });
+});
+
+describe("the words Unwrap put back together", () => {
+  const body = wrap(PARAGRAPH_A).slice(0, -1);
+  const doc = (last: string, next: string) => [...body, last, next, "And the paragraph is finished here."].join("\n");
+
+  it("names each one, with the hyphen's place in the result, so the review step can put it back", () => {
+    const result = unwrapLines(doc("he had learned since then, and it was not much, but it was непере-", "носимой, as the saying goes, and the paragraph runs on to its end."));
+    expect(result.rejoined).toHaveLength(result.dehyphenated);
+    const join = result.rejoined[0];
+    expect(join?.word).toBe("непереносимой");
+    expect(join?.hyphenated).toBe("непере-носимой");
+    // The offsets are into the text Unwrap produced, not into the original.
+    expect(result.text.slice(join?.at, (join?.at ?? 0) + (join?.word.length ?? 0))).toBe("непереносимой");
+    expect(restoreHyphens(result.text, result.rejoined).includes("непере-носимой,")).toBe(true);
+  });
+
+  it("says nothing about a hyphen it kept, or about a join that needed none", () => {
+    expect(unwrapLines(doc("he had learned since then, and it was not much, but it was кое-", "что, as the saying goes, and the paragraph runs on to its end.")).rejoined).toEqual([]);
+    expect(unwrapLines([...body, "a plain line that simply goes on", "into the next one without any hyphen at all."].join("\n")).rejoined).toEqual([]);
+  });
+
+  it("counts the places in a text with several, each against its own paragraph", () => {
+    const first = ["he had learned since then, and it was not much, but it was непере-", "носимой, as the saying goes, and the paragraph runs on to its end."];
+    const second = ["another paragraph of the same book that was set by the same обыкно-", "венный printer with the same habits, and it runs on to its own end."];
+    const result = unwrapLines([...body, ...first, "", ...second].join("\n"));
+    expect(result.rejoined.map((r) => r.word)).toEqual(["непереносимой", "обыкновенный"]);
+    for (const join of result.rejoined) expect(result.text.slice(join.at, join.at + join.word.length)).toBe(join.word);
+    expect(restoreHyphens(result.text, result.rejoined)).toContain("обыкно-венный");
   });
 });

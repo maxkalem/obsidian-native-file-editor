@@ -1,5 +1,5 @@
 import type { Editor, EditorPosition } from "obsidian";
-import { DEFAULT_UNWRAP_OPTIONS, type UnwrapResult, unwrapLines } from "../fmt/unwrap";
+import { DEFAULT_UNWRAP_OPTIONS, type RejoinedWord, type UnwrapResult, restoreHyphens, unwrapLines } from "../fmt/unwrap";
 import { DEFAULT_WRAP_OPTIONS, type WrapResult, wrapLines } from "../fmt/wrap";
 
 /**
@@ -39,6 +39,22 @@ export function transformNoteLines<T extends { readonly text: string }>(editor: 
 
 export function unwrapInNote(editor: NoteEditor): UnwrapResult {
   return transformNoteLines(editor, (text, atDocumentStart, selection, document) => unwrapLines(text, { ...DEFAULT_UNWRAP_OPTIONS, markdown: true, atDocumentStart, selection, evidenceText: document }));
+}
+
+/**
+ * The review step's fix inside a note: the hyphens go back into the text
+ * Unwrap left, as a second edit and so a second undo step. The text is
+ * compared with what Unwrap produced first, because the dialog was open while
+ * the user could type: a changed text is left alone and the caller says so.
+ */
+export function restoreInNote(editor: NoteEditor, produced: string, restore: readonly RejoinedWord[]): boolean {
+  let applied = false;
+  transformNoteLines(editor, (text) => {
+    if (text !== produced) return { text };
+    applied = true;
+    return { text: restoreHyphens(text, restore) };
+  });
+  return applied;
 }
 
 export function wrapInNote(editor: NoteEditor, width: number, breakWords: boolean): WrapResult {

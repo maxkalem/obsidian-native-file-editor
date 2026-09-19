@@ -17,7 +17,8 @@ src/
     text/              bytes to text and back: BOM, encoding, line endings
   format/              readers and minimal-patch writers per format, pure (also MIT-licensed)
   fmt/                 text and code formatting commands, pure (Unwrap and Wrap lines; Format and Compress to come): not a file format, so not under format/
-                       with the text-language dictionaries: the bundled word lists, the lexicon and the vault folder loader
+                       with the text-language dictionaries: the bundled word lists, the lexicon and the vault folder loader,
+                       and the Hunspell reader (hunspell.ts, vaultHunspell.ts) the review step after Unwrap looks words up with
   platform/            the transport: the only code that knows whether it runs on a phone
   highlight/           the language registry (four tiers), the token table, the highlighter, the Obsidian-fork adapter,
                        the generic keyword mode with the Notepad++ tables (generated) and the vault language loader
@@ -31,7 +32,7 @@ A view never sees bytes: it hands them to the text model and gets text and a des
 
 ## The transport
 
-`platform/transport.ts` is the interface: `readBinary`, `writeBinaryAtomic`, `inflateRaw`, `deflateRaw`, `listDir`, `mkdir`. `desktop.ts` uses Node's `fs` and `zlib` through Electron's `require`, resolved lazily so the same `main.js` loads on a phone. `mobile.ts` uses the vault adapter and the Web Streams compression API. `select.ts` picks one at load, and the choice is a pure function a test can ask.
+`platform/transport.ts` is the interface: `readBinary`, `writeBinaryAtomic`, `inflateRaw`, `deflateRaw`, `listDir`, `mkdir`, and the optional `readChunks` for a file too large to want whole (a Hunspell dictionary is 8.5 MB): the desktop transport reads it through one file handle, and where the method is missing the caller falls back to `readBinary`. `desktop.ts` uses Node's `fs` and `zlib` through Electron's `require`, resolved lazily so the same `main.js` loads on a phone. `mobile.ts` uses the vault adapter and the Web Streams compression API. `select.ts` picks one at load, and the choice is a pure function a test can ask.
 
 Writes go to a dot-prefixed sibling temp file that is then renamed over the target, so a write that fails midway leaves the original in place and Obsidian's file index never sees the temp file. Whether the mobile adapter's rename replaces an existing file is not documented; when it refuses, the mobile transport overwrites the target directly and only then removes the temp file, so the complete new bytes survive beside the original if that overwrite fails.
 
@@ -78,6 +79,12 @@ The highlighter matches tags by name (`"keyword"`, `"definition(variableName)"`)
 Two traps are worth naming. A hard-wrapped text contains its own split parts as ordinary words, so "does this part exist on its own?" proves nothing and only the joined and the intact forms are evidence. And a capital before the hyphen is no sign of a name: in a wrapped text a sentence usually starts mid-line, so the capital says nothing at all.
 
 `fmt/vaultDictionaries.ts` reads the dictionaries folder through the transport, exactly as the language loader reads its own: a file named after a bundled language extends it, `"replace": true` replaces it, another name adds a text language, and what the folder holds is put in force with `setVaultDictionaries` at load and on every Reread. Behind the shared switch `customDictionaries`; off, the bundled lists alone apply. Nothing is written unasked: "Create example…" writes one bundled dictionary as a file to edit, and "Add to dictionary…" (`ui/AddToDictionaryModal.ts`, the word from `core/words.ts`) writes one word into the file of the kind the dialog picked — `addWordToDictionary` for a text language, `addWordToLanguage` for a keyword table — starting the file from the bundled definition when the folder has none, so nothing the plugin knew is lost by editing.
+
+## A Hunspell dictionary is a place to look things up, never a word list in memory
+
+The user's design (2026-09-18): "нічого не тримати в пам'яті. словник це місце ревью." So `fmt/hunspell.ts` never builds a set of words. The entries of a `.dic` are lemmas with affix flags (`попередній/j+`), so the lookup goes the way a spell checker's does, backwards: `parseAff` reads the `.aff`'s `SET`, `FLAG`, `IGNORE` and its SFX/PFX tables, `candidateStems` reverses those rules into a handful of stems for one word — one suffix off, one prefix off, and a prefix over a suffix when both rules allow it, each with the flag (or the pair of flags) the entry would have to carry — and `HunspellScan` is fed the file in chunks and answers only "is this line one of the candidates". `fmt/vaultHunspell.ts` finds the `.dic`/`.aff` pairs in the dictionary folder, decodes by the `.aff`'s own encoding (`TextDecoder` with `{ stream: true }`, so a chunk may cut a character in half), and stops as soon as every word is answered. Measured on the user's files: 335 359 entries and 8.5 MB in about 360 ms, 62 119 entries in 36 ms, with 13 to 25 candidate stems per word.
+
+Only the words Unwrap made by dropping a hyphen go to it, with both forms at once — `ньюйоркської` and `нью-йоркської` — because the interesting answer is that the dictionary knows the second and not the first. `unwrapLines` reports those words with the offset of the hyphen it removed (`RejoinedWord`), `ui/HunspellReviewModal.ts` asks before reading anything and shows what the dictionary did not know, and `restoreHyphens` writes the chosen hyphens back as a second edit, from the end so the offsets hold. Nothing is corrected unasked, because a dictionary does not know names and the reader does not do compound rules.
 
 ## Palettes are files in the vault, applied as one stylesheet
 

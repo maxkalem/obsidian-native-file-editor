@@ -27,6 +27,14 @@ export interface Transport {
   listDir(vaultPath: string): Promise<DirectoryListing>;
   /** Creates the folder and every missing parent; an existing folder is not an error. */
   mkdir(vaultPath: string): Promise<void>;
+  /**
+   * The file in pieces, for something too large to want in memory at once: a
+   * Hunspell dictionary is 8.5 MB and is read to answer a dozen words.
+   * `onChunk` returning false stops the read. Optional, because only a
+   * platform with real file handles can do it; where it is missing the caller
+   * falls back to `readBinary` and says so in the log.
+   */
+  readChunks?(vaultPath: string, chunkSize: number, onChunk: (bytes: Uint8Array) => boolean | Promise<boolean>): Promise<void>;
 }
 
 export type TransportErrorCode =
