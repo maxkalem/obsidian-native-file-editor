@@ -52,6 +52,12 @@ export interface SharedSettings {
   customDictionaries: boolean;
   /** Custom file types: lower-case extension -> the registry language name that opens it. */
   customExtensions: Record<string, string>;
+  /**
+   * SHA-256 hashes of formatter files the user confirmed by hand (ADR-005).
+   * A hash, never a file name: a file that changes is refused again. Shared
+   * through data.json, so a confirmation on one device carries to the next.
+   */
+  trustedFormatters: string[];
 }
 
 export const DEFAULT_SETTINGS: SharedSettings = {
@@ -74,6 +80,7 @@ export const DEFAULT_SETTINGS: SharedSettings = {
   dictionaryFolder: "",
   customDictionaries: false,
   customExtensions: {},
+  trustedFormatters: [],
 };
 
 /** A vault folder setting, cleaned, or the default `<subfolder>` under the plugin folder. */
@@ -126,6 +133,9 @@ export function normalizeSettings(raw: unknown): SharedSettings {
   if (typeof raw.customLanguages === "boolean") out.customLanguages = raw.customLanguages;
   if (typeof raw.dictionaryFolder === "string" && !raw.dictionaryFolder.includes("..")) out.dictionaryFolder = raw.dictionaryFolder.trim();
   if (typeof raw.customDictionaries === "boolean") out.customDictionaries = raw.customDictionaries;
+  if (Array.isArray(raw.trustedFormatters)) {
+    out.trustedFormatters = raw.trustedFormatters.filter((h): h is string => typeof h === "string" && /^[0-9a-f]{64}$/.test(h));
+  }
   if (isRecord(raw.customExtensions)) {
     for (const [ext, name] of Object.entries(raw.customExtensions)) {
       if (typeof name === "string" && name.trim().length > 0 && /^[a-z0-9_+-]+$/i.test(ext)) out.customExtensions[ext.toLowerCase()] = name.trim();

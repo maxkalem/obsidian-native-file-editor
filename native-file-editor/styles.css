@@ -809,6 +809,23 @@
   margin-top: var(--size-4-4);
 }
 
+/* "No formatter for this language": the file names to copy, and where they go. */
+.nfe-modal.nfe-formatter-missing .nfe-formatter-files {
+  margin: var(--size-4-2) 0;
+  padding-left: var(--size-4-5);
+}
+
+.nfe-modal.nfe-formatter-missing .nfe-formatter-files li {
+  margin: var(--size-2-1) 0;
+}
+
+/* The path is one long unbroken token; let it wrap rather than widen the dialog. */
+.nfe-modal.nfe-formatter-missing .nfe-formatter-folder {
+  display: block;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
 /* New-file modal: name and extension side by side, stacked on a narrow screen. */
 .nfe-modal .nfe-newfile-row {
   display: flex;

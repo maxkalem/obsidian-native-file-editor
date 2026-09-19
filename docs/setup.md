@@ -70,6 +70,26 @@ The file is read in pieces and the reading stops as soon as every word is answer
 
 `prefixes` and `suffixes` are written without the hyphen. A word in `words` that has a hyphen is kept as it is; one without a hyphen says "this word exists", so a line end that split it is joined back. Everything is matched without case. A file named after a bundled language adds to it; `"replace": true` replaces it; any other name is a language of its own. `keepSameVowel` extends the rule that keeps a hyphen between two identical vowels to scripts other than the Latin one. All the dictionaries apply together, whatever the language of the text, so an entry should name a real hyphenated form rather than a syllable that ordinary words begin with. The decision reads the text itself first — a word the document writes out in full elsewhere decides its own case — and the lists answer what the text does not show. The log's `[dictionaries]` line names what each file did, or why it did not load.
 
+## Format and Compress, and the formatter you install by hand
+
+The context menu of the editor has a **Format ▸** group beside **Case ▸** (the submenu that changes the case of the selection, which used to be called Format). Inside it are **Format** and **Compress**, and only the ones that can do something: a language nothing can format has no group at all, and a language only the plugin's own formatter serves has Format without Compress.
+
+One entry is there before it works: a language one of the files in `formatters/` would format keeps its **Format** row even when nothing is installed, and pressing it opens a dialog with the file names, the folder they go into and a button to the instruction. The same dialog explains a file that is there and failed to load.
+
+Without anything installed, Format is two things: the plugin's own JSON formatter (which keeps the comments, the order of the keys and the spelling of every number, and whose Compress removes the whitespace and turns a `//` comment into a `/* */` one so nothing is swallowed), and CodeMirror's indentation for every language whose mode provides it — measured over the 171 code fixtures, that is about 49 languages properly, and the menu asks the open file rather than a table. The indent it formats with is the file's own, read from its lines; the editor's tab setting is only the fallback for a file that cannot say, which is what Visual Studio Code does too.
+
+For everything else there is prettier, which this plugin does not bundle and never downloads. Copy the files you want out of the repository's `formatters/prettier/` (its `manifest.json` says which version that is) into
+
+```
+<vault>/.obsidian/plugins/native-file-editor/formatters/
+```
+
+`standalone.js` is always needed; then `estree.js` + `babel.js` for JavaScript, JSX and JSON, `estree.js` + `typescript.js` for TypeScript, `postcss.js` for CSS, SCSS and Less, `html.js` for HTML and Vue, `markdown.js`, `yaml.js`, `graphql.js`. Ten more languages come from `formatters/extra/`, where community plugins are bundled into one file each by `scripts/build-formatter.mjs`: `php.js`, `xml.js`, `sql.js`, `svelte.js`, `gherkin.js`, `liquid.js`, `jinja.js`, `nginx.js`, `properties.js`, `ini.js`. Everything goes straight into the one `formatters/` folder, without subfolders. CSS alone costs 237 KB; all of it, 6.7 MB. The plugin reads the folder at start and on Reread — the names only — and reads and evaluates a file the moment Format is pressed, then drops it: about 60 ms, nothing held in between, the same on the desktop and on the phone.
+
+`formatters/README.md` has the table of every language, with the files and the sizes; `scripts/formatter-languages.mjs` prints it from the files themselves.
+
+Each file is checked before it runs: its text is hashed with SHA-256 and compared with the builds the repository ships, and the very text that was hashed is the text that runs. A file that is not one of them is not executed; a dialog names it and its hash and runs it only if you say you put it there yourself, which is remembered for that exact file and refused again once it changes. Only the file names in the table above are ever read; anything else in the folder is named in `nfe.log` and ignored, and the language, dictionary and palette folders are never read as code at all. `docs/ADR-005-formatter-from-the-plugin-folder.md` has the reasoning and `formatters/README.md` the table.
+
 ## Palettes
 
 Settings, Palettes, **Use custom palettes**; the folder row appears with the same buttons. **Create example…** asks for a language and writes `<Language>_light.css` and `<Language>_dark.css` from the theme's own colours: working palettes that change nothing until edited. Edit a value, press **Reread** (or save the file from inside the plugin, which rereads by itself). A Notepad++ theme from `Notepad++\themes\` or a CodeMirror theme module dropped into the folder works as it is; name it `<Language>_dark.xml` to limit it to one language and theme, or leave the name as it is for every file. The README says how names are read.

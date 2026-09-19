@@ -1,0 +1,56 @@
+{
+  "what": "prettier plugins for languages prettier itself does not cover, bundled into one self-contained file each by scripts/build-formatter.mjs (esbuild, with tiny fs and path shims). Built against prettier 3.9.8; the loader answers require(\"prettier\"), require(\"prettier/standalone\"), require(\"prettier/doc\") and require(\"prettier/plugins/<file already loaded>\"), and refuses everything else.",
+  "built": "2026-09-19",
+  "files": {
+    "gherkin.js": {
+      "from": "prettier-plugin-gherkin 3.1.2",
+      "sha256": "55fcf3337e9c15deeff889fd463acc7b405641942035e275fb8e2842e15d27ed",
+      "bytes": 210289
+    },
+    "ini.js": {
+      "from": "prettier-plugin-ini 1.3.0",
+      "sha256": "54ef1f45802a337b960a1f9b7bd3f0fa2f527c1853a7a3a02294e1037bd39362",
+      "bytes": 4791
+    },
+    "jinja.js": {
+      "from": "prettier-plugin-jinja-template 2.1.0",
+      "sha256": "0130158764fd27f6b356fcabdab74dc2cc2ac8e55197993f2e83a814bfb8852a",
+      "bytes": 8075
+    },
+    "liquid.js": {
+      "from": "@shopify/prettier-plugin-liquid 1.9.3",
+      "sha256": "3c90821c4529f8604d840e4cabd2c21256ebc7cad77626fffe7a50d23bb4168e",
+      "bytes": 186737
+    },
+    "nginx.js": {
+      "from": "prettier-plugin-nginx 2.0.0",
+      "sha256": "6612b7b4bf672ad3a42fead504b9fbacc7aaed753ddf7869eba52868737b21f3",
+      "bytes": 13311
+    },
+    "php.js": {
+      "from": "@prettier/plugin-php 0.25.0",
+      "sha256": "6ddfb8eac6bde004f30948760d35c6878ed91b9b7e75a3e883a020ee5d83bdfb",
+      "bytes": 169225
+    },
+    "properties.js": {
+      "from": "prettier-plugin-properties 0.3.1",
+      "sha256": "13a68205fc90636b27d2d072ab1f5f41872f39bb4341c2a818e7e1288d0c3b59",
+      "bytes": 7130
+    },
+    "sql.js": {
+      "from": "prettier-plugin-sql 0.20.0",
+      "sha256": "933b8c977eabc44180b092971b5552fe3326a28dbfe740a9852465e6ef026d8f",
+      "bytes": 2965471
+    },
+    "svelte.js": {
+      "from": "prettier-plugin-svelte 3.4.0",
+      "sha256": "1e29ee89d582c7ca11e0565ec8e70babd60c3bee64d380858159576a331c6a88",
+      "bytes": 906442
+    },
+    "xml.js": {
+      "from": "@prettier/plugin-xml 3.4.2",
+      "sha256": "47adc8d96f288148b0584c7a22a91989d9d13833bfc432ab9b516772ec67fe23",
+      "bytes": 183234
+    }
+  }
+}

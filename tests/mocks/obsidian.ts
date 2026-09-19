@@ -259,6 +259,8 @@ export interface MockMenuItem {
   /** Set when the code asked for `setSubmenu` (Obsidian's undocumented nested menu); the mock hands one out by default. */
   submenu: Menu | null;
   label: boolean;
+  /** A greyed row: the code called `setDisabled(true)`, and a click does nothing. */
+  disabled: boolean;
 }
 
 export const __menuOptions = { submenus: true };
@@ -267,14 +269,14 @@ export class Menu {
   items: MockMenuItem[] = [];
   shownAt: unknown[] = [];
   addItem(cb: (item: Any) => void): Menu {
-    const rec: MockMenuItem = { title: "", icon: "", section: "", checked: null, click: () => undefined, submenu: null, label: false };
+    const rec: MockMenuItem = { title: "", icon: "", section: "", checked: null, click: () => undefined, submenu: null, label: false, disabled: false };
     const item: Any = {
       setTitle: (t: string) => ((rec.title = t), item),
       setIcon: (i: string) => ((rec.icon = i), item),
       setSection: (s: string) => ((rec.section = s), item),
       setChecked: (c: boolean | null) => ((rec.checked = c), item),
       setWarning: () => item,
-      setDisabled: () => item,
+      setDisabled: (on: boolean) => ((rec.disabled = on !== false), item),
       setIsLabel: (on: boolean) => ((rec.label = on), item),
       onClick: (fn: () => void) => ((rec.click = fn), item),
     };
@@ -285,7 +287,7 @@ export class Menu {
   }
   /** A separator is recorded as an item titled "---" so a test can see where the groups break. */
   addSeparator(): Menu {
-    this.items.push({ title: "---", icon: "", section: "", checked: null, click: () => undefined, submenu: null, label: false });
+    this.items.push({ title: "---", icon: "", section: "", checked: null, click: () => undefined, submenu: null, label: false, disabled: false });
     return this;
   }
   showAtMouseEvent(evt: unknown): void {

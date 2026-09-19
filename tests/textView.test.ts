@@ -140,6 +140,22 @@ class FakeEditor implements EditorHandle {
   wordAtCursor(): string {
     return this.cursorWord;
   }
+  /** The fake's language either indents or does not; the tests set it. */
+  indents = false;
+  canIndent(): boolean {
+    return this.indents;
+  }
+  indentLines(): boolean {
+    this.actions.push("indentLines");
+    return this.indents;
+  }
+  replaceDocument(text: string): boolean {
+    this.actions.push("replaceDocument");
+    if (text === this.text) return false;
+    this.text = text;
+    this.options.onChange();
+    return true;
+  }
   transformLines(transform: (text: string, atDocumentStart: boolean, document: string) => string | null): boolean {
     this.actions.push("transformLines");
     const after = transform(this.text, true, this.text);
@@ -468,6 +484,124 @@ describe("TextView", () => {
     expect(h.helpOpened).toHaveLength(1);
   });
 
+  it("Format and Compress live under one Format group, and a language nothing can format has no group at all", async () => {
+    const h = harness();
+    h.transport.files.set("a.json", utf8('{"b":1,"a":[1,2]}'));
+    await h.view.__load(new TFile("a.json"));
+    await h.view.setMode("edit");
+    const ed = h.lastEditor();
+    // The group is a submenu beside "Case ▸" (USER 2026-09-19), so every entry
+    // is looked for inside it, never in the menu itself.
+    const group = (menu: Menu) => menu.items.find((i) => i.title === "Format")?.submenu ?? null;
+    const entry = (menu: Menu, title: string) => group(menu)?.items.find((i) => i.title === title) ?? null;
+    let menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, ed, { text: "", empty: true });
+    expect(group(menu)?.items.map((i) => i.title)).toEqual(["Format", "Compress"]);
+    // The own formatter rewrites the whole document, keeping the key order.
+    // This file is one line, so it cannot say what it indents with, and the
+    // editor's setting decides (a tab, by default) — OPEN 4's fallback.
+    entry(menu, "Format")?.click();
+    expect(ed.text).toBe(["{", '\t"b": 1,', '\t"a": [', "\t\t1,", "\t\t2", "\t]", "}"].join("\n"));
+    expect(__notices.at(-1)).toBe("Formatted.");
+    // Now the file DOES say: reformatting keeps its tabs rather than the setting's,
+    // and formatting an already formatted file changes nothing.
+    menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, ed, { text: "", empty: true });
+    entry(menu, "Format")?.click();
+    expect(__notices.at(-1)).toBe("Format: nothing to change.");
+    menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, ed, { text: "", empty: true });
+    entry(menu, "Compress")?.click();
+    expect(ed.text).toBe('{"b":1,"a":[1,2]}');
+    expect(__notices.at(-1)).toContain("characters fewer");
+    // A language that indents: Format is there alone, because nothing compresses it.
+    h.transport.files.set("b.txt", utf8("hello"));
+    await h.view.__load(new TFile("b.txt"));
+    await h.view.setMode("edit");
+    const plain = h.lastEditor();
+    plain.indents = true;
+    menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, plain, { text: "", empty: true });
+    expect(group(menu)?.items.map((i) => i.title)).toEqual(["Format"]);
+    entry(menu, "Format")?.click();
+    expect(plain.actions).toContain("indentLines");
+    // And with neither: no group, and no separator left standing where it was.
+    plain.indents = false;
+    menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, plain, { text: "", empty: true });
+    expect(menu.items.map((i) => i.title)).not.toContain("Format");
+    expect(menu.items.filter((i, n) => i.title === "---" && menu.items[n + 1]?.title === "---")).toEqual([]);
+  });
+
+  it("a formatter installed in the plugin's folder takes over the languages it serves, and is asked only when Format is pressed", async () => {
+    const h = harness();
+    const calls: Array<{ extension: string; language: string; indent: string; eol: string }> = [];
+    const explained: Array<{ extension: string; language: string; problem?: string }> = [];
+    (h.view as unknown as { nfeDeps: object }).nfeDeps = {
+      ...(h.view as unknown as { nfeDeps: object }).nfeDeps,
+      vaultFormatter: {
+        serves: (extension: string) => extension === "css",
+        installable: (extension: string) => extension === "css" || extension === "php",
+        format: async (extension: string, language: string, text: string, indent: string, eol: string) => {
+          calls.push({ extension, language, indent, eol });
+          return `${text}/* formatted */`;
+        },
+        explain: (extension: string, language: string, problem?: string) => void explained.push({ extension, language, problem }),
+      },
+    };
+    h.transport.files.set("a.css", utf8("a {\n  color: red;\n}"));
+    await h.view.__load(new TFile("a.css"));
+    await h.view.setMode("edit");
+    const ed = h.lastEditor();
+    const formatEntry = (menu: Menu) => menu.items.find((i) => i.title === "Format")?.submenu?.items.find((i) => i.title === "Format") ?? null;
+    const menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, ed, { text: "", empty: true });
+    // Nothing was loaded to build the menu: the answer came from the names.
+    expect(calls).toHaveLength(0);
+    formatEntry(menu)?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toEqual([{ extension: "css", language: "CSS", indent: "  ", eol: "\n" }]);
+    expect(ed.text.endsWith("/* formatted */")).toBe(true);
+    // An extension it does not serve falls back to the language's own indentation.
+    h.transport.files.set("b.ts", utf8("const a=1"));
+    await h.view.__load(new TFile("b.ts"));
+    await h.view.setMode("edit");
+    const ts = h.lastEditor();
+    ts.indents = true;
+    const second = new Menu();
+    h.view.nfeFillContextMenu(second as never, ts, { text: "", empty: true });
+    formatEntry(second)?.click();
+    expect(ts.actions).toContain("indentLines");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("a language a shipped file WOULD format keeps its row and explains what to install; one nothing can format has no row", async () => {
+    const h = harness();
+    const explained: Array<{ extension: string; language: string }> = [];
+    (h.view as unknown as { nfeDeps: object }).nfeDeps = {
+      ...(h.view as unknown as { nfeDeps: object }).nfeDeps,
+      vaultFormatter: {
+        serves: () => false,
+        installable: (extension: string) => extension === "php",
+        format: async () => undefined,
+        explain: (extension: string, language: string) => void explained.push({ extension, language }),
+      },
+    };
+    h.transport.files.set("a.php", utf8("<?php $a=1;"));
+    await h.view.__load(new TFile("a.php"));
+    await h.view.setMode("edit");
+    const ed = h.lastEditor();
+    // PHP indents on its own, but a half-done job is not what Format promises:
+    // the installable file wins and the row says how to get it.
+    ed.indents = true;
+    const menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, ed, { text: "", empty: true });
+    menu.items.find((i) => i.title === "Format")?.submenu?.items.find((i) => i.title === "Format")?.click();
+    expect(explained).toEqual([{ extension: "php", language: "PHP" }]);
+    expect(ed.actions).not.toContain("indentLines");
+  });
+
   it("the context menu of the text: clipboard and Select all always; Format, Comment, completion and Insert in the editor only; this line's direction with the current one checked; a web search for the selection", async () => {
     const h = harness();
     h.transport.files.set("a.txt", utf8("hello world\nsecond"));
@@ -496,7 +630,9 @@ describe("TextView", () => {
       "Paste",
       "Select all",
       "---",
-      "Format ▸ UPPERCASE | lowercase | Title Case | Sentence case | iNVERT cASE",
+      // No Format group: nothing formats plain text, and a row that can only
+      // say no is noise (USER 2026-09-19).
+      "Case ▸ UPPERCASE | lowercase | Title Case | Sentence case | iNVERT cASE",
       "Comment ▸ Toggle line comment (Ctrl+/) | Toggle block comment (Alt+A)",
       "Word completion (Ctrl+Space)",
       expect.stringMatching(/^Insert ▸ Date {2}\d{4}-\d{2}-\d{2} \| Date and time {2}\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/),
@@ -528,7 +664,7 @@ describe("TextView", () => {
     const direction = menu.items.find((i) => i.title === "This line")!.submenu!;
     expect(direction.items.map((i) => i.checked)).toEqual([false, false, true]);
     direction.items[1]?.click();
-    menu.items.find((i) => i.title === "Format")!.submenu!.items[0]?.click();
+    menu.items.find((i) => i.title === "Case")!.submenu!.items[0]?.click();
     menu.items.find((i) => i.title === "Insert")!.submenu!.items[0]?.click();
     menu.items.find((i) => i.title === "Comment")!.submenu!.items[1]?.click();
     menu.items[0]?.click();
@@ -540,7 +676,7 @@ describe("TextView", () => {
     try {
       menu = new Menu();
       h.view.nfeFillContextMenu(menu as never, ed, { text: "", empty: true });
-      const format = menu.items.findIndex((i) => i.title === "Format");
+      const format = menu.items.findIndex((i) => i.title === "Case");
       expect(menu.items[format]?.label).toBe(true);
       expect(menu.items.slice(format + 1, format + 6).map((i) => i.title)).toEqual(["UPPERCASE", "lowercase", "Title Case", "Sentence case", "iNVERT cASE"]);
     } finally {

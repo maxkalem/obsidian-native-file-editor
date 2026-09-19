@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_UNWRAP_OPTIONS, describeUnwrap, restoreHyphens, measureWrapWidth, unwrapLines } from "../src/fmt/unwrap";
+import { DEFAULT_UNWRAP_OPTIONS, columns, describeUnwrap, restoreHyphens, measureWrapWidth, unwrapLines } from "../src/fmt/unwrap";
 import { buildLexicon } from "../src/fmt/dictionary";
 
 // A book annotation as a PDF hands it over: a page number, a title and a
@@ -482,5 +482,74 @@ describe("the words Unwrap put back together", () => {
     expect(result.rejoined.map((r) => r.word)).toEqual(["непереносимой", "обыкновенный"]);
     for (const join of result.rejoined) expect(result.text.slice(join.at, join.at + join.word.length)).toBe(join.word);
     expect(restoreHyphens(result.text, result.rejoined)).toContain("обыкно-венный");
+  });
+});
+
+describe("scripts with no case, and scripts with no word spaces", () => {
+  // One wrapped paragraph per script, cut the way a converter cuts. Measured
+  // 2026-09-18 on these very samples: before the caseless rule every one of
+  // them was refused ("not-prose"), or its width was never even measured.
+  const arabic = [
+    "في قديم الزمان كان هناك تاجر يعيش في مدينة صغيرة على شاطئ",
+    "البحر، وكان له ثلاثة أبناء يعملون معه في التجارة كل يوم",
+    "من الصباح حتى المساء، ولم يكن أحد منهم يشكو من التعب أبدا.",
+    "وفي يوم من الأيام جاء رجل غريب إلى المدينة يحمل معه صندوقا",
+    "كبيرا مغلقا بقفل من حديد، وقال إنه يبيعه لمن يدفع ثمنه ذهبا.",
+  ];
+  const chinese = [
+    "很久以前在海边的一座小城里住着一位商人他有三个儿子每天从",
+    "早到晚都和他一起做生意从来没有一个人抱怨过辛苦或者劳累。",
+    "有一天一个陌生人来到城里他带着一个很大的箱子上面锁着一把",
+    "铁锁他说谁愿意用黄金付钱他就把箱子卖给谁绝不讨价还价。",
+    "商人的三个儿子都想知道箱子里面到底装着什么样的东西呢。",
+  ];
+  const korean = [
+    "옛날 옛적에 바닷가의 작은 도시에 한 상인이 살고 있었는데 그에게는",
+    "세 아들이 있어서 날마다 아침부터 저녁까지 함께 장사를 하였고 그",
+    "누구도 힘들다고 불평하는 일이 한 번도 없었다고 합니다 그러던",
+    "어느 날 낯선 사람이 도시에 와서 커다란 상자를 가지고 왔는데 그",
+    "상자에는 쇠자물쇠가 달려 있었고 금으로 값을 치르면 판다고 했다.",
+  ];
+  const plain = { ...DEFAULT_UNWRAP_OPTIONS, markdown: false };
+
+  it("joins a caseless script, where a lowercase letter can never be the sign of a continuation", () => {
+    const result = unwrapLines(arabic.join("\n"), plain);
+    expect(result.refused).toBeNull();
+    expect(result.joined).toBe(4);
+    expect(result.text.split("\n")).toHaveLength(1);
+    expect(result.text).toContain("على شاطئ البحر");
+  });
+
+  it("counts a line in columns, so a paragraph of wide characters is wrapped prose and not a stack of short lines", () => {
+    // 28 Chinese characters are 56 columns: read as 28 the text was below the
+    // minimum wrap width and nothing was measured at all.
+    expect(columns("很久以前")).toBe(8);
+    expect(columns("abcd")).toBe(4);
+    expect(columns("ab很久")).toBe(6);
+    const result = unwrapLines(chinese.join("\n"), plain);
+    expect(result.width).toBeGreaterThanOrEqual(40);
+    expect(result.joined).toBe(4);
+  });
+
+  it("joins Chinese without a space, and Korean with one", () => {
+    expect(unwrapLines(chinese.join("\n"), plain).text).toContain("每天从早到晚");
+    const hangul = unwrapLines(korean.join("\n"), plain).text;
+    expect(hangul).toContain("그에게는 세 아들이");
+    expect(hangul).not.toContain("그에게는세");
+  });
+
+  it("still refuses a list of short lines in a caseless script", () => {
+    const list = ["苹果", "香蕉", "橙子", "葡萄", "西瓜", "草莓", "桃子", "樱桃"].join("\n");
+    const result = unwrapLines(list, plain);
+    expect(result.text).toBe(list);
+  });
+
+  it("takes the Armenian hyphen and the Hebrew maqaf as hyphens", () => {
+    const body = wrap(PARAGRAPH_A).slice(0, -1);
+    const armenian = [...body, "he had learned since then, and it was not much, but it was непере֊", "носимой, as the saying goes, and the paragraph runs on to its end."].join("\n");
+    // The word is put back together, and the Armenian hyphen goes with it.
+    expect(unwrapLines(armenian).text).toContain("непереносимой,");
+    const hebrew = [...body, "he had learned since then, and it was not much, but it was непере־", "носимой, as the saying goes, and the paragraph runs on to its end."].join("\n");
+    expect(unwrapLines(hebrew).text).toContain("непереносимой,");
   });
 });

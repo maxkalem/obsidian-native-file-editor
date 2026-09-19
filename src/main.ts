@@ -23,6 +23,9 @@ import { findStaleFiles } from "./core/staleSweep";
 import { restoreInNote, unwrapInNote, wrapInNote } from "./core/unwrapNote";
 import { type RejoinedWord, describeUnwrap } from "./fmt/unwrap";
 import { type HunspellPair, checkWithHunspell, findHunspellDictionaries } from "./fmt/vaultHunspell";
+import { type FormatterFolder, extensionsServed, formatWithPrettier, formatterFolderPath, readFormatterFolder } from "./fmt/vaultFormatter";
+import { couldServe } from "./fmt/prettierFiles";
+import { FORMATTER_INSTRUCTION_URL, FormatterMissingModal } from "./ui/FormatterMissingModal";
 import { HunspellReviewModal } from "./ui/HunspellReviewModal";
 import { describeWrap } from "./fmt/wrap";
 import { WrapLinesModal } from "./ui/WrapLinesModal";
@@ -169,6 +172,9 @@ export function obsidianCommandsOn(app: App, chord: Chord, mac: boolean): string
 
 export default class NativeFileEditorPlugin extends Plugin {
   private nfeSettings: SharedSettings = DEFAULT_SETTINGS;
+  /** What the formatters folder held at the last look: names only, never code (ADR-005). */
+  private nfeFormatterFolder: FormatterFolder | null = null;
+  private nfeFormatterExtensions = new Set<string>();
   private nfeDevice!: DeviceLocalStore;
   private nfeTransport!: Transport;
   private nfeLog!: Logger;
@@ -268,6 +274,12 @@ export default class NativeFileEditorPlugin extends Plugin {
         dateTime: () => this.dateTimeNow(),
         addToDictionary: (word, language) => this.openAddToDictionary(word, language),
         reviewJoins: (joins, apply) => void this.offerHunspellReview(joins, apply),
+        vaultFormatter: {
+          serves: (extension) => this.nfeFormatterExtensions.has(extension),
+          installable: (extension) => couldServe(extension) !== null,
+          format: (extension, language, text, indent, eol) => this.formatWithVaultFormatter(extension, language, text, indent, eol),
+          explain: (extension, language, problem) => this.explainFormatter(extension, language, problem),
+        },
         openExternal: (url) => {
           log.info("view", `opening the browser for a web search (${url.length} chars)`);
           window.open(url);
@@ -317,6 +329,9 @@ export default class NativeFileEditorPlugin extends Plugin {
     // The text-language dictionaries decide hyphens in Unwrap; nothing claims
     // an extension for them, so a failure here costs a word list, not a file.
     await this.loadDictionaries();
+    // What the user installed into formatters/, by name: the code is read
+    // only when Format is pressed (ADR-005).
+    await this.loadFormatters();
 
     // Cover everything, yield by default: extensions another plugin already
     // serves are left alone, and the notice about it is shown once per change
@@ -573,6 +588,83 @@ export default class NativeFileEditorPlugin extends Plugin {
     if (report.problem !== null) new Notice(t("notice.locale.problem", { file: LOCALIZATION_FILE, error: report.problem }), 8000);
   }
 
+  /**
+   * What the user installed into `<plugin folder>/formatters/`, by file name.
+   * Read at load and on every Reread; the code itself is read only when
+   * Format is pressed (ADR-005), so this costs a directory listing.
+   */
+  private async loadFormatters(): Promise<void> {
+    this.nfeFormatterFolder = await readFormatterFolder(this.nfeTransport, this.pluginFolder());
+    this.nfeFormatterExtensions = extensionsServed(this.nfeFormatterFolder.present);
+    if (this.nfeFormatterFolder.present.size === 0 && this.nfeFormatterFolder.strangers.length === 0) return;
+    this.nfeLog.info(
+      "formatter",
+      `${this.nfeFormatterFolder.path}: ${[...this.nfeFormatterFolder.present].join(", ") || "nothing known"}` +
+        `${this.nfeFormatterFolder.strangers.length > 0 ? `; ignored: ${this.nfeFormatterFolder.strangers.join(", ")}` : ""}` +
+        `; serves ${[...this.nfeFormatterExtensions].sort().join(" ") || "nothing"}`
+    );
+  }
+
+  /**
+   * "Format" on a language a file would serve: which file, where it goes,
+   * and the repository's instruction. The same dialog explains a file that
+   * IS there and failed, with the error in it.
+   */
+  private explainFormatter(extension: string, language: string, problem?: string): void {
+    const plan = couldServe(extension);
+    if (plan === null) return;
+    new FormatterMissingModal(this.app, {
+      language,
+      files: plan.files,
+      folder: formatterFolderPath(this.pluginFolder()),
+      problem,
+      // The same route "Search the web" takes: Obsidian hands an http(s)
+      // address to the system browser on the desktop and on the phone alike.
+      // The dialog also prints the address, for a WebView that refuses.
+      openInstruction: () => {
+        this.nfeLog.info("formatter", `opening the install instruction for .${extension}`);
+        window.open(FORMATTER_INSTRUCTION_URL);
+      },
+    }).open();
+  }
+
+  /**
+   * Format through the installed formatter: the files are read, checked by
+   * hash and evaluated for this one call. A file nobody approved is not run;
+   * the user is asked once, by hash, and the answer goes into data.json.
+   */
+  private async formatWithVaultFormatter(extension: string, language: string, text: string, indent: string, eol: "\n" | "\r\n"): Promise<void | string> {
+    const folder = this.nfeFormatterFolder;
+    if (!folder) return;
+    const run = async (): Promise<ReturnType<typeof formatWithPrettier> extends Promise<infer R> ? R : never> =>
+      formatWithPrettier({ transport: this.nfeTransport, folder, trusted: this.nfeSettings.trustedFormatters, extension, text, indent, eol, log: this.nfeLog });
+    let outcome = await run();
+    if (outcome.kind === "untrusted") {
+      const hash = outcome.hash;
+      const file = outcome.file;
+      this.nfeLog.warn("formatter", `${folder.path}/${file}: sha256 ${hash} is not a build this plugin knows`);
+      const yes = await confirm(this.app, t("formatter.untrusted.title"), t("formatter.untrusted.desc", { file, hash }), t("formatter.untrusted.confirm"));
+      if (!yes) return;
+      await this.saveSettings({ ...this.nfeSettings, trustedFormatters: [...this.nfeSettings.trustedFormatters, hash] });
+      outcome = await run();
+    }
+    if (outcome.kind === "problem") {
+      this.nfeLog.warn("formatter", `.${extension}: ${outcome.problem}`);
+      // A folder to fix is a dialog with the file names and the instruction in
+      // it; a text prettier refused is one line, because the answer is in the
+      // file the user is looking at.
+      if (outcome.stage === "install") this.explainFormatter(extension, language, outcome.problem);
+      else new Notice(t("notice.format.problem", { error: outcome.problem }), 8000);
+      return;
+    }
+    if (outcome.kind === "untrusted") return;
+    if (outcome.kind === "unchanged") {
+      new Notice(t("notice.format.nothing"));
+      return;
+    }
+    return outcome.text;
+  }
+
   /** The vault's text-language dictionaries (when on) into the lexicon Unwrap reads; the notice names how many files failed. */
   private async loadDictionaries(): Promise<void> {
     const report = await loadVaultDictionaries({
@@ -592,6 +684,7 @@ export default class NativeFileEditorPlugin extends Plugin {
   async reread(announce: boolean): Promise<void> {
     await this.loadLanguages();
     await this.loadDictionaries();
+    await this.loadFormatters();
     const owned = readOwnedExtensions(this.app);
     const fresh = registeredExtensions().filter((ext) => !this.nfeRegistered.has(ext) && (owned[ext] === undefined || owned[ext] === VIEW_TYPE_TEXT) && this.nfeSettings.extensions[ext] !== false);
     if (fresh.length > 0) {

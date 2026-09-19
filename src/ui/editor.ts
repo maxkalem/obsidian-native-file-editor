@@ -98,6 +98,17 @@ export interface EditorHandle {
    * document changed.
    */
   transformLines(transform: (text: string, atDocumentStart: boolean, document: string) => string | null): boolean;
+  /**
+   * Whether the language of this editor can indent at all: CodeMirror answers
+   * null for a mode or grammar that provides no indentation, and the Format
+   * entry is greyed out for exactly those. Asked of the open document rather
+   * than looked up in a table.
+   */
+  canIndent(): boolean;
+  /** Re-indent the lines the selection touches (the whole document when nothing is selected), one undo step. Returns whether anything changed. */
+  indentLines(): boolean;
+  /** Replace the whole document in one undo step, keeping the cursor's line; for a formatter that cannot work on a range. */
+  replaceDocument(text: string): boolean;
   /** The word the main cursor stands in, hyphens and apostrophes included; empty when it stands on none. */
   wordAtCursor(): string;
   /** Force the direction of the lines the selection touches, or `null` to go back to the content's own. Lives with the editor, not the file. */

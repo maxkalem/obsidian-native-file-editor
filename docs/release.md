@@ -38,6 +38,23 @@ npm run size
 
 The size report is part of every release: Obsidian loads `main.js` as one script with no code splitting, so every bundled language package is parsed at every start. A package added to the bundle is named in the release notes with the bytes it adds.
 
+### Refresh the prettier the repository ships
+
+`formatters/prettier/` is not a dependency: nothing updates it on its own, so it is refreshed by hand at release time. Compare the `version` in `formatters/prettier/manifest.json` with the current release (`npm view prettier version`). If a newer one exists, install it in a scratch folder **outside** this repository (never add prettier to `package.json`), copy `standalone.js`, the eight plugin files and `LICENSE` over the old ones, and regenerate the manifest:
+
+```
+cd /tmp && npm install prettier@<version>
+cp node_modules/prettier/standalone.js <repo>/formatters/prettier/
+for f in babel estree typescript postcss html markdown yaml graphql; do cp node_modules/prettier/plugins/$f.js <repo>/formatters/prettier/; done
+cp node_modules/prettier/LICENSE <repo>/formatters/prettier/
+```
+
+Then add the new SHA-256 of each file to `KNOWN_HASHES` in `src/fmt/prettierFiles.ts` **without deleting the old entries** — that list is append-only, so a user who installed the previous build is never asked to confirm it again after a plugin update — and run `npm test`, whose `vaultFormatter` cases format real CSS and JavaScript with the shipped files and check that the manifest, the hashes and the version agree. A release must not ship a build the plugin itself would ask about. Name the prettier version in the release notes; the folder name never carries one, so nothing else changes.
+
+The ten community plugins in `formatters/extra/` are rebuilt the same way when their packages move: `node scripts/build-formatter.mjs <package> <name>` from a scratch folder where you installed it, then append the printed hash. Their manifest names the package and version of each, and the suite formats a sample with every one of them.
+
+After any file in `formatters/` changes, run `node scripts/formatter-languages.mjs`. It loads each file the way the plugin does and prints what it really serves, what `KNOWN_FILES` claims that no parser answers (which would let Format offer itself and then fail), what the file serves that the plugin deliberately does not take, and the SHA-256 of everything in the folder. It exits non-zero on a fault. Update the table in `formatters/README.md` from its output in the same change.
+
 ## Publishing to the community directory (once, at the end)
 
 Publish the draft release the workflow created (a draft does not count). Sign in at community.obsidian.md, link the GitHub account that owns this repository, and submit the repository URL under Plugins, New plugin. The automated review reads `manifest.json` from the default branch; address findings by pushing fixes and cutting a new release with an incremented version. After acceptance, users receive every new GitHub release automatically.

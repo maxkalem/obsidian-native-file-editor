@@ -97,7 +97,7 @@ const WIDTH_PERCENTILE = 0.8;
 /** A line shorter than this share of the width was not cut by the wrapper: it ends where its author ended it. */
 const JOIN_FACTOR = 0.6;
 /** When the next line starts with a lowercase letter the continuation is plain; a somewhat shorter line still joins. */
-const LOWERCASE_JOIN_FACTOR = 0.5;
+const CONTINUING_JOIN_FACTOR = 0.5;
 /** A line this much longer than the width was not wrapped at its end: its end is a real break unless the next line says otherwise. */
 const LONG_LINE_FACTOR = 1.25;
 /** With fewer measured lines than this, a line that ends a sentence is taken at its word: the width is too uncertain to say the next word had no room. */
@@ -107,8 +107,8 @@ const GATE_MIN_PAIRS = 5;
 /** Wrapped prose has most of its ordinary lines near the width ... */
 const MIN_FULL_SHARE = 0.45;
 const FULL_LINE_FACTOR = 0.7;
-/** ... and the next line starting lowercase often, because a wrapper cuts mid-sentence. */
-const MIN_LOWERCASE_SHARE = 0.3;
+/** ... and the next line continuing the sentence often (a lowercase or caseless letter), because a wrapper cuts mid-sentence. */
+const MIN_CONTINUING_SHARE = 0.3;
 
 const FENCE = /^\s{0,3}(```|~~~)/;
 const MATH_FENCE = /^\s*\$\$/;
@@ -128,18 +128,55 @@ const HARD_BREAK = /( {2,}|\\)$/;
 /** A line that starts with an indent, or with a dash as dialogue does, is the first line of a paragraph in most extracted text. */
 const PARAGRAPH_START = /^( {2,}|\t|\s*[–—]\s)/;
 /** The line ends a sentence: the wrapper may still have cut here, but only a nearly full line says so. */
-const SENTENCE_END = /[.!?…:]["'»”’)\]]*\s*$/;
+const SENTENCE_END = /[.!?…:\u3002\uFF01\uFF1F\uFF0E\u061F\u06D4\u0964\u0965\u104B\u17D4]["'»”’)\]\u300D\u300F\uFF09]*\s*$/;
 /** A hyphen glued to what precedes it (not a dash after a space). */
-const HYPHEN_END = /(\S)([-\u2010\u2011\u00AD])\s*$/;
-const HYPHEN_TAIL = /[-\u2010\u2011\u00AD]\s*$/;
-const LETTERS_BEFORE_HYPHEN = /(\p{L}+)[-\u2010\u2011\u00AD]\s*$/u;
+const HYPHEN_END = /(\S)([-\u2010\u2011\u00AD\u058A\u05BE])\s*$/;
+const HYPHEN_TAIL = /[-\u2010\u2011\u00AD\u058A\u05BE]\s*$/;
+const LETTERS_BEFORE_HYPHEN = /(\p{L}+)[-\u2010\u2011\u00AD\u058A\u05BE]\s*$/u;
 const LETTERS_AFTER = /^\s*(\p{L}+)/u;
-const LOWERCASE_START = /^\s*\p{Ll}/u;
+/**
+ * The next line goes on with the same sentence: it starts with a lowercase
+ * letter, or with a letter from a script that HAS no case (Arabic, Hebrew,
+ * Chinese, Japanese, Korean, Thai, Devanagari, Bengali, Tamil …). Measured
+ * 2026-09-18: with `\p{Ll}` alone every one of those scripts failed the prose
+ * gate and Unwrap did nothing at all in them, because a caseless letter can
+ * never look like a continuation. Georgian is the odd one out and always
+ * worked: Mkhedruli is `Ll`, with Mtavruli as its uppercase.
+ */
+const CONTINUES = /^\s*[\p{Ll}\p{Lo}]/u;
+/**
+ * A script that writes without spaces between words: Han, kana, Thai, Lao,
+ * Khmer, Myanmar. Two of its characters meeting at a line end were one
+ * sentence with nothing between them, so the join must not invent a space.
+ * Korean is NOT here: Hangul is written with spaces between words.
+ */
+const NO_WORD_SPACE = /[\u2E80-\u303F\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFF9F\u0E00-\u0EFF\u1000-\u109F\u1780-\u17FF]/u;
+/**
+ * A character that takes two columns in the monospaced grid a wrapper counted
+ * in: East Asian Wide and Fullwidth. Measured 2026-09-18: a Chinese or
+ * Japanese paragraph wrapped at 56 columns has 28 characters per line, which
+ * the plugin read as 28 and refused as too narrow to be wrapped prose at all.
+ */
+const WIDE = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6]/u;
+
+/** The line's width in columns, not in characters: what a wrapper measured. */
+export function columns(text: string): number {
+  let out = 0;
+  for (const ch of text) out += WIDE.test(ch) ? 2 : 1;
+  return out;
+}
+
+/** The space a join puts between two lines: none where both sides are a script that writes without spaces. */
+function joinSpace(left: string, right: string): string {
+  const last = [...left].at(-1) ?? "";
+  const first = [...right][0] ?? "";
+  return NO_WORD_SPACE.test(last) && NO_WORD_SPACE.test(first) ? "" : " ";
+}
 /** A word, with the hyphens that belong to it: what the evidence of the text is counted over. A hyphen at a line end is followed by a break, so it never joins a token. */
-const WORD_TOKEN = /[\p{L}\p{N}]+(?:[-‐‑][\p{L}\p{N}]+)*/gu;
+const WORD_TOKEN = /[\p{L}\p{N}]+(?:[-‐‑֊־][\p{L}\p{N}]+)*/gu;
 /** The word a joined line ends with, and the one the next begins with, inner hyphens kept: what the review step asks the dictionary about. */
-const WORD_BEFORE = /[\p{L}\p{N}]+(?:[-‐‑][\p{L}\p{N}]+)*$/u;
-const WORD_AFTER = /^[\p{L}\p{N}]+(?:[-‐‑][\p{L}\p{N}]+)*/u;
+const WORD_BEFORE = /[\p{L}\p{N}]+(?:[-‐‑֊־][\p{L}\p{N}]+)*$/u;
+const WORD_AFTER = /^[\p{L}\p{N}]+(?:[-‐‑֊־][\p{L}\p{N}]+)*/u;
 /** A part must be this common at the start or the end of the text's other hyphenated words before it decides a hyphen on its own. */
 const EVIDENCE_PART_WORDS = 2;
 /** Latin vowels, including the Nordic and German ones: a hyphen between two identical vowels is spelling, not a line break (linja-auto, re-elect). */
@@ -226,7 +263,7 @@ export function measureWrapWidth(lines: readonly string[], protectedLine: readon
   const lengths: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     if (protectedLine[i]) continue;
-    const length = (lines[i] ?? "").trimEnd().length;
+    const length = columns((lines[i] ?? "").trimEnd());
     if (length >= MIN_MEASURED_LENGTH) lengths.push(length);
   }
   if (lengths.length === 0) return null;
@@ -240,8 +277,12 @@ export function measureWrapWidth(lines: readonly string[], protectedLine: readon
 }
 
 function firstWordLength(line: string): number {
-  const m = /^\s*(\S+)/.exec(line);
-  return m?.[1]?.length ?? 0;
+  const word = /^\s*(\S+)/.exec(line)?.[1] ?? "";
+  // Where a script writes without spaces the whole line is one "word", and
+  // the wrapper needed room for one character, not for all of them.
+  const first = [...word][0] ?? "";
+  if (NO_WORD_SPACE.test(first)) return columns(first);
+  return columns(word);
 }
 
 /**
@@ -251,8 +292,8 @@ function firstWordLength(line: string): number {
 function shouldJoin(line: string, next: string, measured: WrapWidth): boolean {
   if (HARD_BREAK.test(line) || PARAGRAPH_START.test(next)) return false;
   const { width } = measured;
-  const length = line.trimEnd().length;
-  if (LOWERCASE_START.test(next)) return length >= width * LOWERCASE_JOIN_FACTOR;
+  const length = columns(line.trimEnd());
+  if (CONTINUES.test(next)) return length >= width * CONTINUING_JOIN_FACTOR;
   if (length < width * JOIN_FACTOR || length > width * LONG_LINE_FACTOR) return false;
   // A sentence ends here and the next line starts a new one: only a line
   // that had no room for the next word was cut by the wrapper, and only a
@@ -296,19 +337,19 @@ function looksLikeProse(lines: readonly string[], protectedLine: readonly boolea
   let ordinary = 0;
   let full = 0;
   let pairs = 0;
-  let lowercase = 0;
+  let continues = 0;
   for (let i = 0; i < lines.length; i++) {
     if (protectedLine[i]) continue;
     ordinary++;
-    if ((lines[i] ?? "").trimEnd().length >= width * FULL_LINE_FACTOR) full++;
+    if (columns((lines[i] ?? "").trimEnd()) >= width * FULL_LINE_FACTOR) full++;
     const j = next[i] ?? -1;
     if (j < 0) continue;
     pairs++;
-    if (LOWERCASE_START.test(lines[j] ?? "")) lowercase++;
+    if (CONTINUES.test(lines[j] ?? "")) continues++;
   }
   if (pairs === 0) return true;
   if (selection && pairs < GATE_MIN_PAIRS) return true;
-  return full / ordinary >= MIN_FULL_SHARE && lowercase / pairs >= MIN_LOWERCASE_SHARE;
+  return full / ordinary >= MIN_FULL_SHARE && continues / pairs >= MIN_CONTINUING_SHARE;
 }
 
 /**
@@ -403,7 +444,7 @@ function sameVowel(prefix: string, suffix: string, everywhere: boolean): boolean
  */
 export function hyphenAttachment(line: string, next: string, context: HyphenContext): "space" | "hyphen" | "dehyphenate" {
   const end = HYPHEN_END.exec(line);
-  if (!end || !LOWERCASE_START.test(next)) return "space";
+  if (!end || !CONTINUES.test(next)) return "space";
   const before = end[1] ?? "";
   const hyphen = end[2] ?? "-";
   if (/\p{N}/u.test(before)) return "hyphen";
@@ -529,7 +570,7 @@ export function unwrapLines(text: string, options: UnwrapOptions = DEFAULT_UNWRA
         pending.push({ word: before + after, hyphenated: `${before}-${after}`, at: left.length - before.length, hyphenAt: left.length });
       }
     } else if (attach === "hyphen") piece = tidy(current) + incoming(line);
-    else piece = tidy(current) + " " + incoming(line);
+    else piece = tidy(current) + joinSpace(tidy(current), incoming(line)) + incoming(line);
     const j = next[i] ?? -1;
     if (j >= 0 && shouldJoin(line, lines[j] ?? "", measured)) {
       attach = hyphenAttachment(line, lines[j] ?? "", hyphens);

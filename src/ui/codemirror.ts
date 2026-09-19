@@ -1,7 +1,7 @@
 import { plural, t } from "../core/i18n";
 import { autocompletion, completeAnyWord, startCompletion } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab, selectAll, toggleBlockComment, toggleComment } from "@codemirror/commands";
-import { bracketMatching, codeFolding, foldGutter, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
+import { bracketMatching, codeFolding, foldGutter, foldKeymap, getIndentation, indentOnInput, indentRange, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { closeSearchPanel, findNext, findPrevious, highlightSelectionMatches, openSearchPanel, replaceAll, search, searchKeymap, searchPanelOpen, selectMatches, selectNextOccurrence } from "@codemirror/search";
 import { Compartment, EditorSelection, EditorState, type Extension, type Range, StateEffect, StateField } from "@codemirror/state";
 import {
@@ -347,6 +347,46 @@ export const codeMirrorFactory: EditorFactory = {
         const head = view.state.selection.main.head;
         const line = view.state.doc.lineAt(head);
         return wordAtPosition(line.text, head - line.from);
+      },
+      /**
+       * Does anything provide indentation for this language? `getIndentation`
+       * answers null when nothing does, and a line of plain text answers null
+       * everywhere, so a few lines are asked before the answer is "no".
+       */
+      canIndent: () => {
+        const { state } = view;
+        const lines = Math.min(state.doc.lines, 40);
+        for (let n = 1; n <= lines; n++) {
+          const line = state.doc.line(n);
+          if (line.text.trim().length === 0) continue;
+          if (getIndentation(state, line.from) !== null) return true;
+        }
+        return false;
+      },
+      indentLines: () => {
+        if (options.readOnly) return false;
+        const { state } = view;
+        const range = state.selection.main;
+        const from = range.empty ? 0 : state.doc.lineAt(range.from).from;
+        const to = range.empty ? state.doc.length : state.doc.lineAt(range.to).to;
+        const changes = indentRange(state, from, to);
+        if (changes.empty) return false;
+        view.dispatch({ changes, userEvent: "input.format" });
+        view.focus();
+        return true;
+      },
+      replaceDocument: (text) => {
+        if (options.readOnly) return false;
+        const { state } = view;
+        if (text === state.doc.toString()) return false;
+        // The cursor keeps its line, which is the most a whole-document
+        // formatter can honestly promise.
+        const line = state.doc.lineAt(state.selection.main.head).number;
+        view.dispatch({ changes: { from: 0, to: state.doc.length, insert: text }, userEvent: "input.format" });
+        const target = view.state.doc.line(Math.min(line, view.state.doc.lines));
+        view.dispatch({ selection: EditorSelection.cursor(target.from) });
+        view.focus();
+        return true;
       },
       transformLines: (transform) => {
         if (options.readOnly) return false;

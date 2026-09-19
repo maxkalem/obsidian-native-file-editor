@@ -9,6 +9,7 @@ import { OBSIDIAN_SCHEME_CLASS } from "../highlight/highlighter";
 import { type ResolvedLanguage, isProseLanguage, languageFor, resolveLanguage } from "../highlight/registry";
 import { DEFAULT_UNWRAP_OPTIONS, type RejoinedWord, type UnwrapResult, describeUnwrap, restoreHyphens, unwrapLines } from "../fmt/unwrap";
 import { type WrapResult, describeWrap, wrapLines } from "../fmt/wrap";
+import { type FormatPlan, compressOwn, formatOwn, planCompress, planFormat, styleFor } from "../fmt/format";
 import { type WrapChoice, WrapLinesModal } from "./WrapLinesModal";
 import {
   type DecodedText,
@@ -89,6 +90,20 @@ export interface TextViewDeps {
    * answers whether the text was still the one Unwrap had left.
    */
   readonly reviewJoins?: (joins: readonly RejoinedWord[], apply: (restore: readonly RejoinedWord[]) => boolean) => void;
+  /**
+   * The formatter the user installed into the plugin's own folder (ADR-005).
+   * `serves` answers from the folder's file NAMES alone, so the menu costs
+   * nothing; `format` reads and evaluates the files for this one call and
+   * keeps nothing. Absent while nothing is installed.
+   */
+  readonly vaultFormatter?: {
+    readonly serves: (extension: string) => boolean;
+    /** Whether a file the repository ships would format this extension, installed or not. */
+    readonly installable: (extension: string) => boolean;
+    readonly format: (extension: string, language: string, text: string, indent: string, eol: "\n" | "\r\n") => Promise<void | string>;
+    /** Opens the dialog that says which file to copy and where; `problem` when one is there and failed. */
+    readonly explain: (extension: string, language: string, problem?: string) => void;
+  };
   /**
    * The read-only modal's "Create UTF-8 copy": whether a vault path is taken,
    * and the write that makes Obsidian index the new file at once. The view
@@ -684,7 +699,25 @@ export class TextView extends FileView {
     item(t("menu.selectAll"), "text-select", () => ed.selectAll());
     menu.addSeparator();
     if (editable) {
-      nfeSubmenu(menu, t("menu.format"), "case-sensitive", (sub) => {
+      // One "Format ▸" group beside "Case ▸", and nothing at all for a
+      // language nothing can format: a row that can only say no is noise
+      // (USER 2026-09-19). A language that a file WOULD serve keeps its row
+      // and explains itself when pressed.
+      const language = this.nfeLanguage?.entry.name ?? null;
+      const extension = this.file?.extension.toLowerCase() ?? "";
+      const formatter = this.nfeDeps.vaultFormatter;
+      const format = planFormat(language, ed.canIndent(), formatter?.serves(extension) === true, formatter?.installable(extension) === true);
+      const compress = planCompress(language);
+      if (format.kind !== "none" || compress.kind !== "none") {
+        nfeSubmenu(menu, t("menu.formatGroup"), "align-left", (sub) => {
+          if (format.kind !== "none") sub.addItem((i) => i.setTitle(t("menu.formatCode")).setIcon("align-left").onClick(() => this.nfeFormat(format)));
+          if (compress.kind !== "none") sub.addItem((i) => i.setTitle(t("menu.compress")).setIcon("fold-vertical").onClick(() => this.nfeCompress(compress)));
+        });
+        // The separator belongs to the group, not to the position: without it
+        // a language nothing formats would open the menu on two rules in a row.
+        menu.addSeparator();
+      }
+      nfeSubmenu(menu, t("menu.case"), "case-sensitive", (sub) => {
         const cases: Array<[CaseKind, string, string]> = [
           ["upper", t("menu.case.upper"), "case-upper"],
           ["lower", t("menu.case.lower"), "case-lower"],
@@ -739,6 +772,70 @@ export class TextView extends FileView {
       menu.addSeparator();
       item(t("menu.searchWeb", { text: menuExcerpt(selection.text) }), "globe", () => open(webSearchUrl(selection.text)));
     }
+  }
+
+  /**
+   * Format: the plugin's own formatter for the formats it knows, otherwise
+   * CodeMirror's indentation. An own formatter works on the whole document,
+   * because a JSON fragment taken out of its nesting cannot be indented
+   * honestly, and the notice says so when a selection was open.
+   */
+  nfeFormat(plan: FormatPlan): void {
+    const ed = this.nfeEditor;
+    if (!ed || plan.kind === "none") return;
+    if (plan.kind === "installable") {
+      const extension = this.file?.extension.toLowerCase() ?? "";
+      this.nfeDeps.vaultFormatter?.explain(extension, this.nfeLanguage?.entry.name ?? t("language.plainText"));
+      return;
+    }
+    if (plan.kind === "vault") {
+      const extension = this.file?.extension.toLowerCase() ?? "";
+      const text = ed.getText();
+      const indent = styleFor(text, this.nfeIndentUnit()).indent;
+      const language = this.nfeLanguage?.entry.name ?? t("language.plainText");
+      void this.nfeDeps.vaultFormatter?.format(extension, language, text, indent, text.includes("\r\n") ? "\r\n" : "\n").then((formatted) => {
+        // The plugin says what went wrong; the view only writes a result.
+        if (typeof formatted !== "string") return;
+        const changed = this.nfeEditor?.replaceDocument(formatted) ?? false;
+        new Notice(changed ? t("notice.format.done") : t("notice.format.nothing"));
+      });
+      return;
+    }
+    if (plan.kind === "indent") {
+      const changed = ed.indentLines();
+      new Notice(changed ? t("notice.format.done") : t("notice.format.nothing"));
+      return;
+    }
+    const text = ed.getText();
+    const result = formatOwn(this.nfeLanguage?.entry.name ?? null, text, styleFor(text, this.nfeIndentUnit()));
+    if (result === null) return;
+    if (result.problem !== null) {
+      new Notice(t("notice.format.problem", { error: result.problem }), 8000);
+      return;
+    }
+    const changed = ed.replaceDocument(result.text);
+    new Notice(changed ? (ed.selection().empty ? t("notice.format.done") : t("notice.format.wholeFile")) : t("notice.format.nothing"));
+  }
+
+  /** Compress: the same formats, the other way round; whitespace goes and the comments stay (USER 2026-09-19). */
+  nfeCompress(plan: FormatPlan): void {
+    const ed = this.nfeEditor;
+    if (!ed || plan.kind !== "own") return;
+    const text = ed.getText();
+    const result = compressOwn(this.nfeLanguage?.entry.name ?? null, text, styleFor(text, this.nfeIndentUnit()));
+    if (result === null) return;
+    if (result.problem !== null) {
+      new Notice(t("notice.format.problem", { error: result.problem }), 8000);
+      return;
+    }
+    const changed = ed.replaceDocument(result.text);
+    new Notice(changed ? t("notice.compress.done", { saved: Math.max(0, text.length - result.text.length) }) : t("notice.format.nothing"));
+  }
+
+  /** The indent the editor types with, as a string: what a file that cannot say falls back to. */
+  private nfeIndentUnit(): string {
+    const settings = this.nfeDeps.settings();
+    return settings.tabInsertsSpaces ? " ".repeat(Math.max(1, settings.tabSize)) : "\t";
   }
 
   /**

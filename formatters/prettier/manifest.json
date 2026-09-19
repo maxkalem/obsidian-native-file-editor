@@ -1,0 +1,18 @@
+{
+  "name": "prettier",
+  "version": "3.9.8",
+  "source": "https://www.npmjs.com/package/prettier",
+  "licence": "MIT, see LICENSE in this folder",
+  "note": "The files are prettier's own standalone.js and plugins/*.js, unmodified. The folder name carries no version on purpose: the version lives here and in the hash list inside the plugin, so no instruction anywhere has to be rewritten when it changes.",
+  "files": {
+    "babel.js": "5249a89653aae718f7a0fb94577a09768f18b865df832cfe68d8158c8207af5c",
+    "estree.js": "7af7b9e59af8113e22d9b25653a760c372fa8d7c04e9adf67d0037c6ebf862b4",
+    "graphql.js": "b0faef34893f8033b9adeaad048f4cec9456e95baa05f97b51f8315a5a504fec",
+    "html.js": "abb63e0b690ac15f0f8dc4aad63a2fcb9194892998c67714dc57b7d3257c0b46",
+    "markdown.js": "2a906852e32d883409987adda1929b0932875f6784b3974a24fd15044a164bd4",
+    "postcss.js": "8dd23dad68a8bb34d304e04b2b6493c187150dbaebdfb5b54061007f430e5058",
+    "standalone.js": "83605683742650f8460cb9fbc4036bd880b6d7b06f461c9fc14fa2ce981b85ee",
+    "typescript.js": "ad4ede6b3d28fd1ffa37bebcb6a9e7ab9db0dc045d16d0c65eb65496660f91f0",
+    "yaml.js": "48bbba2bad5d666425fc5b435ab80083c6a77825d614e9a72ff5e9bbb8d428bc"
+  }
+}
