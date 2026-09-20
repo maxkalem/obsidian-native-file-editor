@@ -1,3 +1,4 @@
+import { t } from "../core/i18n";
 import { DEFAULT_JSON_STYLE, type JsonStyle, compressJson, formatJson } from "./json";
 
 /**
@@ -94,6 +95,23 @@ export function detectIndentUnit(text: string, fallback: string): string {
   // level in every convention that exists.
   const smallest = Math.min(...widths);
   return smallest >= 1 && smallest <= 8 ? " ".repeat(smallest) : fallback;
+}
+
+/**
+ * How long a job has to take before its notice says how long it took. Under
+ * this the number is noise — the user pressed a key and it was done — and over
+ * it the number is the answer to the question the wait already asked. The one
+ * path that reaches it in practice is a formatter read out of the vault, whose
+ * first call of a session is disk work.
+ */
+export const SLOW_NOTICE_MS = 150;
+
+/**
+ * A notice with the time appended, but only when the work was slow enough for
+ * the time to mean anything. Pure, so the threshold is tested without a clock.
+ */
+export function withDuration(message: string, ms: number): string {
+  return ms >= SLOW_NOTICE_MS ? t("notice.took", { message, ms: String(Math.round(ms)) }) : message;
 }
 
 /** The style for the own formatters: the file's indent and its line ending. */

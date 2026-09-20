@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compressOwn, detectIndentUnit, formatOwn, planCompress, planFormat, styleFor } from "../src/fmt/format";
+import { SLOW_NOTICE_MS, compressOwn, detectIndentUnit, formatOwn, planCompress, planFormat, styleFor, withDuration } from "../src/fmt/format";
 
 /**
  * Which formatter serves a file, and what it formats with. The plan is asked
@@ -59,5 +59,31 @@ describe("the indent to format with", () => {
   it("takes the line ending from the file too", () => {
     expect(styleFor('{"a":1}\r\n', "  ")).toEqual({ indent: "  ", eol: "\r\n" });
     expect(styleFor('{\n  "a": 1\n}\n', "\t")).toEqual({ indent: "  ", eol: "\n" });
+  });
+});
+
+/**
+ * The time is in the notice only when the wait was long enough to have raised
+ * the question. A formatter read out of the vault is the path that reaches it;
+ * indentation and the own JSON formatter answer before the eye moves.
+ */
+describe("the time a notice reports", () => {
+  it("says nothing about a job nobody waited for", () => {
+    expect(withDuration("Formatted.", 0)).toBe("Formatted.");
+    expect(withDuration("Formatted.", SLOW_NOTICE_MS - 1)).toBe("Formatted.");
+  });
+
+  it("appends the milliseconds from the threshold up", () => {
+    expect(withDuration("Formatted.", SLOW_NOTICE_MS)).toBe(`Formatted. (${SLOW_NOTICE_MS} ms)`);
+    expect(withDuration("Formatted.", 2400)).toBe("Formatted. (2400 ms)");
+  });
+
+  it("rounds rather than printing a fraction of a millisecond", () => {
+    expect(withDuration("Formatted.", 243.6)).toBe("Formatted. (244 ms)");
+  });
+
+  it("appends to whatever the notice already said", () => {
+    expect(withDuration("Compressed: 1204 characters fewer.", 900)).toBe("Compressed: 1204 characters fewer. (900 ms)");
+    expect(withDuration("Format: nothing to change.", 900)).toBe("Format: nothing to change. (900 ms)");
   });
 });

@@ -576,6 +576,39 @@ describe("TextView", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("a formatter that answers after the document moved writes nothing over what was typed in between", async () => {
+    const h = harness();
+    const pending: { release: ((text: string) => void) | null } = { release: null };
+    (h.view as unknown as { nfeDeps: object }).nfeDeps = {
+      ...(h.view as unknown as { nfeDeps: object }).nfeDeps,
+      vaultFormatter: {
+        serves: (extension: string) => extension === "css",
+        installable: () => false,
+        format: () =>
+          new Promise<string>((resolve) => {
+            pending.release = resolve;
+          }),
+        explain: () => undefined,
+      },
+    };
+    h.transport.files.set("a.css", utf8("a{color:red}"));
+    await h.view.__load(new TFile("a.css"));
+    await h.view.setMode("edit");
+    const ed = h.lastEditor();
+    const menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, ed, { text: "", empty: true });
+    menu.items.find((i) => i.title === "Format")?.submenu?.items.find((i) => i.title === "Format")?.click();
+    // The formatter reads its files out of the vault, so it is still working
+    // while the user carries on typing.
+    ed.setText("a{color:blue}");
+    pending.release?.("a {\n  color: red;\n}\n");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(ed.getText()).toBe("a{color:blue}");
+    expect(ed.actions).not.toContain("replaceDocument");
+    expect(__notices.at(-1)).toBe("The file changed while the formatter was working, so it was left alone. Press Format again.");
+  });
+
   it("a language a shipped file WOULD format keeps its row and explains what to install; one nothing can format has no row", async () => {
     const h = harness();
     const explained: Array<{ extension: string; language: string }> = [];

@@ -9,7 +9,7 @@ import { OBSIDIAN_SCHEME_CLASS } from "../highlight/highlighter";
 import { type ResolvedLanguage, isProseLanguage, languageFor, resolveLanguage } from "../highlight/registry";
 import { DEFAULT_UNWRAP_OPTIONS, type RejoinedWord, type UnwrapResult, describeUnwrap, restoreHyphens, unwrapLines } from "../fmt/unwrap";
 import { type WrapResult, describeWrap, wrapLines } from "../fmt/wrap";
-import { type FormatPlan, compressOwn, formatOwn, planCompress, planFormat, styleFor } from "../fmt/format";
+import { type FormatPlan, compressOwn, formatOwn, planCompress, planFormat, styleFor, withDuration } from "../fmt/format";
 import { type WrapChoice, WrapLinesModal } from "./WrapLinesModal";
 import {
   type DecodedText,
@@ -807,22 +807,36 @@ export class TextView extends FileView {
     }
     if (plan.kind === "vault") {
       const extension = this.file?.extension.toLowerCase() ?? "";
+      const started = Date.now();
       const text = ed.getText();
       const indent = styleFor(text, this.nfeIndentUnit()).indent;
       const language = this.nfeLanguage?.entry.name ?? t("language.plainText");
       void this.nfeDeps.vaultFormatter?.format(extension, language, text, indent, text.includes("\r\n") ? "\r\n" : "\n").then((formatted) => {
         // The plugin says what went wrong; the view only writes a result.
         if (typeof formatted !== "string") return;
-        const changed = this.nfeEditor?.replaceDocument(formatted) ?? false;
-        new Notice(changed ? t("notice.format.done") : t("notice.format.nothing"));
+        // This is the one formatter that answers later than it was asked: it
+        // reads its files out of the vault. By then the document may not be
+        // the one it was given — the user kept typing, or another file was
+        // loaded into this view. Writing the result over that would lose
+        // whatever came in between, so a document that moved is left alone
+        // and says so. The same guard the hyphen review uses after Unwrap.
+        const editor = this.nfeEditor;
+        if (!editor || editor !== ed || editor.getText() !== text) {
+          new Notice(t("notice.format.moved"));
+          return;
+        }
+        const changed = editor.replaceDocument(formatted);
+        new Notice(withDuration(changed ? t("notice.format.done") : t("notice.format.nothing"), Date.now() - started));
       });
       return;
     }
     if (plan.kind === "indent") {
+      const started = Date.now();
       const changed = ed.indentLines();
-      new Notice(changed ? t("notice.format.done") : t("notice.format.nothing"));
+      new Notice(withDuration(changed ? t("notice.format.done") : t("notice.format.nothing"), Date.now() - started));
       return;
     }
+    const started = Date.now();
     const text = ed.getText();
     const result = formatOwn(this.nfeLanguage?.entry.name ?? null, text, styleFor(text, this.nfeIndentUnit()));
     if (result === null) return;
@@ -831,13 +845,14 @@ export class TextView extends FileView {
       return;
     }
     const changed = ed.replaceDocument(result.text);
-    new Notice(changed ? (ed.selection().empty ? t("notice.format.done") : t("notice.format.wholeFile")) : t("notice.format.nothing"));
+    new Notice(withDuration(changed ? (ed.selection().empty ? t("notice.format.done") : t("notice.format.wholeFile")) : t("notice.format.nothing"), Date.now() - started));
   }
 
   /** Compress: the same formats, the other way round; whitespace goes and the comments stay (USER 2026-09-19). */
   nfeCompress(plan: FormatPlan): void {
     const ed = this.nfeEditor;
     if (!ed || plan.kind !== "own") return;
+    const started = Date.now();
     const text = ed.getText();
     const result = compressOwn(this.nfeLanguage?.entry.name ?? null, text, styleFor(text, this.nfeIndentUnit()));
     if (result === null) return;
@@ -846,7 +861,9 @@ export class TextView extends FileView {
       return;
     }
     const changed = ed.replaceDocument(result.text);
-    new Notice(changed ? t("notice.compress.done", { saved: Math.max(0, text.length - result.text.length) }) : t("notice.format.nothing"));
+    new Notice(
+      withDuration(changed ? t("notice.compress.done", { saved: Math.max(0, text.length - result.text.length) }) : t("notice.format.nothing"), Date.now() - started)
+    );
   }
 
   /** The indent the editor types with, as a string: what a file that cannot say falls back to. */
