@@ -418,9 +418,16 @@ describe("the hyphen decision: the text first, the dictionaries second, the rule
 
   it("falls back to the dictionaries: a known word, prefix or particle", () => {
     expect(unwrapLines(doc("кое-", "что")).text.includes("кое-что,")).toBe(true);
-    expect(unwrapLines(doc("будь-", "ласка")).text.includes("будь-ласка,")).toBe(true);
+    expect(unwrapLines(doc("будь-", "коли")).text.includes("будь-коли,")).toBe(true);
     expect(unwrapLines(doc("когда-", "нибудь")).text.includes("когда-нибудь,")).toBe(true);
     expect(unwrapLines(doc("time-", "based")).text.includes("time-based,")).toBe(true);
+    // Ukrainian since the 2019 orthography: віце-, екс-, міні- are written
+    // solid, so nothing in the lists keeps a wrapper's hyphen after them.
+    expect(unwrapLines(doc("віце-", "прем'єр")).text.includes("віцепрем'єр,")).toBe(true);
+    expect(unwrapLines(doc("екс-", "чемпіон")).text.includes("ексчемпіон,")).toBe(true);
+    // A solid word the lists know is joined even at a particle the text never shows whole.
+    expect(unwrapLines(doc("ніби-", "то")).text.includes("нібито,")).toBe(true);
+    expect(unwrapLines(doc("співак-", "початківець")).text.includes("співак-початківець,")).toBe(true);
   });
 
   it("takes a lexicon handed to it instead of the dictionaries in force", () => {

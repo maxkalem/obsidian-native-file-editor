@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reloadPlugin } from "../src/platform/desktopShell";
+import { openObsidianHotkeys, reloadPlugin } from "../src/platform/desktopShell";
 
 function fakeApp(tabs: string[]) {
   const calls: string[] = [];
@@ -40,5 +40,29 @@ describe("reloadPlugin", () => {
   it("returns the error text when the restart fails", async () => {
     const app = { plugins: { disablePlugin: async () => undefined, enablePlugin: async () => Promise.reject(new Error("boom")) } };
     expect(await reloadPlugin(app, "x")).toBe("boom");
+  });
+});
+
+describe("openObsidianHotkeys", () => {
+  it("opens Obsidian's Hotkeys tab and sets its search to the plugin's name", () => {
+    const calls: string[] = [];
+    const app = {
+      setting: {
+        open: () => void calls.push("open"),
+        openTabById: (id: string) => {
+          calls.push(`tab ${id}`);
+          return { setQuery: (q: string) => void calls.push(`query ${q}`) };
+        },
+      },
+    };
+    expect(openObsidianHotkeys(app, "Native File Editor")).toBe(true);
+    expect(calls).toEqual(["open", "tab hotkeys", "query Native File Editor"]);
+  });
+
+  it("still opens the tab when it has no search to set, and reports a build that has no tab at all", () => {
+    const bare = { setting: { open: () => undefined, openTabById: () => ({}) } };
+    expect(openObsidianHotkeys(bare, "x")).toBe(true);
+    expect(openObsidianHotkeys({}, "x")).toBe(false);
+    expect(openObsidianHotkeys({ setting: { openTabById: () => null } }, "x")).toBe(false);
   });
 });

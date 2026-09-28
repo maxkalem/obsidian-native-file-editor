@@ -1,7 +1,7 @@
 import { type Language, ensureSyntaxTree } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
 import type { NodeType, SyntaxNode, Tree } from "@lezer/common";
-import { type Highlighter, type Tag, highlightCode } from "@lezer/highlight";
+import { type Highlighter, type Tag, highlightCode, highlightTree } from "@lezer/highlight";
 import { cm5Classes, forkTokenClassProp } from "./obsidianFork";
 import { TOKEN_CLASSES } from "./tokenTable";
 
@@ -192,5 +192,89 @@ export function paintByName(text: string, tree: Tree): TextToken[] {
   emit(0, top.from, null);
   walk(top, null);
   emit(top.to, text.length, null);
+  return out;
+}
+
+/** What a stretch of a document is to a tool that rewrites it: text it may touch, or a string or comment it must not. */
+export type SegmentKind = "code" | "string" | "comment";
+
+export interface TextSegment {
+  readonly from: number;
+  readonly to: number;
+  readonly kind: SegmentKind;
+}
+
+/**
+ * The document as strings, comments and the rest, in order and without gaps,
+ * from the same tree and the same highlighter the editor colours with. This is
+ * what Compress works on: a token class is the one thing every language the
+ * plugin knows agrees on, while node names differ per grammar.
+ *
+ * On a lezer grammar the spans come from `highlightTree`, so a comment or a
+ * string that spans lines is one segment. On Obsidian's stream fork the tree
+ * carries no highlight rules and the tokens are per line (`paintByName`), so
+ * two comment tokens either side of a line break are joined when the first
+ * does not begin with a line-comment marker, and two string tokens always:
+ * a string that ends on one line and another that begins on the next with
+ * nothing between them is not a construct the plugin's languages have.
+ */
+export function segmentsOf(text: string, tree: Tree): TextSegment[] {
+  const spans: { from: number; to: number; kind: SegmentKind }[] = [];
+  highlightTree(tree, nfeHighlighter, (from, to, classes) => {
+    const kind = kindOfClasses(classes);
+    if (kind !== "code") spans.push({ from, to, kind });
+  });
+  if (spans.length === 0 && treeHasRules(tree)) spans.push(...spansByName(text, tree));
+  const out: TextSegment[] = [];
+  let pos = 0;
+  const push = (from: number, to: number, kind: SegmentKind) => {
+    if (to <= from) return;
+    const last = out[out.length - 1];
+    if (last && last.kind === kind && last.to === from) out[out.length - 1] = { from: last.from, to, kind };
+    else out.push({ from, to, kind });
+  };
+  for (const span of spans) {
+    if (span.from < pos) continue;
+    push(pos, span.from, "code");
+    push(span.from, span.to, span.kind);
+    pos = span.to;
+  }
+  push(pos, text.length, "code");
+  return out;
+}
+
+function kindOfClasses(classes: string | null): SegmentKind {
+  if (classes === null) return "code";
+  if (/\bnfe-tok-comment\b/.test(classes)) return "comment";
+  if (/\bnfe-tok-(string|regexp|escape)\b/.test(classes)) return "string";
+  return "code";
+}
+
+/** A line comment ends at its newline; anything else that is a comment may go on. */
+const LINE_COMMENT_MARKER = /^(\/\/|#|--|;|%|'|!|::|REM\b|dnl\b)/i;
+
+/** The fork's per-line tokens as spans, with the line breaks inside a string or a block comment given back to it. */
+function spansByName(text: string, tree: Tree): { from: number; to: number; kind: SegmentKind }[] {
+  const tokens = paintByName(text, tree);
+  const out: { from: number; to: number; kind: SegmentKind }[] = [];
+  let pos = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    const from = pos;
+    pos += token.text.length;
+    if (token.text === "\n") {
+      const prev = out[out.length - 1];
+      const next = tokens[i + 1];
+      if (prev && prev.to === from && next && next.text !== "\n" && kindOfClasses(next.classes) === prev.kind && (prev.kind === "string" || (prev.kind === "comment" && !LINE_COMMENT_MARKER.test(text.slice(prev.from, prev.to))))) {
+        out[out.length - 1] = { ...prev, to: pos };
+      }
+      continue;
+    }
+    const kind = kindOfClasses(token.classes);
+    if (kind === "code") continue;
+    const prev = out[out.length - 1];
+    if (prev && prev.kind === kind && prev.to === from) out[out.length - 1] = { ...prev, to: pos };
+    else out.push({ from, to: pos, kind });
+  }
   return out;
 }

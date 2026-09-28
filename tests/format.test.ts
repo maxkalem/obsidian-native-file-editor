@@ -30,7 +30,8 @@ describe("which formatter serves a file", () => {
 
   it("says nothing can do it, and the menu then shows no row at all (USER 2026-09-19)", () => {
     expect(planFormat("Makefile", false).kind).toBe("none");
-    expect(planCompress("Rust").kind).toBe("none");
+    // Compress has a generic path for every language the whitespace table frees; a record format is what has no row.
+    expect(planCompress("Diff").kind).toBe("none");
     // A file with no language at all is the same case.
     expect(planFormat(null, false).kind).toBe("none");
   });

@@ -104,8 +104,8 @@ describe("loadVaultDictionaries", () => {
 describe("addWordToDictionary", () => {
   it("puts a word in the list its shape names, keeping what the bundled dictionary had", async () => {
     const transport = new MemoryTransport();
-    expect(listForWord("кое-")).toEqual({ list: "prefixes", entry: "кое" });
-    expect(listForWord("-нибудь")).toEqual({ list: "suffixes", entry: "нибудь" });
+    expect(listForWord("будь-")).toEqual({ list: "prefixes", entry: "будь" });
+    expect(listForWord("-небудь")).toEqual({ list: "suffixes", entry: "небудь" });
     expect(listForWord(" віч-на-віч ")).toEqual({ list: "words", entry: "віч-на-віч" });
 
     const added = await addWordToDictionary(transport, FOLDER, "Ukrainian", "мега-байт");

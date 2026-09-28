@@ -7,7 +7,7 @@ export type DictionaryChoice =
   | { readonly kind: "programming"; readonly language: string; readonly role: string; readonly word: string };
 
 export interface AddToDictionaryDeps {
-  /** The word under the cursor or the selection; the field is editable, so `кое-` and `-нибудь` can be typed. */
+  /** The word under the cursor or the selection; the field is editable, so `будь-` and `-небудь` can be typed. */
   readonly word: string;
   /** Text languages in force, bundled and from the vault. */
   readonly textLanguages: () => string[];
@@ -121,9 +121,18 @@ export class AddToDictionaryModal extends Modal {
       return;
     }
     const languages = this.deps.programmingLanguages();
-    new Setting(body)
+    const current = this.deps.currentLanguage;
+    // The file's language is preselected when it has lists; when it has a
+    // grammar the first entry stands there instead, and the row says why the
+    // language the user is looking at is not the one in the dropdown. That
+    // sentence is the answer to the question the dialog provokes, so it stands
+    // on its own line in the warning colour rather than inside the description.
+    const grammar = current !== null && !languages.includes(current);
+    const programming = new Setting(body)
       .setName(t("addWord.kind.programming"))
-      .setDesc(t("addWord.programming.desc"))
+      .setDesc(t("addWord.programming.desc"));
+    if (grammar) programming.descEl.createDiv({ cls: "nfe-add-word-grammar", text: t("addWord.programming.grammar", { language: current }) });
+    programming
       .addDropdown((d) => {
         for (const name of languages) d.addOption(name, name);
         d.setValue(this.programmingLanguage);

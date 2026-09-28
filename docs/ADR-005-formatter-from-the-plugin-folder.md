@@ -4,7 +4,7 @@ Status: accepted 2026-09-19. Supersedes the rule "no code from the vault is ever
 
 ## The question
 
-Format has to work on every language a person actually writes, and the cheap universal formatter — CodeMirror's `indentRange` — only fixes indentation. Measured over the 171 code fixtures (ledger, 2026-09-19): of the 113 samples with real indentation it restores 40 exactly, 9 within two lines, and for 64 it does nothing useful. Everything beyond that (spacing, line breaks, quotes, wrapping) needs a real formatter, and the real formatters are big: prettier's full set is 2.29 MB minified, its JavaScript-only subset 615 KB, against a `main.js` of 1.69 MB.
+Format has to work on every language a person actually writes, and the cheap universal formatter — CodeMirror's `indentRange` — only fixes indentation. Measured over the 171 code fixtures (measured 2026-09-19): of the 113 samples with real indentation it restores 40 exactly, 9 within two lines, and for 64 it does nothing useful. Everything beyond that (spacing, line breaks, quotes, wrapping) needs a real formatter, and the real formatters are big: prettier's full set is 2.29 MB minified, its JavaScript-only subset 615 KB, against a `main.js` of 1.69 MB.
 
 Three ways were measured and put to the user: bundle a library, run the user's own installed formatter through the Run mechanism (ADR-004), or let the user install the formatter into the plugin's folder and load it when it is needed.
 
@@ -38,7 +38,7 @@ Two things the first version of this ADR did not foresee, both measured on 2026-
 
 The community plugins are not prettier's own files, so the repository bundles each one itself with `scripts/build-formatter.mjs` (esbuild, `fs` and `path` replaced by two-line shims, the engine external) into `formatters/extra/`, whose `manifest.json` names the package, the version and the hash of each. That makes them ours to vouch for, which the hash list then does. What did not survive the attempt, and why, is written in that script's header: server-side plugins (Java, Shell, Solidity) need Node modules, TOML inlines a WebAssembly blob of 34.8 MB, and the Go-template plugin is written for prettier 2.
 
-The limit that stays: only names from the list above, only in that fixed folder, never a path from a setting, never anything downloaded, and never a file whose hash nobody has approved. The palette, language and dictionary folders keep the old rule in full — a CodeMirror theme module there is still read as text and never executed, because those folders are meant for data and a person drops files into them without thinking about code.
+The limit that stays: only names from the list the plugin compiles in — prettier's own files above and the community ones bundled here, and nothing else — only in that fixed folder, never a path from a setting, never anything downloaded, and never a file whose hash nobody has approved. The palette, language and dictionary folders keep the old rule in full — a CodeMirror theme module there is still read as text and never executed, because those folders are meant for data and a person drops files into them without thinking about code.
 
 Measured cost of the load (2.18 MB minified prettier, Node): parse 39 ms, module evaluation 18 ms, 7.2 MB of heap while it is loaded, +0.3 MB after the reference is dropped and the collector runs. Roughly 60 ms per Format, nothing held in between.
 

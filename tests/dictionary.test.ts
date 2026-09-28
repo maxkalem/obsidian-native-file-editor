@@ -74,13 +74,13 @@ describe("parseDictionary", () => {
 });
 
 describe("buildLexicon", () => {
-  const lexicon = buildLexicon([{ name: "Test", prefixes: ["Кое", "-по-"], suffixes: ["НЕБУДЬ"], words: ["Будь‑що", "непереносимой", " "] }]);
+  const lexicon = buildLexicon([{ name: "Test", prefixes: ["Будь", "-по-"], suffixes: ["НЕБУДЬ"], words: ["Будь‑що", "непереносимий", " "] }]);
 
   it("lower-cases, strips the hyphens of a particle and normalises the hyphen of a word", () => {
-    expect([...lexicon.prefixes].sort()).toEqual(["кое", "по"]);
+    expect([...lexicon.prefixes].sort()).toEqual(["будь", "по"]);
     expect([...lexicon.suffixes]).toEqual(["небудь"]);
     expect(lexicon.hyphenated.has("будь-що")).toBe(true);
-    expect(lexicon.plain.has("непереносимой")).toBe(true);
+    expect(lexicon.plain.has("непереносимий")).toBe(true);
   });
 
   it("asks for the same-vowel rule outside the Latin script only when a dictionary does", () => {

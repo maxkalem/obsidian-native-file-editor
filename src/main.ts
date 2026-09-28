@@ -14,7 +14,7 @@ import {
   VIEW_TYPE_TEXT,
 } from "./constants";
 import { PaletteLoader } from "./palette/loader";
-import { createDesktopShell, reloadPlugin } from "./platform/desktopShell";
+import { createDesktopShell, openObsidianHotkeys, reloadPlugin } from "./platform/desktopShell";
 import { setupRun } from "./run/setup";
 import { confirm, pickLanguage, promptText } from "./ui/pickers";
 import { DocumentStyleSink } from "./ui/styleSink";
@@ -55,7 +55,33 @@ import { LOCALIZATION_FILE, loadLocalization } from "./core/localization";
 import { AddToDictionaryModal, type DictionaryChoice } from "./ui/AddToDictionaryModal";
 import { NewFileModal } from "./ui/NewFileModal";
 import { RegexHelpModal } from "./ui/RegexHelpModal";
+import { addSubmenu } from "./ui/submenu";
 import { type BakedHotkey, type Chord, bakedMatches, platformOf } from "./core/hotkeys";
+import {
+  COMMAND_ADD_TO_DICTIONARY,
+  COMMAND_CASE_INVERT,
+  COMMAND_CASE_LOWER,
+  COMMAND_CASE_SENTENCE,
+  COMMAND_CASE_TITLE,
+  COMMAND_CASE_UPPER,
+  COMMAND_INSERT_DATE,
+  COMMAND_INSERT_DATE_TIME,
+  COMMAND_KEYS,
+  COMMAND_KEYS_GUIDE,
+  COMMAND_LINE_AUTO,
+  COMMAND_LINE_LTR,
+  COMMAND_LINE_RTL,
+  COMMAND_SEARCH_WEB,
+  COMMAND_TOGGLE_INVISIBLES,
+  COMMAND_TOGGLE_WORD_WRAP,
+  COMMAND_UNWRAP,
+  COMMAND_WRAP,
+  type ObsidianHotkey,
+  defaultObsidianHotkeys,
+  fromObsidianHotkey,
+  toObsidianHotkey,
+} from "./core/commandKeys";
+import type { CaseKind } from "./core/editText";
 import { TextView } from "./ui/TextView";
 import { codeMirrorFactory } from "./ui/codemirror";
 
@@ -170,6 +196,62 @@ export function obsidianCommandsOn(app: App, chord: Chord, mac: boolean): string
     out.push(typeof name === "string" && name.length > 0 ? name : id);
   });
   return out;
+}
+
+/** The default keys of one of this plugin's commands, for `addCommand` (none for one that ships unbound). */
+function commandDefaults(id: string): ObsidianHotkey[] {
+  const command = COMMAND_KEYS.find((c) => c.id === id);
+  return command ? defaultObsidianHotkeys(command) : [];
+}
+
+/** The shape of `app.hotkeyManager` this plugin relies on, every member probed before use (app.js 1.13.7, read 2026-09-22). */
+interface HotkeyManagerLike {
+  getHotkeys?: (id: string) => unknown;
+  getDefaultHotkeys?: (id: string) => unknown;
+  setHotkeys?: (id: string, hotkeys: unknown[]) => void;
+  removeHotkeys?: (id: string) => void;
+  save?: () => Promise<void> | void;
+  bake?: () => void;
+}
+
+function hotkeyManagerOf(app: App): HotkeyManagerLike | null {
+  const manager = (app as unknown as { hotkeyManager?: unknown }).hotkeyManager;
+  return manager !== null && typeof manager === "object" ? (manager as HotkeyManagerLike) : null;
+}
+
+/**
+ * The keys Obsidian binds to one of this plugin's commands right now: the
+ * user's when he set any (on either page), else the defaults. `custom` says
+ * which. Null when this Obsidian build does not expose its hotkey manager,
+ * in which case the settings row can only point at Obsidian's page.
+ */
+export function commandChords(app: App, fullId: string): { chords: Chord[]; custom: boolean } | null {
+  const manager = hotkeyManagerOf(app);
+  if (!manager || typeof manager.getHotkeys !== "function" || typeof manager.getDefaultHotkeys !== "function") return null;
+  const read = (raw: unknown): Chord[] => (Array.isArray(raw) ? raw.map(fromObsidianHotkey).filter((c): c is Chord => c !== null) : []);
+  const own = manager.getHotkeys(fullId);
+  if (Array.isArray(own)) return { chords: read(own), custom: true };
+  return { chords: read(manager.getDefaultHotkeys(fullId)), custom: false };
+}
+
+/**
+ * Bind one chord to one of this plugin's commands the way Obsidian's own
+ * Hotkeys page does — `setHotkeys`, then `save` (the vault's hotkeys.json),
+ * then `bake` — or, with null, take the user's binding away so the default
+ * returns (`removeHotkeys`). False when the manager is not there.
+ */
+export async function setCommandChord(app: App, fullId: string, chord: Chord | null): Promise<boolean> {
+  const manager = hotkeyManagerOf(app);
+  if (!manager || typeof manager.setHotkeys !== "function" || typeof manager.removeHotkeys !== "function") return false;
+  try {
+    if (chord === null) manager.removeHotkeys(fullId);
+    else manager.setHotkeys(fullId, [toObsidianHotkey(chord)]);
+    if (typeof manager.save === "function") await manager.save();
+    if (typeof manager.bake === "function") manager.bake();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export default class NativeFileEditorPlugin extends Plugin {
@@ -304,6 +386,7 @@ export default class NativeFileEditorPlugin extends Plugin {
     if (run) {
       this.addCommand({
         id: COMMAND_RUN_FILE,
+        hotkeys: commandDefaults(COMMAND_RUN_FILE),
         name: t("command.run"),
         checkCallback: (checking) => {
           const view = this.app.workspace.getActiveViewOfType(TextView);
@@ -314,6 +397,7 @@ export default class NativeFileEditorPlugin extends Plugin {
       });
       this.addCommand({
         id: COMMAND_STOP_RUN,
+        hotkeys: commandDefaults(COMMAND_STOP_RUN),
         name: t("command.stop"),
         checkCallback: (checking) => {
           const view = this.app.workspace.getActiveViewOfType(TextView);
@@ -387,6 +471,7 @@ export default class NativeFileEditorPlugin extends Plugin {
 
     this.addCommand({
       id: COMMAND_TOGGLE_MODE,
+      hotkeys: commandDefaults(COMMAND_TOGGLE_MODE),
       name: t("command.toggleMode"),
       checkCallback: (checking) => {
         const view = this.app.workspace.getActiveViewOfType(TextView);
@@ -403,6 +488,7 @@ export default class NativeFileEditorPlugin extends Plugin {
     // exactly when its menu row is absent, because both ask the same plan.
     this.addCommand({
       id: COMMAND_FORMAT,
+      hotkeys: commandDefaults(COMMAND_FORMAT),
       name: t("command.format"),
       checkCallback: (checking) => {
         const view = this.app.workspace.getActiveViewOfType(TextView);
@@ -415,6 +501,7 @@ export default class NativeFileEditorPlugin extends Plugin {
     });
     this.addCommand({
       id: COMMAND_COMPRESS,
+      hotkeys: commandDefaults(COMMAND_COMPRESS),
       name: t("command.compress"),
       checkCallback: (checking) => {
         const view = this.app.workspace.getActiveViewOfType(TextView);
@@ -426,8 +513,63 @@ export default class NativeFileEditorPlugin extends Plugin {
       },
     });
 
+    // The five Case entries of the context menu as commands, so they can carry
+    // a key (USER 2026-09-22: Ctrl+Alt+Shift+1…5 by default). Each declines
+    // where the menu has no Case ▸: no pane, or the preview.
+    const cases: Array<[string, string, CaseKind]> = [
+      [COMMAND_CASE_UPPER, t("command.case.upper"), "upper"],
+      [COMMAND_CASE_LOWER, t("command.case.lower"), "lower"],
+      [COMMAND_CASE_TITLE, t("command.case.title"), "title"],
+      [COMMAND_CASE_SENTENCE, t("command.case.sentence"), "sentence"],
+      [COMMAND_CASE_INVERT, t("command.case.invert"), "invert"],
+    ];
+    for (const [id, name, kind] of cases) {
+      this.addCommand({
+        id,
+        name,
+        hotkeys: commandDefaults(id),
+        checkCallback: (checking) => {
+          const view = this.app.workspace.getActiveViewOfType(TextView);
+          if (!view || !view.nfeCanChangeCase()) return false;
+          if (!checking) view.nfeChangeCase(kind);
+          return true;
+        },
+      });
+    }
+
+    // Everything else the menus offer, as commands with no key (USER
+    // 2026-09-22), so a key can be given to any of them. Each declines where
+    // its menu row would be absent; the view answers the same question.
+    const viewCommand = (id: string, name: string, can: (view: TextView) => boolean, run: (view: TextView) => void): void => {
+      this.addCommand({
+        id,
+        name,
+        hotkeys: commandDefaults(id),
+        checkCallback: (checking) => {
+          const view = this.app.workspace.getActiveViewOfType(TextView);
+          if (!view || !can(view)) return false;
+          if (!checking) run(view);
+          return true;
+        },
+      });
+    };
+    viewCommand(COMMAND_UNWRAP, t("command.unwrap"), (v) => v.nfeCanEdit(), (v) => v.nfeUnwrapLines());
+    viewCommand(COMMAND_WRAP, t("command.wrap"), (v) => v.nfeCanEdit(), (v) => v.nfeOpenWrapLines());
+    viewCommand(COMMAND_ADD_TO_DICTIONARY, t("command.addToDictionary"), (v) => v.nfeHasEditor(), (v) => void v.nfeAddToDictionary());
+    viewCommand(COMMAND_INSERT_DATE, t("command.insertDate"), (v) => v.nfeCanEdit(), (v) => v.nfeInsertStamp("date"));
+    viewCommand(COMMAND_INSERT_DATE_TIME, t("command.insertDateTime"), (v) => v.nfeCanEdit(), (v) => v.nfeInsertStamp("dateTime"));
+    viewCommand(COMMAND_TOGGLE_WORD_WRAP, t("command.toggleWordWrap"), (v) => v.nfeHasEditor(), (v) => v.toggleWordWrap());
+    viewCommand(COMMAND_TOGGLE_INVISIBLES, t("command.toggleInvisibles"), (v) => v.nfeHasEditor(), (v) => v.toggleInvisibles());
+    viewCommand(COMMAND_LINE_AUTO, t("command.lineAuto"), (v) => v.nfeHasEditor(), (v) => void v.nfeSetLineDirection(null));
+    viewCommand(COMMAND_LINE_LTR, t("command.lineLtr"), (v) => v.nfeHasEditor(), (v) => void v.nfeSetLineDirection("ltr"));
+    viewCommand(COMMAND_LINE_RTL, t("command.lineRtl"), (v) => v.nfeHasEditor(), (v) => void v.nfeSetLineDirection("rtl"));
+    viewCommand(COMMAND_SEARCH_WEB, t("command.searchWeb"), (v) => v.nfeCanSearchWeb(), (v) => void v.nfeSearchWeb());
+    // The guide needs no pane: it is the same modal the settings page and the pane's ? open.
+    this.addCommand({ id: COMMAND_KEYS_GUIDE, name: t("command.keysGuide"), hotkeys: commandDefaults(COMMAND_KEYS_GUIDE), callback: () => new RegexHelpModal(this.app, this.nfeSettings.hotkeys).open() });
+
     this.addCommand({
       id: COMMAND_NEW_FILE,
+      hotkeys: commandDefaults(COMMAND_NEW_FILE),
       name: t("command.newFile"),
       callback: () => {
         const active = this.app.workspace.getActiveFile();
@@ -435,10 +577,11 @@ export default class NativeFileEditorPlugin extends Plugin {
       },
     });
 
-    this.addCommand({ id: COMMAND_RELOAD_PALETTES, name: t("command.reread"), callback: () => void this.reread(true) });
+    this.addCommand({ id: COMMAND_RELOAD_PALETTES, name: t("command.reread"), hotkeys: commandDefaults(COMMAND_RELOAD_PALETTES), callback: () => void this.reread(true) });
     this.addCommand({
       id: COMMAND_WRITE_EXAMPLE_PALETTE,
       name: t("command.examplePalette"),
+      hotkeys: commandDefaults(COMMAND_WRITE_EXAMPLE_PALETTE),
       callback: () => {
         void (async () => {
           const language = await pickLanguage(this.app, allLanguageNames(), t("settings.palettes.example.placeholder"));
@@ -466,33 +609,39 @@ export default class NativeFileEditorPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu: Menu, editor, info) => {
         if (info.file?.extension !== "md") return;
-        menu.addItem((item) =>
-          item
-            .setTitle(t("menu.note.unwrap"))
-            .setIcon("unfold-horizontal")
-            .onClick(() => {
-              const result = unwrapInNote(editor);
-              new Notice(describeUnwrap(result));
-              if (result.rejoined.length > 0) void this.offerHunspellReview(result.rejoined, (restore) => restoreInNote(editor, result.text, restore));
-            })
-        );
-        menu.addItem((item) =>
-          item
-            .setTitle(t("menu.note.wrap"))
-            .setIcon("wrap-text")
-            .onClick(() => new WrapLinesModal(this.app, (choice) => new Notice(describeWrap(wrapInNote(editor, choice.width, choice.breakWords), choice.width))).open())
-        );
-        menu.addItem((item) =>
-          item
-            .setTitle(t("menu.note.addToDictionary"))
-            .setIcon("book-plus")
-            .onClick(() => {
-              const selected = editor.getSelection().trim();
-              const cursor = editor.getCursor();
-              const word = selected.length > 0 ? (selected.split(/\s*\n\s*/)[0] ?? "") : wordAtPosition(editor.getLine(cursor.line), cursor.ch);
-              this.openAddToDictionary(word, null);
-            })
-        );
+        // One group named after the plugin, its rows without a suffix: Obsidian's
+        // own Format ▸ cannot be reached from here, and three rows each carrying
+        // "(Native File Editor)" were the noise he asked to remove (USER 2026-09-22).
+        addSubmenu(menu, t("menu.note.group"), "align-left", (sub) => {
+          sub.addItem((item) =>
+            item
+              .setTitle(t("menu.unwrap"))
+              .setIcon("unfold-horizontal")
+              .onClick(() => {
+                const result = unwrapInNote(editor);
+                new Notice(describeUnwrap(result));
+                if (result.rejoined.length > 0) void this.offerHunspellReview(result.rejoined, (restore) => restoreInNote(editor, result.text, restore));
+              })
+          );
+          sub.addItem((item) =>
+            item
+              .setTitle(t("menu.wrap"))
+              .setIcon("wrap-text")
+              .onClick(() => new WrapLinesModal(this.app, (choice) => new Notice(describeWrap(wrapInNote(editor, choice.width, choice.breakWords), choice.width))).open())
+          );
+          sub.addSeparator();
+          sub.addItem((item) =>
+            item
+              .setTitle(t("menu.addToDictionary"))
+              .setIcon("book-plus")
+              .onClick(() => {
+                const selected = editor.getSelection().trim();
+                const cursor = editor.getCursor();
+                const word = selected.length > 0 ? (selected.split(/\s*\n\s*/)[0] ?? "") : wordAtPosition(editor.getLine(cursor.line), cursor.ch);
+                this.openAddToDictionary(word, null);
+              })
+          );
+        });
       })
     );
 
@@ -523,6 +672,11 @@ export default class NativeFileEditorPlugin extends Plugin {
         textLanguages: () => allTextLanguageNames(),
         createExampleDictionary: (language) => this.createExampleDictionary(language),
         regexHelp: () => new RegexHelpModal(this.app, this.nfeSettings.hotkeys).open(),
+        openObsidianHotkeys: () => {
+          if (!openObsidianHotkeys(this.app, this.manifest.name)) new Notice(t("notice.hotkeys.unavailable"));
+        },
+        commandKeys: (id) => commandChords(this.app, `${PLUGIN_ID}:${id}`),
+        setCommandKey: (id, chord) => setCommandChord(this.app, `${PLUGIN_ID}:${id}`, chord),
         obsidianHoldersOf: (chord) => obsidianCommandsOn(this.app, chord, platformOf(Platform) === "mac"),
         reloadPlugin: async () => {
           const err = await reloadPlugin(this.app, PLUGIN_ID);

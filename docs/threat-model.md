@@ -10,11 +10,13 @@ The one thing that reaches the network is the user's own browser: the editor's c
 
 ## Filesystem
 
-The plugin reads and writes the files the user opens in it, through one transport (`src/platform/`): Node's `fs` on desktop, the vault adapter on mobile. Writes go to a dot-prefixed temp file beside the target and are renamed over it, so a failed write leaves the original in place. Of its own the plugin writes, under its plugin folder, the diagnostic log (`nfe.log`, paths and error stacks, never file contents) and, once per vault, the example palette; it reads the palette folder the user configured. Backups, when they arrive, are written under a configurable vault folder and removed through Obsidian's trash.
+The plugin reads and writes the files the user opens in it, through one transport (`src/platform/`): Node's `fs` on desktop, the vault adapter on mobile. Writes go to a dot-prefixed temp file beside the target and are renamed over it, so a failed write leaves the original in place. Of its own the plugin writes, under its plugin folder, the diagnostic log (`nfe.log`, paths and error stacks, never file contents) and the example files the user asks for from settings — a palette, a language definition, a dictionary — and the one word "Add to dictionary…" puts into a dictionary or a language file; it reads the palette, language and dictionary folders the user configured, a Hunspell dictionary from the last of them when the review after Unwrap is accepted, and the file names in its own `formatters/` folder. Backups, when they arrive, are written under a configurable vault folder and removed through Obsidian's trash.
 
 ## Code from the vault
 
-None of it is executed. A CodeMirror theme module dropped into the palette folder is scanned as text for its colour literals (`src/palette/codemirrorTheme.ts`) and never evaluated; palette CSS reaches the page as the `textContent` of one `<style>` element. Document content never goes through `innerHTML`.
+None of it is executed out of a folder a setting can point at. A CodeMirror theme module dropped into the palette folder is scanned as text for its colour literals (`src/palette/codemirrorTheme.ts`) and never evaluated; the language and dictionary folders are read as data in the same way; palette CSS reaches the page as the `textContent` of one `<style>` element. Document content never goes through `innerHTML`.
+
+One path evaluates a file, and only one: a formatter the user copied by hand into `.obsidian/plugins/native-file-editor/formatters/`, a fixed path no setting moves, beside the `main.js` Obsidian itself evaluates at every start (ADR-005). Only names the plugin knows are read there, and only when Format is pressed: the file is read into a string, that string is hashed with SHA-256 and compared with the builds this repository ships and with the hashes the user has confirmed in `data.json`, and the same string is then evaluated and dropped again — nothing is downloaded, nothing is kept between calls, and a file in neither list is named with its hash and runs only after the user says they put it there (`src/fmt/vaultFormatter.ts`, `src/fmt/prettierFiles.ts`).
 
 ## Processes: the Run feature (ADR-004)
 
@@ -34,4 +36,4 @@ Program output is text, appended to a `pre` with `appendText`, stdout and stderr
 
 ## Settings and state
 
-`data.json` (shared through sync) holds preferences only. Everything that names this device (interpreter paths, the Run toggle, the timeout, the large-file limit, last modes) lives in `localStorage` scoped by vault, so an interpreter path never travels to another machine.
+`data.json` (shared through sync) holds preferences, and the one thing that is not a preference: the SHA-256 hashes of formatter files the user confirmed by hand, which is a list of approvals rather than of anything device-specific. Everything that names this device (interpreter paths, the Run toggle, the timeout, the large-file limit, last modes) lives in `localStorage` scoped by vault, so an interpreter path never travels to another machine.

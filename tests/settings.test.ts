@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_LARGE_FILE_BYTES } from "../src/constants";
-import { chordText } from "../src/core/hotkeys";
+import { type Chord, chordText, parseChord } from "../src/core/hotkeys";
 import { EN } from "../src/i18n/en";
 import { DEFAULT_DEVICE_STATE, DeviceLocalStore, type StorageLike, normalizeDeviceState } from "../src/settings/DeviceLocalStore";
 import { Setting, __fakeEl, __findAllByClass, __fire, __textOf } from "./mocks/obsidian";
@@ -87,6 +87,11 @@ describe("settings tab definitions", () => {
     const dialogs = { folder: null as string | null, file: null as string | null, language: null as string | null, text: null as string | null, confirm: true, asked: [] as string[] };
     /** What Obsidian would say holds a chord (`Ctrl+B` → ["Toggle bold"]); empty by default. */
     const obsidianKeys: Record<string, string[]> = {};
+    const commandBindings: { readable: boolean; custom: Record<string, Chord[]>; defaults: Record<string, Chord[]> } = {
+      readable: true,
+      custom: {},
+      defaults: { format: [parseChord("Ctrl+Alt+Shift+F")!], compress: [parseChord("Ctrl+Alt+Shift+C")!], "toggle-mode": [parseChord("Ctrl+Alt+Shift+E")!], "case-upper": [parseChord("Ctrl+Alt+Shift+1")!] },
+    };
     const shell: DesktopShell = {
       openPath: async (p) => (actions.push(`open ${p}`), null),
       pickFolder: async () => dialogs.folder,
@@ -116,12 +121,20 @@ describe("settings tab definitions", () => {
       createExampleDictionary: async (l) => void actions.push(`dictionary ${l}`),
       reloadPlugin: async () => void actions.push("reload"),
       regexHelp: () => void actions.push("regex-help"),
+      openObsidianHotkeys: () => void actions.push("obsidian-hotkeys"),
+      commandKeys: (id) => (commandBindings.readable ? { chords: commandBindings.custom[id] ?? commandBindings.defaults[id] ?? [], custom: id in commandBindings.custom } : null),
+      setCommandKey: async (id, chord) => {
+        actions.push(chord === null ? `command ${id} reset` : `command ${id} = ${chordText(chord)}`);
+        if (chord === null) delete commandBindings.custom[id];
+        else commandBindings.custom[id] = [chord];
+        return commandBindings.readable;
+      },
       obsidianHoldersOf: (chord) => (obsidianKeys[chordText(chord)] ?? []),
       isDesktop: () => desktop,
       notice: (m: string) => void notices.push(m),
       refresh: () => void actions.push("refresh"),
     };
-    return { deps, device, current: () => current, actions, notices, dialogs, obsidianKeys };
+    return { deps, device, current: () => current, actions, notices, dialogs, obsidianKeys, commandBindings };
   }
 
   /** The options of the dropdown whose control key is `key`. */
@@ -356,6 +369,36 @@ describe("settings tab definitions", () => {
     expect(h.device.get()).toMatchObject({ runEnabled: true, runWarningAccepted: true });
   });
 
+  it("the Enable Run row is rendered, so a refresh rebuilds its switch from the state; the write never sets the switch itself (2026-09-25: Esc left it on, then a setValue after the write looped)", async () => {
+    desktop = true;
+    const h = harness();
+    const rowOf = () => renderRows(buildDefinitions(h.deps) as never).find((r) => r.name === "Enable Run")!;
+    const toggleOf = (row: { setting: Setting }) => (row.setting as unknown as { toggles: Array<{ value: boolean; onChange: ((v: boolean) => void) | null }> }).toggles[0]!;
+    const first = toggleOf(rowOf());
+    expect(first.value).toBe(false);
+    // The click: Obsidian's toggle flips itself, then calls the callback.
+    h.dialogs.confirm = false;
+    first.value = true;
+    first.onChange!(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.device.get().runEnabled).toBe(false);
+    expect(h.actions).toEqual(["refresh"]);
+    // The refresh re-renders the row (a `render` row always is), and the new switch reads the state.
+    expect(toggleOf(rowOf()).value).toBe(false);
+    // The old switch was never set from the write: a setValue there would call its callback and write again.
+    expect(first.value).toBe(true);
+    expect(h.dialogs.asked).toHaveLength(1);
+    // Accepted: state on, the re-rendered switch on.
+    h.dialogs.confirm = true;
+    const second = toggleOf(rowOf());
+    second.value = true;
+    second.onChange!(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.device.get().runEnabled).toBe(true);
+    expect(toggleOf(rowOf()).value).toBe(true);
+    expect(h.dialogs.asked).toHaveLength(2);
+  });
+
   it("the accepted warning is device-local, so a reset of this device asks again", async () => {
     desktop = true;
     const h = harness();
@@ -554,6 +597,62 @@ describe("settings tab definitions", () => {
     expect(status()).toBe("warning");
     await h.deps.saveSettings({ ...h.current(), hotkeys: { win: {}, mac: {}, linux: {} } });
     expect(status()).toBe(null);
+  });
+
+  it("the Hotkeys page lists the commands with the keys Obsidian binds, records a new one through Obsidian's manager, and resets", async () => {
+    const h = harness();
+    const page = () => keysGroup(h.deps).items.find((d) => d.type === "page" && d.name === "Hotkeys") as unknown as { items: Array<{ heading: string; items: Array<{ name: string; desc: string; action?: () => void; render?: (s: Setting) => void }> }> };
+    // Two groups: the editor's own keys, then the commands (USER 2026-09-22: every key on one page).
+    expect(page().items.map((g) => g.heading)).toEqual(["Keys", "Commands"]);
+    const rows = page().items[1]!.items;
+    expect(rows[0]!.name).toBe("Where else the keys live");
+    rows[0]!.action?.();
+    expect(h.actions).toEqual(["obsidian-hotkeys"]);
+    // One row per command this device registers, Run and Stop included on the desktop, none for the phone.
+    expect(rows.slice(1).map((r) => r.name)).toEqual([
+      "Toggle preview and edit", "New file", "Format", "Compress",
+      "UPPERCASE the selection", "lowercase the selection", "Title Case the selection", "Sentence case the selection", "iNVERT cASE of the selection",
+      "Run file", "Stop run",
+      "Unwrap lines", "Wrap lines…", "Add to dictionary…", "Insert the date", "Insert the date and time", "Toggle word wrap", "Toggle invisibles",
+      "This line: direction by content", "This line: left to right", "This line: right to left", "Search the web for the selection", "Keys and regular expressions guide",
+      "Reread languages and palettes", "Create example palette for a language",
+    ]);
+    desktop = false;
+    const mobileRows = (keysGroup(harness().deps).items.find((d) => d.type === "page" && d.name === "Hotkeys") as unknown as { items: Array<{ items: Array<{ name: string }> }> }).items[1]!.items;
+    desktop = true;
+    expect(mobileRows.map((r) => r.name)).not.toContain("Run file");
+    expect(mobileRows.map((r) => r.name)).toContain("Format");
+    // The key shown is Obsidian's current binding; an unbound command says so.
+    const rendered = renderRows(rows.slice(1) as never);
+    const descOf = (r: { setting: Setting }) => __textOf(r.setting.descEl);
+    expect(descOf(rendered.find((r) => r.name === "Format")!)).toContain("Ctrl+Shift+Alt+F");
+    expect(descOf(rendered.find((r) => r.name === "Reread languages and palettes")!)).toContain("not set");
+    // The pencil records the next chord and writes it through Obsidian's hotkey manager, not into data.json.
+    const format = rendered.find((r) => r.name === "Format")!;
+    format.setting.__click("Change: press");
+    __fire(format.setting.texts[0]!.inputEl, "keydown", { code: "KeyK", key: "k", altKey: false, shiftKey: false, ctrlKey: true, metaKey: false });
+    await tick();
+    expect(h.actions.at(-2)).toBe("command format = Ctrl+K");
+    expect(h.current().hotkeys.win).toEqual({});
+    // Rendered again: the new key, the default named, and a reset arrow that removes the user's binding.
+    const again = renderRows(page().items[1]!.items.slice(1) as never).find((r) => r.name === "Format")!;
+    expect(descOf(again)).toContain("Ctrl+K");
+    expect(descOf(again)).toContain("default Ctrl+Shift+Alt+F");
+    again.setting.__click("Back to the default");
+    await tick();
+    expect(h.actions.at(-2)).toBe("command format reset");
+    expect(h.commandBindings.custom).toEqual({});
+  });
+
+  it("without a readable hotkey manager the command rows show the plugin's default and point at Obsidian's page, with no pencil", () => {
+    const h = harness();
+    h.commandBindings.readable = false;
+    const page = keysGroup(h.deps).items.find((d) => d.type === "page" && d.name === "Hotkeys") as unknown as { items: Array<{ items: unknown[] }> };
+    const rendered = renderRows(page.items[1]!.items.slice(1) as never);
+    const format = rendered.find((r) => r.name === "Format")!;
+    expect(__textOf(format.setting.descEl)).toContain("Ctrl+Shift+Alt+F");
+    expect(__textOf(format.setting.descEl)).toContain("use Settings → Hotkeys");
+    expect(format.setting.buttons).toHaveLength(0);
   });
 
   it("custom file types live on the File types page: add asks for the extension and a language, delete removes, both reread", async () => {

@@ -22,6 +22,8 @@ import { DEFAULT_SETTINGS, type SharedSettings } from "../src/settings/settings"
 import { type RunViewDeps, TextView } from "../src/ui/TextView";
 import type { ExecuteRequest, ExecuteResult } from "../src/run/execute";
 import type { EditorFactory, EditorHandle, EditorOptions } from "../src/ui/editor";
+import type { TextSegment } from "../src/highlight/highlighter";
+import type { Tree } from "@lezer/common";
 
 /**
  * The view against a fake editor, a fake transport and fake timers. What this
@@ -145,9 +147,23 @@ class FakeEditor implements EditorHandle {
   canIndent(): boolean {
     return this.indents;
   }
-  indentLines(): boolean {
+  /** The unit the last Format asked for: the file's own, or the setting when the file cannot say. */
+  indentUnit: string | undefined = undefined;
+  indentLines(unit?: string): boolean {
     this.actions.push("indentLines");
+    this.indentUnit = unit;
     return this.indents;
+  }
+  /** A tree a test supplies (the markup formatters read one); null otherwise. */
+  treeValue: Tree | null = null;
+  syntaxTree(): Tree | null {
+    return this.treeValue;
+  }
+  /** The fake has no grammar: the whole text is code unless a test says otherwise, and null stands for a parse that timed out. */
+  segmentsValue: TextSegment[] | null | "code" = "code";
+  segments(): TextSegment[] | null {
+    this.actions.push("segments");
+    return this.segmentsValue === "code" ? [{ from: 0, to: this.text.length, kind: "code" }] : this.segmentsValue;
   }
   replaceDocument(text: string): boolean {
     this.actions.push("replaceDocument");
@@ -355,7 +371,7 @@ describe("TextView", () => {
     h.transport.files.set("a.txt", utf8("x"));
     await h.view.__load(new TFile("a.txt"));
     // Added mode first, so it sits next to the three dots; the search button to its left.
-    expect(h.view.actions.map((a) => a.icon)).toEqual(["pencil", "search", "pilcrow"]);
+    expect(h.view.actions.map((a) => a.icon)).toEqual(["pencil", "search", "pilcrow", "wrap-text"]);
     const modeEl = h.view.actions[0]?.el;
     const searchEl = h.view.actions[1]?.el;
     expect(modeEl.getAttribute("data-icon")).toBe("pencil");
@@ -496,7 +512,7 @@ describe("TextView", () => {
     const entry = (menu: Menu, title: string) => group(menu)?.items.find((i) => i.title === title) ?? null;
     let menu = new Menu();
     h.view.nfeFillContextMenu(menu as never, ed, { text: "", empty: true });
-    expect(group(menu)?.items.map((i) => i.title)).toEqual(["Format", "Compress"]);
+    expect(group(menu)?.items.map((i) => i.title)).toEqual(["Format", "Compress", "---", "Unwrap lines", "Wrap lines…"]);
     // The own formatter rewrites the whole document, keeping the key order.
     // This file is one line, so it cannot say what it indents with, and the
     // editor's setting decides (a tab, by default) — OPEN 4's fallback.
@@ -514,23 +530,43 @@ describe("TextView", () => {
     entry(menu, "Compress")?.click();
     expect(ed.text).toBe('{"b":1,"a":[1,2]}');
     expect(__notices.at(-1)).toContain("characters fewer");
-    // A language that indents: Format is there alone, because nothing compresses it.
-    h.transport.files.set("b.txt", utf8("hello"));
+    // A language that indents: Format is there, and Compress too — plain
+    // text is "significant" in the whitespace table, so the generic compressor
+    // may take the trailing spaces and the extra blank lines and nothing else.
+    h.transport.files.set("b.txt", utf8("hello  \n\n\n  world\n"));
     await h.view.__load(new TFile("b.txt"));
     await h.view.setMode("edit");
     const plain = h.lastEditor();
     plain.indents = true;
     menu = new Menu();
     h.view.nfeFillContextMenu(menu as never, plain, { text: "", empty: true });
-    expect(group(menu)?.items.map((i) => i.title)).toEqual(["Format"]);
+    expect(group(menu)?.items.map((i) => i.title)).toEqual(["Format", "Compress", "---", "Unwrap lines", "Wrap lines…"]);
     entry(menu, "Format")?.click();
     expect(plain.actions).toContain("indentLines");
-    // And with neither: no group, and no separator left standing where it was.
+    entry(menu, "Compress")?.click();
+    expect(plain.text).toBe("hello\n\n  world\n");
+    expect(__notices.at(-1)).toBe("Compressed: 3 characters fewer. Layout is syntax here, so only trailing spaces, extra blank lines and 0 comment(s) went.");
+    // A parse that did not finish leaves the file alone and says so.
+    plain.segmentsValue = null;
+    menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, plain, { text: "", empty: true });
+    entry(menu, "Compress")?.click();
+    expect(plain.text).toBe("hello\n\n  world\n");
+    expect(__notices.at(-1)).toBe("Compress: the file could not be parsed in time, so it was left alone.");
+    // Without indentation the Format row goes; Compress stays, and so does the group (Unwrap and Wrap live in it, USER 2026-09-22), with no separator left standing.
     plain.indents = false;
     menu = new Menu();
     h.view.nfeFillContextMenu(menu as never, plain, { text: "", empty: true });
-    expect(menu.items.map((i) => i.title)).not.toContain("Format");
+    expect(group(menu)?.items.map((i) => i.title)).toEqual(["Compress", "---", "Unwrap lines", "Wrap lines…"]);
     expect(menu.items.filter((i, n) => i.title === "---" && menu.items[n + 1]?.title === "---")).toEqual([]);
+    // A record format has no Compress row: the layout is the content.
+    h.transport.files.set("c.diff", utf8("--- a\n+++ b\n@@ -1 +1 @@\n-x\n+y\n"));
+    await h.view.__load(new TFile("c.diff"));
+    await h.view.setMode("edit");
+    const diff = h.lastEditor();
+    menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, diff, { text: "", empty: true });
+    expect(group(menu)?.items.map((i) => i.title)).not.toContain("Compress");
   });
 
   it("a formatter installed in the plugin's folder takes over the languages it serves, and is asked only when Format is pressed", async () => {
@@ -574,6 +610,32 @@ describe("TextView", () => {
     formatEntry(second)?.click();
     expect(ts.actions).toContain("indentLines");
     expect(calls).toHaveLength(1);
+  });
+
+  it("indentation formats with the file's own unit, and with the setting only when the file cannot say", async () => {
+    const h = harness();
+    const formatEntry = (menu: Menu) => menu.items.find((i) => i.title === "Format")?.submenu?.items.find((i) => i.title === "Format") ?? null;
+    // The setting types tabs; the file is written in four spaces (a Rust sample
+    // was rewritten in tabs this way on 2026-09-21).
+    h.transport.files.set("a.rs", utf8("fn main() {\n    let a = 1;\n    if a > 0 {\n        a;\n    }\n}\n"));
+    await h.view.__load(new TFile("a.rs"));
+    await h.view.setMode("edit");
+    const rs = h.lastEditor();
+    rs.indents = true;
+    let menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, rs, { text: "", empty: true });
+    formatEntry(menu)?.click();
+    expect(rs.indentUnit).toBe("    ");
+    // A file with no indented line says nothing: the editor's setting applies.
+    h.transport.files.set("b.rs", utf8("fn main() {}\n"));
+    await h.view.__load(new TFile("b.rs"));
+    await h.view.setMode("edit");
+    const flat = h.lastEditor();
+    flat.indents = true;
+    menu = new Menu();
+    h.view.nfeFillContextMenu(menu as never, flat, { text: "", empty: true });
+    formatEntry(menu)?.click();
+    expect(flat.indentUnit).toBe("\t");
   });
 
   it("a formatter that answers after the document moved writes nothing over what was typed in between", async () => {
@@ -663,14 +725,16 @@ describe("TextView", () => {
       "Paste",
       "Select all",
       "---",
-      // No Format group: nothing formats plain text, and a row that can only
-      // say no is noise (USER 2026-09-19).
+      // The Format group in every file (USER 2026-09-22): nothing formats plain
+      // text, so its two rows are absent (USER 2026-09-19), and Unwrap and Wrap
+      // stand in it alone.
+      // Plain text compresses (trailing spaces, blank lines), so the row is there; nothing indents it, so Format is not.
+      "Format ▸ Compress | --- | Unwrap lines | Wrap lines…",
+      "---",
       "Case ▸ UPPERCASE | lowercase | Title Case | Sentence case | iNVERT cASE",
       "Comment ▸ Toggle line comment (Ctrl+/) | Toggle block comment (Alt+A)",
       "Word completion (Ctrl+Space)",
       expect.stringMatching(/^Insert ▸ Date {2}\d{4}-\d{2}-\d{2} \| Date and time {2}\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/),
-      "Unwrap lines",
-      "Wrap lines…",
       "This line ▸ Direction by content | Left to right | Right to left",
       "---",
       'Search the web for "hello world, a long selection…"',
@@ -678,20 +742,23 @@ describe("TextView", () => {
     // The dictionary item appears only when the plugin can open the dialog, and carries the selection or the word at the cursor.
     const words: Array<[string, string | null]> = [];
     (h.view as unknown as { nfeDeps: object }).nfeDeps = { ...(h.view as unknown as { nfeDeps: object }).nfeDeps, addToDictionary: (w: string, l: string | null) => void words.push([w, l]) };
+    // It is the last row of the Format group, after a separator (USER 2026-09-22).
+    const formatRows = (m: Menu) => m.items.find((i) => i.title === "Format")?.submenu?.items ?? [];
     let withDictionary = new Menu();
-    h.view.nfeFillContextMenu(withDictionary as never, ed, { text: "кое-что\nсказал", empty: false });
-    withDictionary.items.find((i) => i.title?.startsWith("Add"))?.click();
+    h.view.nfeFillContextMenu(withDictionary as never, ed, { text: "будь-що\nсказал", empty: false });
+    expect(formatRows(withDictionary).map((i) => i.title)).toEqual(["Compress", "---", "Unwrap lines", "Wrap lines…", "---", 'Add "будь-що" to dictionary…']);
+    formatRows(withDictionary).find((i) => i.title?.startsWith("Add"))?.click();
     ed.cursorWord = "непере";
     withDictionary = new Menu();
     h.view.nfeFillContextMenu(withDictionary as never, ed, { text: "", empty: true });
-    expect(withDictionary.items.find((i) => i.title?.startsWith("Add"))?.title).toBe('Add "непере" to dictionary…');
-    withDictionary.items.find((i) => i.title?.startsWith("Add"))?.click();
+    expect(formatRows(withDictionary).find((i) => i.title?.startsWith("Add"))?.title).toBe('Add "непере" to dictionary…');
+    formatRows(withDictionary).find((i) => i.title?.startsWith("Add"))?.click();
     ed.cursorWord = "";
     withDictionary = new Menu();
     h.view.nfeFillContextMenu(withDictionary as never, ed, { text: "", empty: true });
-    expect(withDictionary.items.find((i) => i.title === "Add to dictionary…")).toBeDefined();
+    expect(formatRows(withDictionary).find((i) => i.title === "Add to dictionary…")).toBeDefined();
     expect(words).toEqual([
-      ["кое-что", null],
+      ["будь-що", null],
       ["непере", null],
     ]);
     const direction = menu.items.find((i) => i.title === "This line")!.submenu!;
@@ -704,6 +771,12 @@ describe("TextView", () => {
     menu.items.at(-1)?.click();
     expect(ed.actions).toEqual(["lineDir:ltr", "case:upper", expect.stringMatching(/^insert:\d{4}-\d{2}-\d{2}$/), "blockComment", "cut"]);
     expect(opened).toEqual(["https://www.google.com/search?q=hello%20world%2C%20a%20long%20selection%20that%20the%20menu%20shortens"]);
+    // In the preview the Format group holds the dictionary row alone (the deps still carry addToDictionary).
+    await h.view.setMode("preview");
+    const previewMenu = new Menu();
+    h.view.nfeFillContextMenu(previewMenu as never, h.lastEditor(), { text: "", empty: true });
+    expect(formatRows(previewMenu).map((i) => i.title)).toEqual(["Add to dictionary…"]);
+    await h.view.setMode("edit");
     // Where Obsidian has no setSubmenu, a group is a label followed by its items in the same menu.
     __menuOptions.submenus = false;
     try {
@@ -730,7 +803,8 @@ describe("TextView", () => {
     expect(shown).toEqual([evt]);
   });
 
-  it("Unwrap lines: offered for prose in the editor only, joins the wrapped lines as one edit and says what it did", async () => {
+  it("Unwrap lines: offered in the editor, joins the wrapped lines as one edit and says what it did", async () => {
+    const fmt = (m: Menu) => m.items.find((i) => i.title === "Format")?.submenu?.items ?? [];
     const wrapped = ["Title", "The first line of a paragraph that a mail client cut at seventy-two columns", "and the second line of it, which also runs on to the very end of the row", "and stops."].join("\n");
     const h = harness();
     h.transport.files.set("a.txt", utf8(wrapped));
@@ -740,9 +814,9 @@ describe("TextView", () => {
     const ed = h.lastEditor();
     let menu = new Menu();
     h.view.nfeFillContextMenu(menu as never, ed, { text: "", empty: true });
-    const item = menu.items.find((i) => i.title === "Unwrap lines");
+    const item = fmt(menu).find((i) => i.title === "Unwrap lines");
     expect(item?.icon).toBe("unfold-horizontal");
-    expect(menu.items.find((i) => i.title === "Wrap lines…")?.icon).toBe("wrap-text");
+    expect(fmt(menu).find((i) => i.title === "Wrap lines…")?.icon).toBe("wrap-text");
     __notices.length = 0;
     item?.click();
     expect(ed.actions).toEqual(["transformLines"]);
@@ -757,7 +831,7 @@ describe("TextView", () => {
     __openedModals.length = 0;
     __modalInstances.length = 0;
     __notices.length = 0;
-    menu.items.find((i) => i.title === "Wrap lines…")?.click();
+    fmt(menu).find((i) => i.title === "Wrap lines…")?.click();
     expect(__openedModals).toEqual(["WrapLinesModal"]);
     const modal = __modalInstances[0] as { onOpen(): void; width: number; breakWords: boolean; finish(): void };
     modal.onOpen();
@@ -766,12 +840,13 @@ describe("TextView", () => {
     expect(ed.getText().split("\n").every((l) => l.length <= 60)).toBe(true);
     expect(ed.getText().split("\n")[0]).toBe("Title");
     expect(__notices).toEqual(["Wrap lines: 1 line cut at 60 characters, 2 line breaks added."]);
-    // Code is not prose: no entry for a TypeScript file.
+    // Code has the same two rows (USER 2026-09-22: one menu for every file); Unwrap's prose gate still refuses code.
     await h.view.__load(new TFile("b.ts"));
     await h.view.setMode("edit");
     menu = new Menu();
     h.view.nfeFillContextMenu(menu as never, h.lastEditor(), { text: "", empty: true });
-    expect(menu.items.some((i) => i.title === "Unwrap lines" || i.title === "Wrap lines…")).toBe(false);
+    expect(fmt(menu).some((i) => i.title === "Unwrap lines")).toBe(true);
+    expect(fmt(menu).some((i) => i.title === "Wrap lines…")).toBe(true);
   });
 
   it("the pane menu carries Edit/Preview, Search and a checked Word wrap that switches live and is stored", async () => {
@@ -847,6 +922,31 @@ describe("TextView", () => {
     __fire(btn, "click");
     await h.view.setMode("edit");
     expect(h.lastEditor().options.showInvisibles).toBe(true);
+  });
+
+  it("Word wrap: the header button beside the invisibles one switches the editor live, stores the setting, and shows the state (USER 2026-09-22)", async () => {
+    const h = harness();
+    h.transport.files.set("a.txt", utf8("one\ntwo"));
+    await h.view.__load(new TFile("a.txt"));
+    const btn = h.view.actions[3]?.el;
+    expect(btn.getAttribute("aria-label")).toBe("Wrap long lines");
+    expect(btn.hasClass("is-active")).toBe(false);
+    __fire(btn, "click");
+    expect(h.lastEditor().wrap).toBe(true);
+    expect(h.wrapSaved).toEqual([true]);
+    expect(btn.getAttribute("aria-label")).toBe("Do not wrap long lines");
+    expect(btn.hasClass("is-active")).toBe(true);
+    // The pane menu's item and the button agree, and each moves the other.
+    const menu = new Menu();
+    h.view.onPaneMenu(menu as never, "more-options");
+    expect(menu.items[6]?.checked).toBe(true);
+    menu.items[6]?.click();
+    expect(h.lastEditor().wrap).toBe(false);
+    expect(btn.hasClass("is-active")).toBe(false);
+    // The next editor is built with the stored setting.
+    __fire(btn, "click");
+    await h.view.setMode("edit");
+    expect(h.lastEditor().options.wordWrap).toBe(true);
   });
 
   it("typing autosaves after the delay, in the file's own encoding and line ending", async () => {

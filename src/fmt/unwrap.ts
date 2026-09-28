@@ -20,7 +20,7 @@
  * in a short line; DOC conversions where EVERY line is followed by a blank line
  * ("spaced" wrapping, so a single blank line is not a paragraph break there);
  * justified text with doubled spaces inside the lines; lines ending in a
- * hyphen that is the word's own (кое-что, по-прежнему, когда-нибудь) about as
+ * hyphen that is the word's own (будь-що, по-перше, коли-небудь) about as
  * often as a word the printer split, so the hyphen decision looks at the parts.
  *
  * A pure module: strings in, strings out, no editor, no Obsidian.
@@ -34,8 +34,8 @@ export interface UnwrapOptions {
   readonly markdown: boolean;
   /**
    * A word the printer split with a hyphen at the line end (`непере-` /
-   * `носимой`) is joined back WITHOUT the hyphen. A hyphen that is the word's
-   * own stays (`кое-` / `что` → `кое-что`). Which of the two it is, is decided
+   * `носимий`) is joined back WITHOUT the hyphen. A hyphen that is the word's
+   * own stays (`будь-` / `что` → `будь-що`). Which of the two it is, is decided
    * by `hyphenAttachment`: the evidence of the text first, the dictionaries
    * second, a few language-independent rules last. Off, every hyphen stays and
    * the parts are joined without a space.

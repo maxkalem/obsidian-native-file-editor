@@ -1,5 +1,9 @@
 import { t } from "../core/i18n";
+import type { Tree } from "@lezer/common";
 import { DEFAULT_JSON_STYLE, type JsonStyle, compressJson, formatJson } from "./json";
+import { compressCss, formatCss } from "./css";
+import { type MarkupKind, compressMarkup, formatMarkup } from "./markup";
+import { type WhitespaceRule, whitespaceRuleFor } from "./whitespace";
 
 /**
  * What Format and Compress do for a file, and why they sometimes do nothing.
@@ -22,6 +26,8 @@ import { DEFAULT_JSON_STYLE, type JsonStyle, compressJson, formatJson } from "./
 
 export type FormatterKind =
   | "own"
+  /** Compress only: the generic compressor over the highlighter's strings and comments, as far as the whitespace table allows. */
+  | "tree"
   /** A formatter the user installed into the plugin's folder serves this file. */
   | "vault"
   /** CodeMirror's indentation, which is all the language's mode provides. */
@@ -35,8 +41,29 @@ export interface FormatPlan {
   readonly kind: FormatterKind;
 }
 
-/** The formats the plugin formats itself, by the registry's language name. */
-const OWN_FORMAT = new Set(["JSON", "JSON with comments", "JSON5", "JSON Lines"]);
+/**
+ * The formats the plugin formats itself, by the registry's language name.
+ * JSON, XML and HTML come before a formatter the user installed (JSON keeps
+ * its comments, markup keeps its text); CSS comes after one, because
+ * prettier's CSS wraps and reorders nothing but does more with long values,
+ * and the own one is the fallback for a sheet with nothing installed.
+ */
+const OWN_FIRST = new Set(["JSON", "JSON with comments", "JSON5", "JSON Lines", "XML", "HTML"]);
+const OWN_AFTER_VAULT = new Set(["CSS"]);
+const OWN_FORMAT = new Set([...OWN_FIRST, ...OWN_AFTER_VAULT]);
+
+/** The own formatters that work on the editor's syntax tree rather than on the text alone. */
+const MARKUP: ReadonlyMap<string, MarkupKind> = new Map([
+  ["XML", "xml"],
+  ["HTML", "html"],
+]);
+
+/** Whether the own formatter for this language needs the editor's syntax tree. */
+export function ownFormatterNeedsTree(language: string | null): boolean {
+  return language !== null && (MARKUP.has(language) || language === "CSS");
+}
+
+const NO_TREE = "the file could not be parsed in time";
 
 /**
  * `vaultServes` is true when the user has installed the formatter files for
@@ -45,8 +72,9 @@ const OWN_FORMAT = new Set(["JSON", "JSON with comments", "JSON5", "JSON Lines"]
  * the numbers, which a reprinting formatter does not promise.
  */
 export function planFormat(language: string | null, canIndent: boolean, vaultServes = false, installable = false): FormatPlan {
-  if (language !== null && OWN_FORMAT.has(language)) return { kind: "own" };
+  if (language !== null && OWN_FIRST.has(language)) return { kind: "own" };
   if (vaultServes) return { kind: "vault" };
+  if (language !== null && OWN_AFTER_VAULT.has(language)) return { kind: "own" };
   // A file the repository ships would format this language: worth an entry
   // that explains itself, rather than indentation that does half the job.
   if (installable) return { kind: "installable" };
@@ -54,18 +82,43 @@ export function planFormat(language: string | null, canIndent: boolean, vaultSer
   return { kind: "none" };
 }
 
-export function planCompress(language: string | null): FormatPlan {
-  return { kind: language !== null && OWN_FORMAT.has(language) ? "own" : "none" };
+/**
+ * Compress: the plugin's own compressor for JSON (it keeps the comments,
+ * which the generic one drops), otherwise the generic one over the token
+ * stream for every language whose whitespace row allows anything — and no
+ * row at all where the table says the layout is the content, or where the
+ * text between tags is content the tokens do not mark (`markup`, waiting for
+ * the tree-aware formatter).
+ */
+export function planCompress(language: string | null): CompressPlan {
+  // The own formatters first: JSON keeps its comments, and XML and HTML are
+  // read by their tree, where the generic one could not tell text from layout.
+  if (language !== null && OWN_FORMAT.has(language)) return { kind: "own" };
+  const rule = whitespaceRuleFor(language);
+  if (rule.whitespace === "none" || rule.markup === true) return { kind: "none" };
+  return { kind: "tree", rule };
 }
 
-/** Run the plugin's own formatter for a language it knows. Null when it has none. */
-export function formatOwn(language: string | null, text: string, style: JsonStyle): { text: string; problem: string | null } | null {
+export type CompressPlan = { readonly kind: "own" | "none" } | { readonly kind: "tree"; readonly rule: WhitespaceRule };
+
+/**
+ * Run the plugin's own formatter for a language it knows. Null when it has
+ * none. The markup formatters read the tree the editor holds; `tree` is null
+ * when the parse did not finish, and then the file is left alone.
+ */
+export function formatOwn(language: string | null, text: string, style: JsonStyle, tree: Tree | null = null): { text: string; problem: string | null } | null {
   if (language === null || !OWN_FORMAT.has(language)) return null;
+  const kind = MARKUP.get(language);
+  if (kind !== undefined) return tree ? formatMarkup(text, tree, kind, style) : { text, problem: NO_TREE };
+  if (language === "CSS") return tree ? formatCss(text, tree, style) : { text, problem: NO_TREE };
   return formatJson(text, style);
 }
 
-export function compressOwn(language: string | null, text: string, style: JsonStyle): { text: string; problem: string | null } | null {
+export function compressOwn(language: string | null, text: string, style: JsonStyle, tree: Tree | null = null): { text: string; problem: string | null } | null {
   if (language === null || !OWN_FORMAT.has(language)) return null;
+  const kind = MARKUP.get(language);
+  if (kind !== undefined) return tree ? compressMarkup(text, tree, kind) : { text, problem: NO_TREE };
+  if (language === "CSS") return tree ? compressCss(text, tree) : { text, problem: NO_TREE };
   return compressJson(text, style);
 }
 

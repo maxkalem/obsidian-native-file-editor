@@ -316,7 +316,11 @@ const ENTRIES: readonly LanguageEntry[] = [
   legacy("LaTeX", ["tex", "sty", "ltx", "dtx", "latex"], stex),
   legacy("Swift", ["swift"], swift),
   // The tcl mode knows a few dozen commands; Notepad++'s list fills in the rest (`dict`, `clock`, `chan`, ...).
-  legacy("Tcl", ["tcl", "tk", "exp"], NPP_FALLBACKS.tcl ? withFallbackKeywords(tcl, NPP_FALLBACKS.tcl) : tcl),
+  // The tcl mode calls an operator and a double-quoted string "comment" (its
+  // colouring, since CodeMirror 5); a compressor that drops comments would drop
+  // them. Only a token that is nothing but operator characters, or begins
+  // with a quote, is renamed; a `#` comment, and the lines of a `#* *#` block, stay.
+  legacy("Tcl", ["tcl", "tk", "exp"], retag(NPP_FALLBACKS.tcl ? withFallbackKeywords(tcl, NPP_FALLBACKS.tcl) : tcl, (name, text) => (name === "comment" && /^[+\-*&%=<>!?^/|]+$/.test(text) ? "operator" : name === "comment" && text.startsWith('"') ? "string" : name))),
   legacy("Textile", ["textile"], textile),
   // List bullets are `comment` in the TiddlyWiki mode; real comments keep the name.
   legacy("TiddlyWiki", ["tid"], retag(tiddlyWiki, (raw, text) => (raw === "comment" && /^[*#]+$/.test(text) ? "keyword" : raw))),

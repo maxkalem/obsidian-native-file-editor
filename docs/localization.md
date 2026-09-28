@@ -41,6 +41,7 @@ Anything the file does not translate stays English, key by key, so you can trans
 - `{name}` in a value is a placeholder the plugin fills — a count, a file name, a key combination. Keep every placeholder the English line has; the words around it are yours. `tests/locales.test.ts` fails on an example file that loses one or that carries a key the plugin does not know.
 - Do not translate the product name `Native File Editor`, file extensions, or JSON field names quoted inside a description (`"replace": true`).
 - The Keys and regular expressions guide is in here like everything else, but its patterns (`\d{4}-\d{2}-\d{2}`) and key names (`Ctrl+F`) are not keys at all: they are the same in every language. The three rows that are words — `guide.key.altDrag`, `guide.key.modClick`, `guide.key.rightClick` — are yours to translate; keep `{mod}` in the second, which becomes Ctrl or Cmd.
+- The plugin's commands take their names from this file as well, because it is read before they are registered, so Obsidian's own command palette and its Settings → Hotkeys page list them in your language too.
 - Log lines are deliberately not translatable: a log is a diagnostic and is read by whoever receives the report.
 
 The English source in the plugin itself is `src/i18n/en.ts`; `locales/english.json` is generated from it and a test fails when the two drift apart.

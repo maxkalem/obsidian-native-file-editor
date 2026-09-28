@@ -2,7 +2,7 @@ import type { TextDictionary } from "./dictionary";
 
 /**
  * The bundled dictionaries of the text languages: what Unwrap needs to tell a
- * word's own hyphen (кое-что, self-evident, an-mhaith) from the hyphen a
+ * word's own hyphen (будь-що, self-evident, an-mhaith) from the hyphen a
  * printer put at a line end. Each holds the prefixes that take a hyphen, the
  * suffixes (particles) that follow one, and whole words; hand-written lists,
  * not exhaustive, and every one of them can be extended or replaced by a JSON
@@ -27,25 +27,40 @@ import type { TextDictionary } from "./dictionary";
 export const TEXT_LANGUAGES: readonly TextDictionary[] = [
   {
     name: "Ukrainian",
-    prefixes: ["будь", "казна", "хтозна", "бозна", "віце", "контр", "обер", "унтер", "лейб", "штабс"],
-    suffixes: ["небудь", "будь", "таки"],
+    // Not віце-, контр-, обер-, унтер-, лейб-, штабс-, екс-, міні-: since the 2019 orthography (§35) these are written solid (віцепрем'єр, контрадмірал, ексчемпіон, мінімаркет), so a prefix entry would keep the hyphen a wrapper left in a modern text, while dropping it gives the current spelling of either. A text that writes the old form in full decides for itself through its own evidence. -бо, -но, -то are particles (отож-бо, тільки-но) and are still syllables ordinary words end with, so they go in whole under `words`; `початківець` is the appositive of співак-початківець and its case forms.
+    prefixes: ["будь", "казна", "хтозна", "бозна"],
+    suffixes: [
+	  "небудь", "будь", "таки", "початківець", "початківця", "початківцю", "початківцем", 
+	  "початківці", "початківців", "початківцям", "початківцями", "початківцях"
+	  ],
     words: [
-      "будь-що", "будь-як", "будь-де", "будь-хто", "будь-який", "будь-коли", "будь-куди", "будь-ласка",
-      "де-не-де", "коли-не-коли", "хоч-не-хоч", "віч-на-віч", "пліч-о-пліч", "все-таки", "як-от", "як-не-як",
+      "будь-що", "будь-як", "будь-де", "будь-хто", "будь-який", "будь-коли", "будь-куди",
+      "де-не-де", "коли-не-коли", "хоч-не-хоч", "віч-на-віч", "пліч-о-пліч", "все-таки", 
+	  "усе-таки", "як-от", "як-не-як", "врешті-решт", "отож-бо", "тільки-но",
       "з-під", "з-за", "з-поміж", "з-понад", "з-посеред", "з-перед", "з-над",
-      "по-перше", "по-друге", "по-третє", "по-моєму", "по-твоєму", "по-своєму", "по-українськи", "по-новому", "по-старому",
-      "ось-ось", "ледо-ледве", "ледве-ледве", "тихо-тихо", "де-факто", "де-юре", "тет-а-тет", "ва-банк", "екс-чемпіон", "міні-маркет",
+      "по-перше", "по-друге", "по-третє", "по-моєму", "по-твоєму", "по-своєму", 
+	  "по-українськи", "по-новому", "по-старому", "ось-ось", "ледь-ледь", "ледве-ледве", 
+	  "тихо-тихо", "де-факто", "де-юре", "тет-а-тет", "ва-банк",
+      // Solid words a wrapper splits at the particle: the join is the only right answer.
+      "нібито", "мовбито", "неначебто",
     ],
   },
   {
     name: "English",
-    prefixes: ["self", "non", "anti", "co", "all", "well", "half", "semi", "quasi", "multi", "neo", "pseudo", "vice", "great", "step", "ill", "mock", "ultra", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"],
-    suffixes: ["based", "like", "free", "only", "up", "off", "style", "type", "related", "friendly", "oriented", "driven", "proof", "esque", "wide", "shaped", "sized", "minded", "hearted", "looking", "born", "made", "held", "owned", "bound", "odd", "plus", "class"],
+    prefixes: [
+	  "self", "non", "anti", "co", "all", "well", "half", "semi", "quasi", "multi", "neo", 
+	  "pseudo", "vice", "great", "step", "ill", "mock", "ultra", "twenty", "thirty", "forty", 
+	  "fifty", "sixty", "seventy", "eighty", "ninety"
+	  ],
+    suffixes: [
+	  "based", "like", "free", "only", "up", "off", "style", "type", "related", "friendly", "oriented", "driven", "proof", "esque", "wide", "shaped", "sized", "minded", "hearted", "looking", "born", "made", "held", "owned", "bound", "odd", "plus", "class"],
     words: [
-      "e-mail", "x-ray", "t-shirt", "well-being", "so-called", "long-term", "short-term", "full-time", "part-time",
-      "up-to-date", "state-of-the-art", "mother-in-law", "father-in-law", "one-way", "two-way", "know-how", "check-in",
-      "built-in", "plug-in", "follow-up", "start-up", "make-up", "break-up", "set-up", "warm-up", "run-down", "hands-on",
-      "face-to-face", "ex-wife", "ex-husband", "pre-war", "post-war", "mid-air", "cross-border", "inter-city", "re-elect", "re-enter",
+      "e-mail", "x-ray", "t-shirt", "well-being", "so-called", "long-term", "short-term", 
+	  "full-time", "part-time", "up-to-date", "state-of-the-art", "mother-in-law", 
+	  "father-in-law", "one-way", "two-way", "know-how", "check-in","built-in", "plug-in", 
+	  "follow-up", "start-up", "make-up", "break-up", "set-up", "warm-up", "run-down", 
+	  "hands-on", "face-to-face", "ex-wife", "ex-husband", "pre-war", "post-war", "mid-air", 
+	  "cross-border", "inter-city", "re-elect", "re-enter",
     ],
   },
   {

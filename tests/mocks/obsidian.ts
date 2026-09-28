@@ -538,8 +538,23 @@ export class Setting {
     cb(comp);
     return this;
   }
+  /** As Obsidian's ToggleComponent: `setValue` with a different value CALLS the change callback. */
+  toggles: Array<{ value: boolean; onChange: ((v: boolean) => void) | null }> = [];
   addToggle(cb: (c: Any) => void): this {
-    cb({ setValue: () => undefined, onChange: () => undefined });
+    const entry: { value: boolean; onChange: ((v: boolean) => void) | null } = { value: false, onChange: null };
+    this.toggles.push(entry);
+    const comp: Any = {
+      setValue: (v: boolean) => {
+        if (entry.value !== v) {
+          entry.value = v;
+          entry.onChange?.(v);
+        }
+        return comp;
+      },
+      getValue: () => entry.value,
+      onChange: (fn: (v: boolean) => void) => ((entry.onChange = fn), comp),
+    };
+    cb(comp);
     return this;
   }
   dropdowns: Array<{ options: Array<[string, string]>; value: string; onChange: ((v: string) => void) | null }> = [];
@@ -592,6 +607,7 @@ export interface Command {
   name: string;
   callback?: () => void;
   checkCallback?: (checking: boolean) => boolean | void;
+  hotkeys?: Array<{ modifiers: string[]; key: string }>;
 }
 
 export class Plugin {

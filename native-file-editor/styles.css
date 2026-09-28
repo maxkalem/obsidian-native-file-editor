@@ -357,6 +357,13 @@
   color: var(--text-warning);
 }
 
+/* Add to dictionary: the file's language has a grammar and so is not in the list. The sentence answers
+   the question the dropdown provokes, so it gets its own line in the warning colour. */
+.nfe-add-word-grammar {
+  margin-top: var(--size-4-1);
+  color: var(--text-warning);
+}
+
 /* Obsidian's page rows (Hotkeys, File types) get no hover colour from Obsidian's own stylesheet, its
    action rows do; in this tab both read as buttons. Same colour as Obsidian's; no
    `@media (hover)` guard, which the styles test does not parse — a phone has no hover to speak of. */

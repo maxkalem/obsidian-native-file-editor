@@ -1,7 +1,7 @@
 import { plural, t } from "../core/i18n";
 import { autocompletion, completeAnyWord, startCompletion } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab, selectAll, toggleBlockComment, toggleComment } from "@codemirror/commands";
-import { bracketMatching, codeFolding, foldGutter, foldKeymap, getIndentation, indentOnInput, indentRange, indentUnit, syntaxHighlighting } from "@codemirror/language";
+import { bracketMatching, codeFolding, ensureSyntaxTree, foldGutter, foldKeymap, indentOnInput, indentRange, indentUnit, language, syntaxHighlighting } from "@codemirror/language";
 import { closeSearchPanel, findNext, findPrevious, highlightSelectionMatches, openSearchPanel, replaceAll, search, searchKeymap, searchPanelOpen, selectMatches, selectNextOccurrence } from "@codemirror/search";
 import { Compartment, EditorSelection, EditorState, type Extension, type Range, StateEffect, StateField } from "@codemirror/state";
 import {
@@ -23,10 +23,12 @@ import {
 import { changeCase } from "../core/editText";
 import { chordFor, describeChord } from "../core/hotkeys";
 import { wordAtPosition } from "../core/words";
-import { OBSIDIAN_SCHEME_CLASS, nfeHighlighter } from "../highlight/highlighter";
+import { OBSIDIAN_SCHEME_CLASS, TOKENIZE_TIMEOUT_MS, nfeHighlighter, segmentsOf } from "../highlight/highlighter";
 import { forkLineHighlighter } from "../highlight/obsidianFork";
 import type { EditorFactory, EditorHandle, EditorOptions, LineDirection, SelectionInfo } from "./editor";
 import { DEFAULT_KEYS_TAKEN, columnKeymap, columnMode, selectAllOccurrences } from "./columnMode";
+import { bracketDepthIndent } from "./bracketDepth";
+import { indentable } from "./indentable";
 import { conflictTints, diffLineTints } from "./lineTints";
 import { createSearchPanel } from "./searchPanel";
 
@@ -230,7 +232,13 @@ function clipboard(): { writeText(text: string): Promise<void>; readText(): Prom
  * way they colour a code block in a note, and styles.css adds only what
  * Obsidian has no rule for.
  */
-export function buildExtensions(options: EditorOptions, wrap: Compartment = new Compartment(), marks: Compartment = new Compartment(), dir: Compartment = new Compartment()): Extension[] {
+export function buildExtensions(
+  options: EditorOptions,
+  wrap: Compartment = new Compartment(),
+  marks: Compartment = new Compartment(),
+  dir: Compartment = new Compartment(),
+  unit: Compartment = new Compartment()
+): Extension[] {
   const ext: Extension[] = [
     highlightSpecialChars(),
     history(),
@@ -238,6 +246,9 @@ export function buildExtensions(options: EditorOptions, wrap: Compartment = new 
     dropCursor(),
     EditorState.allowMultipleSelections.of(true),
     indentOnInput(),
+    // Brackets indent by depth, not by alignment to the bracket's column;
+    // one rule for Format and for Enter (bracketDepth.ts).
+    bracketDepthIndent(),
     bracketMatching(),
     columnMode(),
     highlightSelectionMatches(),
@@ -255,7 +266,9 @@ export function buildExtensions(options: EditorOptions, wrap: Compartment = new 
     ...(forkLineHighlighter ? [forkLineHighlighter] : []),
     EditorView.editorAttributes.of({ class: OBSIDIAN_SCHEME_CLASS }),
     EditorState.tabSize.of(options.tabSize),
-    indentUnit.of(options.tabInsertsSpaces ? " ".repeat(options.tabSize) : "\t"),
+    // In a compartment so that Format can indent with the file's own unit for
+    // one computation without changing what the editor types.
+    unit.of(indentUnit.of(options.tabInsertsSpaces ? " ".repeat(options.tabSize) : "\t")),
     // The plugin's bindings first (the remappable ones on their configured chords), then CodeMirror's own without the keys the remappable commands had by default.
     keymap.of([...columnKeymap(options.hotkeys, options.platform), ...defaultKeymap.filter((b) => !b.key || !DEFAULT_KEYS_TAKEN.has(b.key)), ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
     EditorView.updateListener.of((update) => {
@@ -286,8 +299,9 @@ export const codeMirrorFactory: EditorFactory = {
     const wrap = new Compartment();
     const marks = new Compartment();
     const dir = new Compartment();
+    const unit = new Compartment();
     const view = new EditorView({
-      state: EditorState.create({ doc: options.text, extensions: buildExtensions(options, wrap, marks, dir) }),
+      state: EditorState.create({ doc: options.text, extensions: buildExtensions(options, wrap, marks, dir, unit) }),
       parent,
     });
     return {
@@ -353,23 +367,27 @@ export const codeMirrorFactory: EditorFactory = {
        * answers null when nothing does, and a line of plain text answers null
        * everywhere, so a few lines are asked before the answer is "no".
        */
-      canIndent: () => {
-        const { state } = view;
-        const lines = Math.min(state.doc.lines, 40);
-        for (let n = 1; n <= lines; n++) {
-          const line = state.doc.line(n);
-          if (line.text.trim().length === 0) continue;
-          if (getIndentation(state, line.from) !== null) return true;
-        }
-        return false;
+      canIndent: () => indentable(view.state),
+      syntaxTree: () => (view.state.facet(language) ? ensureSyntaxTree(view.state, view.state.doc.length, TOKENIZE_TIMEOUT_MS) : null),
+      segments: () => {
+        const text = view.state.doc.toString();
+        // No language at all: no parse to wait for, and the whole text is code.
+        if (!view.state.facet(language)) return [{ from: 0, to: text.length, kind: "code" }];
+        const tree = ensureSyntaxTree(view.state, text.length, TOKENIZE_TIMEOUT_MS);
+        return tree ? segmentsOf(text, tree) : null;
       },
-      indentLines: () => {
+      indentLines: (indent) => {
         if (options.readOnly) return false;
         const { state } = view;
         const range = state.selection.main;
         const from = range.empty ? 0 : state.doc.lineAt(range.from).from;
         const to = range.empty ? state.doc.length : state.doc.lineAt(range.to).to;
-        const changes = indentRange(state, from, to);
+        // `indentRange` writes the state's indent unit. The file's own unit
+        // is put into a copy of the state for this one computation: the
+        // document is the same, so the changes apply to the live state, and
+        // the editor goes on typing what its setting says.
+        const measured = indent !== undefined && indent !== state.facet(indentUnit) ? state.update({ effects: unit.reconfigure(indentUnit.of(indent)) }).state : state;
+        const changes = indentRange(measured, from, to);
         if (changes.empty) return false;
         view.dispatch({ changes, userEvent: "input.format" });
         view.focus();

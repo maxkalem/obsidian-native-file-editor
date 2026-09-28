@@ -10,15 +10,17 @@ Views on top, models in the middle, formats and platform at the bottom, and noth
 
 ```
 src/
-  main.ts              entry: settings load, view registration, the claim rule, the command
+  main.ts              entry: settings load, view registration, the claim rule, the commands
   constants.ts         PLUGIN_ID, view types, frozen command ids, defaults
-  core/                pure decisions: which extensions to claim, which mode to open in, the autosave debounce
+  core/                pure decisions: which extensions to claim, which mode to open in, the autosave debounce,
+                       the commands' default keys and the conversion between a chord and Obsidian's hotkey (commandKeys.ts)
   model/               document models, pure, no DOM, no Obsidian (also MIT-licensed, see below)
     text/              bytes to text and back: BOM, encoding, line endings
   format/              readers and minimal-patch writers per format, pure (also MIT-licensed)
-  fmt/                 text and code formatting commands, pure (Unwrap and Wrap lines; Format and Compress to come): not a file format, so not under format/
+  fmt/                 text and code formatting commands, pure (Unwrap and Wrap lines, Format and Compress): not a file format, so not under format/
                        with the text-language dictionaries: the bundled word lists, the lexicon and the vault folder loader,
-                       and the Hunspell reader (hunspell.ts, vaultHunspell.ts) the review step after Unwrap looks words up with
+                       the Hunspell reader (hunspell.ts, vaultHunspell.ts) the review step after Unwrap looks words up with,
+                       and the plan behind Format (format.ts) with the formatter files installed into the plugin folder (prettierFiles.ts, vaultFormatter.ts, ADR-005)
   platform/            the transport: the only code that knows whether it runs on a phone
   highlight/           the language registry (four tiers), the token table, the highlighter, the Obsidian-fork adapter,
                        the generic keyword mode with the Notepad++ tables (generated) and the vault language loader
@@ -84,7 +86,7 @@ Two traps are worth naming. A hard-wrapped text contains its own split parts as 
 
 ## A Hunspell dictionary is a place to look things up, never a word list in memory
 
-The user's design (2026-09-18): "нічого не тримати в пам'яті. словник це місце ревью." So `fmt/hunspell.ts` never builds a set of words. The entries of a `.dic` are lemmas with affix flags (`попередній/j+`), so the lookup goes the way a spell checker's does, backwards: `parseAff` reads the `.aff`'s `SET`, `FLAG`, `IGNORE` and its SFX/PFX tables, `candidateStems` reverses those rules into a handful of stems for one word — one suffix off, one prefix off, and a prefix over a suffix when both rules allow it, each with the flag (or the pair of flags) the entry would have to carry — and `HunspellScan` is fed the file in chunks and answers only "is this line one of the candidates". `fmt/vaultHunspell.ts` finds the `.dic`/`.aff` pairs in the dictionary folder, decodes by the `.aff`'s own encoding (`TextDecoder` with `{ stream: true }`, so a chunk may cut a character in half), and stops as soon as every word is answered. Measured on the user's files: 335 359 entries and 8.5 MB in about 360 ms, 62 119 entries in 36 ms, with 13 to 25 candidate stems per word.
+The design (2026-09-18): nothing is held in memory, and the dictionary is where a review happens, not a spell checker that runs as one types. So `fmt/hunspell.ts` never builds a set of words. The entries of a `.dic` are lemmas with affix flags (`попередній/j+`), so the lookup goes the way a spell checker's does, backwards: `parseAff` reads the `.aff`'s `SET`, `FLAG`, `IGNORE` and its SFX/PFX tables, `candidateStems` reverses those rules into a handful of stems for one word — one suffix off, one prefix off, and a prefix over a suffix when both rules allow it, each with the flag (or the pair of flags) the entry would have to carry — and `HunspellScan` is fed the file in chunks and answers only "is this line one of the candidates". `fmt/vaultHunspell.ts` finds the `.dic`/`.aff` pairs in the dictionary folder, decodes by the `.aff`'s own encoding (`TextDecoder` with `{ stream: true }`, so a chunk may cut a character in half), and stops as soon as every word is answered. Measured on the user's files: 335 359 entries and 8.5 MB in about 360 ms, 62 119 entries in 36 ms, with 13 to 25 candidate stems per word.
 
 Only the words Unwrap made by dropping a hyphen go to it, with both forms at once — `ньюйоркської` and `нью-йоркської` — because the interesting answer is that the dictionary knows the second and not the first. `unwrapLines` reports those words with the offset of the hyphen it removed (`RejoinedWord`), `ui/HunspellReviewModal.ts` asks before reading anything and shows what the dictionary did not know, and `restoreHyphens` writes the chosen hyphens back as a second edit, from the end so the offsets hold. Nothing is corrected unasked, because a dictionary does not know names and the reader does not do compound rules.
 
@@ -104,7 +106,7 @@ Three tests hold this together. `tests/catalogue.test.ts` scans the source for k
 
 ## Settings: declarative, with rendered rows behind switches
 
-`settings/SettingsTab.ts` uses Obsidian 1.13's declarative tab. Simple controls are keyed rows; the folder rows, the interpreter rows and the custom-type rows are `render` items built on a `Setting` with buttons; the rows behind a switch carry `visible`, and every write that changes what is visible calls `refresh` (the tab's `update()`). Native dialogs, "open in explorer" and the plugin restart go through `platform/desktopShell.ts` (Electron's `shell` and `remote.dialog`, lazily required; null on mobile, and then the rows show paths without buttons). The registry is mutable for two things only: vault definitions and custom file types (`registerVaultLanguage`, `registerCustomExtension`), which win for their extensions while present and are cleared and re-applied on every Reread; a Reread registers new extensions with Obsidian at once and leaves those another plugin owns to the yield rule.
+`settings/SettingsTab.ts` uses Obsidian 1.13's declarative tab. Simple controls are keyed rows; the folder rows, the interpreter rows and the custom-type rows are `render` items built on a `Setting` with buttons; the rows behind a switch carry `visible`, and every write that changes what is visible calls `refresh` (the tab's `update()`). Native dialogs, "open in explorer" and the plugin restart go through `platform/desktopShell.ts` (Electron's `shell` and `remote.dialog`, lazily required; null on mobile, and then the rows show paths without buttons). The Hotkeys page holds two groups, the editor's own keys out of `data.json` and the plugin's Obsidian commands: the second reads and writes their bindings through `app.hotkeyManager`, which the public typings do not carry, so every member is probed before it is called and a build that has none shows the default and points at Settings → Hotkeys — the group's first row opens that page filtered to this plugin (`openObsidianHotkeys`, probed the same way). The registry is mutable for two things only: vault definitions and custom file types (`registerVaultLanguage`, `registerCustomExtension`), which win for their extensions while present and are cleared and re-applied on every Reread; a Reread registers new extensions with Obsidian at once and leaves those another plugin owns to the yield rule.
 
 ## Run: the user's interpreters, behind one interface
 

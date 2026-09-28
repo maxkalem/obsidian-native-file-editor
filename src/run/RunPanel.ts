@@ -21,9 +21,9 @@ import type { RunnerDef } from "./runners";
  * (`console.log` as well as `warn`/`error`, a process's stderr, its stdout
  * again when it is text), a page's reports (mhtml.ts `pageReporter`:
  * console, errors, policy refusals, the load line, each frame with the run's
- * token) and the outcome as the last line. The split is the user's
- * (2026-09-16): "console.log це буквально вивід який має попадати в лог", and
- * Output is for something to look at. A run opens on the Log and switches to
+ * token) and the outcome as the last line. The split (2026-09-16):
+ * `console.log` is output that belongs in a log, and Output is for
+ * something to look at. A run opens on the Log and switches to
  * Output when a result arrives, unless the user picked a view meanwhile. The
  * Log tab counts the problems while Output is showing. Text goes in through
  * `createSpan`/`textContent`; never `innerHTML`.

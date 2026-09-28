@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Events, Menu, TFile, TFolder, __modalInstances, __notices, __openedModals, __resetObsidianMock, mockPlugin } from "./mocks/obsidian";
 import { VIEW_TYPE_TEXT } from "../src/constants";
-import NativeFileEditorPlugin, { logFilePath, obsidianCommandsOn, readOwnedExtensions, selfTestStreamLanguage, vaultId } from "../src/main";
+import NativeFileEditorPlugin, { commandChords, logFilePath, obsidianCommandsOn, readOwnedExtensions, selfTestStreamLanguage, setCommandChord, vaultId } from "../src/main";
 import { PALETTE_STYLE_ID } from "../src/ui/styleSink";
 
 /**
@@ -75,20 +75,33 @@ describe("plugin load", () => {
     expect(taken.extensions).not.toContain("log");
     expect(taken.extensions).not.toContain("md");
     expect(__notices).toEqual(["Native File Editor left .log to cm-code-editor. Take them over per extension in its settings."]);
-    expect(plugin.commands.map((c) => c.id)).toEqual(["toggle-mode", "format", "compress", "new-file", "reload-palettes", "write-example-palette"]);
+    expect(plugin.commands.map((c) => c.id)).toEqual([
+      "toggle-mode", "format", "compress", "case-upper", "case-lower", "case-title", "case-sentence", "case-invert",
+      "unwrap-lines", "wrap-lines", "add-to-dictionary", "insert-date", "insert-date-time", "toggle-word-wrap", "toggle-invisibles",
+      "line-direction-auto", "line-direction-ltr", "line-direction-rtl", "search-web", "keys-guide",
+      "new-file", "reload-palettes", "write-example-palette",
+    ]);
+    // Every command that carries no default is registered with an empty list, so Obsidian shows a row to bind (USER 2026-09-22).
+    for (const id of ["unwrap-lines", "wrap-lines", "add-to-dictionary", "insert-date", "insert-date-time", "toggle-word-wrap", "toggle-invisibles", "line-direction-auto", "search-web", "keys-guide"]) {
+      expect(plugin.commands.find((c) => c.id === id)?.hotkeys, id).toEqual([]);
+    }
     expect(plugin.settingTabs).toHaveLength(1);
   });
 
-  it("offers Format and Compress as commands with no default key, and each declines unless the active view can do it", async () => {
+  it("offers Format and Compress as commands with his default keys, and each declines unless the active view can do it", async () => {
     const app = makeApp({});
     const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, { id: "native-file-editor" } as never));
     await plugin.onload();
     const format = plugin.commands.find((c) => c.id === "format");
     const compress = plugin.commands.find((c) => c.id === "compress");
-    // No `hotkeys` on either: the command exists so a key CAN be bound, and
-    // which key is the user's business (USER 2026-09-19).
-    expect("hotkeys" in (format as object)).toBe(false);
-    expect("hotkeys" in (compress as object)).toBe(false);
+    // Default keys, his (USER 2026-09-22, reversing 2026-09-19's "no key"): Obsidian shows them on its
+    // Hotkeys page and the user overrides them there or on the plugin's. Reread and the example palette ship unbound.
+    expect(format?.hotkeys).toEqual([{ modifiers: ["Mod", "Alt", "Shift"], key: "F" }]);
+    expect(compress?.hotkeys).toEqual([{ modifiers: ["Mod", "Alt", "Shift"], key: "C" }]);
+    expect(plugin.commands.find((c) => c.id === "toggle-mode")?.hotkeys).toEqual([{ modifiers: ["Mod", "Alt", "Shift"], key: "E" }]);
+    expect(plugin.commands.find((c) => c.id === "case-invert")?.hotkeys).toEqual([{ modifiers: ["Mod", "Alt", "Shift"], key: "5" }]);
+    expect(plugin.commands.find((c) => c.id === "reload-palettes")?.hotkeys).toEqual([]);
+    expect(plugin.commands.find((c) => c.id === "write-example-palette")?.hotkeys).toEqual([]);
 
     // Nothing active: both decline, and a decline must not act.
     expect(format?.checkCallback?.(true)).toBe(false);
@@ -118,6 +131,66 @@ describe("plugin load", () => {
     expect(format?.checkCallback?.(false)).toBe(true);
     expect(compress?.checkCallback?.(false)).toBe(true);
     expect(calls).toEqual(["format own", "compress own"]);
+  });
+
+  it("the five Case commands act on the active pane's editor and decline in the preview or with no pane", async () => {
+    const app = makeApp({});
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, { id: "native-file-editor" } as never));
+    await plugin.onload();
+    const upper = plugin.commands.find((c) => c.id === "case-upper");
+    const title = plugin.commands.find((c) => c.id === "case-title");
+    expect(upper?.checkCallback?.(true)).toBe(false);
+    const kinds: string[] = [];
+    let editable = false;
+    const view = { nfeCanChangeCase: () => editable, nfeChangeCase: (kind: string) => void kinds.push(kind) };
+    (app.workspace as Record<string, unknown>).getActiveViewOfType = () => view;
+    expect(upper?.checkCallback?.(false)).toBe(false);
+    editable = true;
+    expect(upper?.checkCallback?.(true)).toBe(true);
+    expect(kinds).toEqual([]);
+    expect(upper?.checkCallback?.(false)).toBe(true);
+    expect(title?.checkCallback?.(false)).toBe(true);
+    expect(kinds).toEqual(["upper", "title"]);
+  });
+
+  it("the menu's other entries are commands too: each declines exactly where its row would be absent", async () => {
+    const app = makeApp({});
+    const plugin = mockPlugin(new NativeFileEditorPlugin(app as never, { id: "native-file-editor" } as never));
+    await plugin.onload();
+    const cmd = (id: string) => plugin.commands.find((c) => c.id === id)!;
+    const calls: string[] = [];
+    let editable = false;
+    let hasEditor = false;
+    let selected = false;
+    const view = {
+      nfeCanEdit: () => editable,
+      nfeHasEditor: () => hasEditor,
+      nfeCanSearchWeb: () => selected,
+      nfeUnwrapLines: () => void calls.push("unwrap"),
+      nfeOpenWrapLines: () => void calls.push("wrap"),
+      nfeAddToDictionary: () => (calls.push("dictionary"), true),
+      nfeInsertStamp: (which: string) => void calls.push(`insert ${which}`),
+      toggleWordWrap: () => void calls.push("word-wrap"),
+      toggleInvisibles: () => void calls.push("invisibles"),
+      nfeSetLineDirection: (d: string | null) => (calls.push(`line ${d}`), true),
+      nfeSearchWeb: () => (calls.push("web"), true),
+    };
+    (app.workspace as Record<string, unknown>).getActiveViewOfType = () => view;
+    // A preview: the display commands act, the editing ones decline.
+    hasEditor = true;
+    expect(cmd("unwrap-lines").checkCallback?.(true)).toBe(false);
+    expect(cmd("insert-date").checkCallback?.(true)).toBe(false);
+    expect(cmd("toggle-word-wrap").checkCallback?.(false)).toBe(true);
+    expect(cmd("line-direction-rtl").checkCallback?.(false)).toBe(true);
+    expect(cmd("add-to-dictionary").checkCallback?.(false)).toBe(true);
+    expect(cmd("search-web").checkCallback?.(true)).toBe(false);
+    // Editing, with a selection: everything acts.
+    editable = true;
+    selected = true;
+    for (const id of ["unwrap-lines", "wrap-lines", "insert-date", "insert-date-time", "search-web", "toggle-invisibles", "line-direction-auto"]) expect(cmd(id).checkCallback?.(false), id).toBe(true);
+    expect(calls).toEqual(["word-wrap", "line rtl", "dictionary", "unwrap", "wrap", "insert date", "insert dateTime", "web", "invisibles", "line null"]);
+    // The guide needs no pane at all.
+    expect(typeof cmd("keys-guide").callback).toBe("function");
   });
 
   it("writes load, transport, self-test and claims lines to the log file after the flush delay", async () => {
@@ -297,13 +370,17 @@ describe("plugin load", () => {
     };
     const menu = new Menu();
     (app.workspace as unknown as Events).trigger("editor-menu", menu, editor, { file: new TFile("notes/a.md") });
-    expect(menu.items.map((i) => [i.title, i.icon])).toEqual([
-      ["Unwrap lines (Native File Editor)", "unfold-horizontal"],
-      ["Wrap lines… (Native File Editor)", "wrap-text"],
-      ["Add to dictionary… (Native File Editor)", "book-plus"],
+    // One group named after the plugin, its rows without the suffix they used to carry (USER 2026-09-22).
+    expect(menu.items.map((i) => [i.title, i.icon])).toEqual([["Native File Editor", "align-left"]]);
+    const rows = menu.items[0]!.submenu!.items;
+    expect(rows.map((i) => [i.title, i.icon])).toEqual([
+      ["Unwrap lines", "unfold-horizontal"],
+      ["Wrap lines…", "wrap-text"],
+      ["---", ""],
+      ["Add to dictionary…", "book-plus"],
     ]);
     __notices.length = 0;
-    menu.items[0]?.click();
+    rows[0]?.click();
     expect(transactions).toEqual([{ changes: [{ from: { line: 0, ch: 0 }, to: { line: 2, ch: 6 }, text: lines.join(" ") }], selection: undefined }]);
     expect(__notices).toEqual(["Unwrap lines: 2 line breaks removed at a wrap width of 76."]);
     // Wrap lines… opens the modal; its choice cuts the long line through the same editor.
@@ -312,7 +389,7 @@ describe("plugin load", () => {
     __notices.length = 0;
     __openedModals.length = 0;
     __modalInstances.length = 0;
-    menu.items[1]?.click();
+    rows[1]?.click();
     expect(__openedModals).toEqual(["WrapLinesModal"]);
     const modal = __modalInstances[0] as { onOpen(): void; width: number; breakWords: boolean; finish(): void };
     modal.onOpen();
@@ -326,7 +403,7 @@ describe("plugin load", () => {
     // Add to dictionary…: the word the cursor stands in is prefilled.
     __openedModals.length = 0;
     __modalInstances.length = 0;
-    menu.items[2]?.click();
+    rows[3]?.click();
     expect(__openedModals).toEqual(["AddToDictionaryModal"]);
     expect((__modalInstances[0] as { word: string }).word).toBe("A");
     // Not a note: nothing added.
@@ -408,6 +485,38 @@ describe("readOwnedExtensions and vaultId", () => {
   it("the log lives in the plugin folder under the config dir", () => {
     expect(logFilePath(".obsidian")).toBe(".obsidian/plugins/native-file-editor/nfe.log");
     expect(logFilePath(".obsidian-work")).toBe(".obsidian-work/plugins/native-file-editor/nfe.log");
+  });
+
+  it("reads a command's keys from Obsidian's hotkey manager, the user's over the defaults, and writes them back the way its Hotkeys page does", async () => {
+    // The manager's shape as read in app.js 1.13.7: customs and defaults by full command id.
+    const custom: Record<string, unknown[]> = {};
+    const defaults: Record<string, unknown[]> = { "native-file-editor:format": [{ modifiers: ["Mod", "Alt", "Shift"], key: "F" }] };
+    const calls: string[] = [];
+    const app = {
+      hotkeyManager: {
+        getHotkeys: (id: string) => custom[id],
+        getDefaultHotkeys: (id: string) => defaults[id],
+        setHotkeys: (id: string, hotkeys: unknown[]) => void ((custom[id] = hotkeys), calls.push(`set ${id}`)),
+        removeHotkeys: (id: string) => void (delete custom[id], calls.push(`remove ${id}`)),
+        save: async () => void calls.push("save"),
+        bake: () => void calls.push("bake"),
+      },
+    };
+    const format = { mod: true, shift: true, alt: true, key: "F" };
+    expect(commandChords(app as never, "native-file-editor:format")).toEqual({ chords: [format], custom: false });
+    // Unbound and unknown to Obsidian: no chords, not custom.
+    expect(commandChords(app as never, "native-file-editor:reload-palettes")).toEqual({ chords: [], custom: false });
+    // A key set here: setHotkeys, save, bake — in that order, as Obsidian's own page does.
+    expect(await setCommandChord(app as never, "native-file-editor:format", { mod: true, shift: false, alt: false, key: "K" })).toBe(true);
+    expect(calls).toEqual(["set native-file-editor:format", "save", "bake"]);
+    expect(custom["native-file-editor:format"]).toEqual([{ modifiers: ["Mod"], key: "K" }]);
+    expect(commandChords(app as never, "native-file-editor:format")).toEqual({ chords: [{ mod: true, shift: false, alt: false, key: "K" }], custom: true });
+    // Reset: the user's binding goes, the default is back.
+    expect(await setCommandChord(app as never, "native-file-editor:format", null)).toBe(true);
+    expect(commandChords(app as never, "native-file-editor:format")).toEqual({ chords: [format], custom: false });
+    // A build without the manager: null and false, never a throw.
+    expect(commandChords({} as never, "x")).toBeNull();
+    expect(await setCommandChord({} as never, "x", format)).toBe(false);
   });
 
   it("the stream-language self-test passes against npm's CodeMirror", () => {

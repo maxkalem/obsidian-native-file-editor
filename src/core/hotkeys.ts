@@ -114,6 +114,7 @@ const KEY_ALIASES: Record<string, string> = {
   pageup: "PageUp",
   pagedown: "PageDown",
   insert: "Insert",
+  pause: "Pause",
 };
 
 /** `Ctrl+Alt+ArrowUp` → a chord, or null when the text is not one (no key, an unknown word). */
@@ -182,9 +183,11 @@ export function keyOfEvent(evt: { code: string; key: string }): string | null {
   const code = evt.code;
   if (/^Key[A-Z]$/.test(code)) return code.slice(3);
   if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  // The keypad's digits are the digits: Obsidian does not tell them apart either (USER 2026-09-22 wrote his defaults as Num1–Num5).
+  if (/^Numpad[0-9]$/.test(code)) return code.slice(6);
   if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
   if (code === "NumpadEnter") return "Enter";
-  if (/^(Arrow(Up|Down|Left|Right)|Enter|Space|Tab|Escape|Backspace|Delete|Home|End|PageUp|PageDown|Insert)$/.test(code)) return code;
+  if (/^(Arrow(Up|Down|Left|Right)|Enter|Space|Tab|Escape|Backspace|Delete|Home|End|PageUp|PageDown|Insert|Pause)$/.test(code)) return code;
   const punctuation: Record<string, string> = {
     Slash: "/",
     Backslash: "\\",

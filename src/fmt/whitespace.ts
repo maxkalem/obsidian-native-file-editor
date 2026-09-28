@@ -57,6 +57,19 @@ export interface WhitespaceRule {
   readonly runs?: RunCollapse;
   /** `free` only; "drop" when absent. */
   readonly lineBreaks?: LineBreakRule;
+  /**
+   * `significant` only: what the safe removals leave alone in this language.
+   * Markdown ends a line with two spaces on purpose and its comments are
+   * often markers; prose keeps its comments.
+   */
+  readonly keeps?: ReadonlyArray<"comments" | "trailing">;
+  /**
+   * The text between the tags is content the token stream does not mark
+   * (`pre`, an inline box, output outside `<?php`), so the generic compressor
+   * must not touch the file; the own tree-aware formatter of the format
+   * specification's step 6 is the one that may. Until it exists, no row.
+   */
+  readonly markup?: true;
   /** Why the row is not the obvious one, in one line. Absent where it is. */
   readonly note?: string;
 }
@@ -66,7 +79,10 @@ const free = (lineBreaks: LineBreakRule = "drop", note?: string): WhitespaceRule
 /** A `free` language that separates every token by whitespace: brackets and operators are words. */
 const spaced = (lineBreaks: LineBreakRule, note: string): WhitespaceRule => ({ whitespace: "free", runs: "single", lineBreaks, note });
 
-const significant = (note?: string): WhitespaceRule => ({ whitespace: "significant", ...(note === undefined ? {} : { note }) });
+const significant = (note?: string, keeps?: ReadonlyArray<"comments" | "trailing">): WhitespaceRule => ({ whitespace: "significant", ...(note === undefined ? {} : { note }), ...(keeps === undefined ? {} : { keeps }) });
+
+/** A `free` language whose text outside the tags is content: no generic compression (see `markup`). */
+const markup = (note: string): WhitespaceRule => ({ whitespace: "free", markup: true, note });
 
 const nothing = (note: string): WhitespaceRule => ({ whitespace: "none", note });
 
@@ -78,11 +94,11 @@ const nothing = (note: string): WhitespaceRule => ({ whitespace: "none", note })
 const RULES: Readonly<Record<string, WhitespaceRule>> = {
   // Prose and plain files. A paragraph is the content; only the trailing
   // spaces and the runs of blank lines are noise.
-  "Plain text": significant(),
-  Markdown: significant("Indentation makes lists and code blocks; a block scalar of spaces is content."),
-  Textile: significant(),
-  txt2tags: significant(),
-  TiddlyWiki: significant(),
+  "Plain text": significant("Text has no comments to speak of; a line that looks like one is text.", ["comments"]),
+  Markdown: significant("Indentation makes lists and code blocks; two spaces at a line end are a hard break; an HTML comment is often a marker.", ["comments", "trailing"]),
+  Textile: significant(undefined, ["comments"]),
+  txt2tags: significant("A comment line is often a marker for the converter.", ["comments"]),
+  TiddlyWiki: significant(undefined, ["comments"]),
   troff: significant("A macro is a line that starts with a dot in the first column."),
   LaTeX: significant("A blank line is a paragraph; a per cent sign at the end of a line eats the newline."),
   NFO: nothing("The drawing is made of spaces."),
@@ -100,9 +116,9 @@ const RULES: Readonly<Record<string, WhitespaceRule>> = {
 
   // Whitespace-free code, the plain case.
   JSON: free(),
-  XML: free("drop", "A subtree under xml:space=\"preserve\" keeps its whitespace."),
+  XML: markup("A subtree under xml:space=\"preserve\" keeps its whitespace, and the text between tags is content."),
   DTD: free(),
-  HTML: free("drop", "The pre family (pre, textarea, listing, plaintext) and an inline box keep their whitespace."),
+  HTML: markup("The pre family (pre, textarea, listing, plaintext) and an inline box keep their whitespace."),
   CSS: free(),
   SCSS: free(),
   Less: free(),
@@ -115,15 +131,15 @@ const RULES: Readonly<Record<string, WhitespaceRule>> = {
   "PL/SQL": free(),
   Rust: free(),
   Java: free(),
-  PHP: free("drop", "Text outside the tags is output; it is HTML and follows HTML's rule."),
+  PHP: markup("Text outside the tags is output; it is HTML and follows HTML's rule."),
   Nix: free(),
   Solidity: free(),
   GraphQL: free(),
   Ceylon: free(),
   Dart: free(),
-  Clojure: free(),
-  "Common Lisp": free(),
-  Scheme: free(),
+  Clojure: spaced("drop", "A symbol may hold any operator character, so two tokens joined are one symbol."),
+  "Common Lisp": spaced("drop", "A symbol may hold any operator character, so two tokens joined are one symbol."),
+  Scheme: spaced("drop", "A symbol may hold any operator character, so two tokens joined are one symbol."),
   Cypher: free(),
   D: free(),
   ECL: free(),
@@ -166,22 +182,22 @@ const RULES: Readonly<Record<string, WhitespaceRule>> = {
   TSX: free("statements", "Automatic semicolon insertion."),
   Go: free("statements", "The scanner inserts the semicolons."),
   Kotlin: free("statements"),
-  Swift: free("statements"),
-  Ruby: free("statements"),
-  Crystal: free("statements"),
+  Swift: spaced("statements", "Whitespace on the sides of an operator decides whether it is prefix, postfix or infix."),
+  Ruby: spaced("statements", "`puts -1` and `puts-1` differ: whitespace before an operator decides what it is."),
+  Crystal: spaced("statements", "As Ruby: whitespace before an operator decides what it is."),
   Scala: free("statements"),
   Groovy: free("statements"),
-  Elixir: free("statements"),
+  Elixir: spaced("statements", "`foo -1` is a call and `foo - 1` a subtraction: whitespace before an operator decides."),
   HCL: free("statements", "One attribute per line, and no separator to write instead."),
   Prisma: free("statements", "One field per line."),
-  Julia: free("statements"),
+  Julia: spaced("statements", "The ternary demands its spaces, and whitespace decides a call from a juxtaposition."),
   Octave: free("statements"),
   R: free("statements"),
-  PowerShell: free("statements"),
+  PowerShell: spaced("statements", "A command line is words separated by whitespace, and `-Path` after a name is a parameter only with the space."),
   Squirrel: free("statements", "A newline ends a statement where no semicolon does."),
   ActionScript: free("statements", "Automatic semicolon insertion."),
-  Svelte: free("statements", "Markup with a script block: HTML's rule for the markup, the script's for the rest."),
-  Astro: free("statements", "Markup with a script block: HTML's rule for the markup, the script's for the rest."),
+  Svelte: markup("Markup with a script block: HTML's rule for the markup, the script's for the rest."),
+  Astro: markup("Markup with a script block: HTML's rule for the markup, the script's for the rest."),
 
   // Whitespace-free within a line, with a preprocessor that ends its
   // directives at the newline.
@@ -195,30 +211,30 @@ const RULES: Readonly<Record<string, WhitespaceRule>> = {
   "Resource script": free("directives", "A preprocessor directive ends at its newline."),
 
   // Line-oriented: free inside a line, one command or instruction per line.
-  Assembly: free("keep", "One instruction per line."),
-  CMake: free("keep", "One command per line by convention, and a comment runs to the newline."),
-  Dockerfile: free("keep", "One instruction per line, continued by a backslash."),
+  Assembly: spaced("keep", "One instruction per line, and a directive and its argument are words: `.section .text` joined is one name."),
+  CMake: spaced("keep", "Arguments are words separated by whitespace; a comment runs to the newline."),
+  Dockerfile: spaced("keep", "One instruction per line, continued by a backslash; the instruction is a command line of words."),
   Lua: free("keep", "Joining lines can turn a name and a bracket into a call."),
   Perl: free("keep", "Heredocs, POD and the data section end at a line."),
-  Shell: free("keep", "A newline ends a command, and a heredoc ends at its own line."),
+  Shell: spaced("keep", "A command is words separated by whitespace (`[ -z x ]` is four of them); a newline ends it, and a heredoc ends at its own line."),
   OCaml: free("keep"),
   "Standard ML": free("keep"),
   Mathematica: free("keep", "A newline can end an expression."),
-  NSIS: free("keep", "One command per line."),
-  mIRC: free("keep", "One command per line."),
-  HXML: free("keep", "One argument per line."),
+  NSIS: spaced("keep", "One command per line, of words."),
+  mIRC: spaced("keep", "One command per line, of words."),
+  HXML: spaced("keep", "One argument per line: a flag and its value are two words."),
   MsGenny: free("keep", "One statement per line."),
   "Visual Basic": free("keep", "A newline ends a statement; an underscore continues it."),
   VBScript: free("keep", "A newline ends a statement; an underscore continues it."),
-  ASP: free("keep", "A newline ends a statement, and the markup around it is HTML."),
+  ASP: markup("A newline ends a statement, and the markup around it is HTML."),
   "TL-Verilog": significant("Indentation is the scope."),
   AutoIt: free("keep", "One statement per line."),
   AviSynth: free("keep", "One statement per line."),
   BlitzBasic: free("keep", "One statement per line."),
   FreeBASIC: free("keep", "One statement per line."),
   PureBasic: free("keep", "One statement per line."),
-  Gui4Cli: free("keep", "One command per line."),
-  KiXtart: free("keep", "One command per line."),
+  Gui4Cli: spaced("keep", "One command per line, of words."),
+  KiXtart: spaced("keep", "One command per line, of words."),
   OScript: free("keep"),
   BaanC: free("keep"),
   EScript: free("keep"),
@@ -291,6 +307,11 @@ export function ruledLanguages(): string[] {
  * Compress keeps one line break per statement: the caveat list of the
  * specification, read out of the table rather than written twice.
  */
+/** The languages whose row waits for the tree-aware formatter: no generic compression. */
+export function markupLanguages(): string[] {
+  return [...BY_NAME].filter(([, rule]) => rule.markup === true).map(([name]) => name);
+}
+
 export function asiLanguages(): string[] {
   return [...BY_NAME].filter(([, rule]) => rule.lineBreaks === "statements").map(([name]) => name);
 }

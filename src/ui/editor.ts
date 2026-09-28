@@ -1,6 +1,8 @@
 import type { Extension } from "@codemirror/state";
 import type { CaseKind } from "../core/editText";
 import type { HotkeyPlatform } from "../core/hotkeys";
+import type { Tree } from "@lezer/common";
+import type { TextSegment } from "../highlight/highlighter";
 
 /**
  * What the text view needs from an editor, without naming CodeMirror. The
@@ -105,10 +107,24 @@ export interface EditorHandle {
    * than looked up in a table.
    */
   canIndent(): boolean;
-  /** Re-indent the lines the selection touches (the whole document when nothing is selected), one undo step. Returns whether anything changed. */
-  indentLines(): boolean;
+  /**
+   * Re-indent the lines the selection touches (the whole document when nothing
+   * is selected), one undo step. `unit` is the indent to write (`"\t"`, four
+   * spaces): the file's own, detected by the caller, so a file written with
+   * spaces is not rewritten in tabs because the editor types tabs. Without it
+   * the editor's configured unit applies. Returns whether anything changed.
+   */
+  indentLines(unit?: string): boolean;
   /** Replace the whole document in one undo step, keeping the cursor's line; for a formatter that cannot work on a range. */
   replaceDocument(text: string): boolean;
+  /**
+   * The document as strings, comments and code, from the editor's own syntax
+   * tree and highlighter; null when the parse did not finish in time. What
+   * Compress works on.
+   */
+  segments(): TextSegment[] | null;
+  /** The editor's syntax tree, parsed to the end; null when there is no language or the parse did not finish in time. */
+  syntaxTree(): Tree | null;
   /** The word the main cursor stands in, hyphens and apostrophes included; empty when it stands on none. */
   wordAtCursor(): string;
   /** Force the direction of the lines the selection touches, or `null` to go back to the content's own. Lives with the editor, not the file. */

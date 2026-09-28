@@ -1,6 +1,6 @@
 /**
  * Text-language dictionaries: the word knowledge Unwrap uses to tell a word's
- * own hyphen (кое-что, self-evident, linja-auto) from the hyphen a printer put
+ * own hyphen (будь-що, self-evident, linja-auto) from the hyphen a printer put
  * at the end of a line. A dictionary is data, not code: the bundled ones are in
  * `textLanguages.ts`, and a JSON file of the same shape in the vault's
  * dictionaries folder extends a bundled language, replaces it, or adds a new
@@ -43,7 +43,7 @@ export interface TextDictionary {
 export interface HyphenLexicon {
   readonly prefixes: ReadonlySet<string>;
   readonly suffixes: ReadonlySet<string>;
-  /** Hyphenated words, `кое-что`. */
+  /** Hyphenated words, `будь-що`. */
   readonly hyphenated: ReadonlySet<string>;
   /** Words without a hyphen: their existence says a split is to be joined. */
   readonly plain: ReadonlySet<string>;
@@ -58,7 +58,7 @@ export function normalizeEntry(word: string): string {
   return word.trim().toLowerCase().replace(HYPHENS, "-");
 }
 
-/** A prefix or a suffix is stored bare, so `кое-` and `-нибудь` are accepted as typed. */
+/** A prefix or a suffix is stored bare, so `будь-` and `-небудь` are accepted as typed. */
 function bareParticle(word: string): string {
   return normalizeEntry(word).replace(/^-+/, "").replace(/-+$/, "");
 }

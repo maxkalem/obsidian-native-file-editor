@@ -83,6 +83,26 @@ export function createDesktopShell(basePath: string | null): DesktopShell | null
 }
 
 /**
+ * Open Obsidian's own Hotkeys tab with its search set to `query`, so the rows
+ * of this plugin's commands are what the user sees. `app.setting` and the
+ * tab's `setQuery` are not in the public typings; both are probed, and a
+ * build without them opens the tab unfiltered or, failing that, nothing.
+ * Returns whether the tab opened.
+ */
+export function openObsidianHotkeys(app: unknown, query: string): boolean {
+  const a = app as { setting?: { open?: () => void; openTabById?: (id: string) => unknown } };
+  try {
+    a.setting?.open?.();
+    const tab = a.setting?.openTabById?.("hotkeys") as { setQuery?: (q: string) => void } | null | undefined;
+    if (!tab) return false;
+    if (typeof tab.setQuery === "function") tab.setQuery(query);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Restart this plugin through Obsidian's plugin manager (`app.plugins`, not in
  * the public typings). The settings window is closed before the disable (the
  * tab dies with the plugin) and reopened afterwards on this plugin's own tab,

@@ -78,7 +78,7 @@ export async function loadVaultDictionaries(input: VaultDictionariesInput): Prom
   return { folder: folder ?? "", loaded, problems };
 }
 
-/** Which list a typed word belongs in: `кое-` is a prefix, `-нибудь` a suffix, anything else a word. */
+/** Which list a typed word belongs in: `будь-` is a prefix, `-небудь` a suffix, anything else a word. */
 export function listForWord(word: string): { list: "prefixes" | "suffixes" | "words"; entry: string } {
   const trimmed = word.trim().replace(/[‐‑]/g, "-");
   if (/^-/.test(trimmed)) return { list: "suffixes", entry: trimmed.replace(/^-+/, "") };

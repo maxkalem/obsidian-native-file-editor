@@ -6,10 +6,12 @@ import { type CaseKind, formatDate, formatDateTime, menuExcerpt, webSearchUrl } 
 import type { Logger } from "../core/log";
 import { type ViewMode, decideOpenMode } from "../core/openMode";
 import { OBSIDIAN_SCHEME_CLASS } from "../highlight/highlighter";
-import { type ResolvedLanguage, isProseLanguage, languageFor, resolveLanguage } from "../highlight/registry";
+import { type ResolvedLanguage, languageFor, resolveLanguage } from "../highlight/registry";
+import { addSubmenu } from "./submenu";
 import { DEFAULT_UNWRAP_OPTIONS, type RejoinedWord, type UnwrapResult, describeUnwrap, restoreHyphens, unwrapLines } from "../fmt/unwrap";
 import { type WrapResult, describeWrap, wrapLines } from "../fmt/wrap";
-import { type FormatPlan, compressOwn, formatOwn, planCompress, planFormat, styleFor, withDuration } from "../fmt/format";
+import { compress } from "../fmt/compress";
+import { type CompressPlan, type FormatPlan, compressOwn, formatOwn, ownFormatterNeedsTree, planCompress, planFormat, styleFor, withDuration } from "../fmt/format";
 import { type WrapChoice, WrapLinesModal } from "./WrapLinesModal";
 import {
   type DecodedText,
@@ -122,22 +124,7 @@ export interface TextViewDeps {
  */
 const SELF_WRITE_ECHO_MS = 1500;
 
-/**
- * A group of the context menu as a submenu. `MenuItem.setSubmenu` is what
- * Obsidian's own editor menu uses for "Format ▸" and "Insert ▸", but it is
- * not in the public typings, so it is probed; where it is missing the group
- * becomes a label followed by its items in the same menu.
- */
-function nfeSubmenu(menu: Menu, title: string, icon: string, fill: (target: Menu) => void): void {
-  let sub: Menu | null = null;
-  menu.addItem((item) => {
-    item.setTitle(title).setIcon(icon);
-    const make = (item as MenuItem & { setSubmenu?: () => Menu }).setSubmenu;
-    if (typeof make === "function") sub = make.call(item);
-    else item.setIsLabel(true);
-  });
-  fill(sub ?? menu);
-}
+const nfeSubmenu = addSubmenu;
 
 /**
  * One pane for every text and code file: a preview that renders in under a
@@ -171,6 +158,7 @@ export class TextView extends FileView {
   private readonly nfeSearchAction: HTMLElement;
   private readonly nfeModeAction: HTMLElement;
   private readonly nfeInvisiblesAction: HTMLElement;
+  private readonly nfeWrapAction: HTMLElement;
 
   constructor(leaf: WorkspaceLeaf, deps: TextViewDeps) {
     super(leaf);
@@ -180,12 +168,15 @@ export class TextView extends FileView {
     this.nfeHeadEl = this.contentEl.createDiv({ cls: "nfe-head" });
     this.nfeBodyEl = this.contentEl.createDiv({ cls: "nfe-body" });
     // Header actions are added right to left; the mode toggle sits next to the
-    // three dots, the search button to its left, the invisibles toggle left of that.
+    // three dots, the search button to its left, the invisibles toggle left of
+    // that, and the word-wrap toggle leftmost (USER 2026-09-22: a header switch
+    // beside the invisibles one, mirroring the setting).
     this.nfeModeAction = this.addAction("pencil", "Edit", () => {
       void this.toggleMode();
     });
     this.nfeSearchAction = this.addAction("search", "Search", () => this.toggleSearch());
     this.nfeInvisiblesAction = this.addAction("pilcrow", t("view.invisibles.show"), () => this.toggleInvisibles());
+    this.nfeWrapAction = this.addAction("wrap-text", t("view.wrap.on"), () => this.toggleWordWrap());
     // Obsidian's keymap listens on the window in the capture phase and takes
     // Mod+F for "Search current file" before CodeMirror's keymap sees it; a
     // scope on the view is consulted first while the pane is active, which is
@@ -537,6 +528,11 @@ export class TextView extends FileView {
   setWordWrap(on: boolean): void {
     this.nfeEditor?.setWordWrap(on);
     this.nfeDeps.setWordWrap?.(on);
+    this.nfeSyncActions();
+  }
+
+  toggleWordWrap(): void {
+    this.setWordWrap(!this.nfeDeps.settings().wordWrap);
   }
 
   /** Invisibles (spaces, tabs, line ends) from the header button or the menu: live here, stored as the shared setting. */
@@ -570,6 +566,9 @@ export class TextView extends FileView {
     const marks = this.nfeDeps.settings().showInvisibles;
     setTooltip(this.nfeInvisiblesAction, marks ? t("view.invisibles.hide") : t("view.invisibles.show"));
     this.nfeInvisiblesAction.toggleClass("is-active", marks);
+    const wrap = this.nfeDeps.settings().wordWrap;
+    setTooltip(this.nfeWrapAction, wrap ? t("view.wrap.off") : t("view.wrap.on"));
+    this.nfeWrapAction.toggleClass("is-active", wrap);
   }
 
   /**
@@ -698,22 +697,36 @@ export class TextView extends FileView {
     if (editable) item(t("menu.paste"), "clipboard-paste", () => void ed.paste());
     item(t("menu.selectAll"), "text-select", () => ed.selectAll());
     menu.addSeparator();
+    // One "Format ▸" group in every file, beside "Case ▸": Format and Compress
+    // where something can do them (a row that can only say no is noise, USER
+    // 2026-09-19), then Unwrap and Wrap in every language, then Add to
+    // dictionary — the last one in the preview too (USER 2026-09-22: the
+    // three inside Format ▸, separated; the same shape in every file).
+    const format = editable ? this.nfeFormatPlan() : { kind: "none" as const };
+    const compress = editable ? this.nfeCompressPlan() : { kind: "none" as const };
+    const canFormat = format.kind !== "none" || compress.kind !== "none";
+    const addToDictionary = this.nfeDeps.addToDictionary;
+    // The selection, or the word the cursor stands in: the dialog's field is
+    // editable either way, so an empty one is still worth opening.
+    const word = selection.empty ? ed.wordAtCursor() : selection.text.trim().split(/\s*\n\s*/)[0] ?? "";
+    if (editable || addToDictionary) {
+      nfeSubmenu(menu, t("menu.formatGroup"), "align-left", (sub) => {
+        if (format.kind !== "none") sub.addItem((i) => i.setTitle(t("menu.formatCode")).setIcon("align-left").onClick(() => this.nfeFormat(format)));
+        if (compress.kind !== "none") sub.addItem((i) => i.setTitle(t("menu.compress")).setIcon("fold-vertical").onClick(() => this.nfeCompress(compress)));
+        if (editable) {
+          if (canFormat) sub.addSeparator();
+          sub.addItem((i) => i.setTitle(t("menu.unwrap")).setIcon("unfold-horizontal").onClick(() => this.nfeUnwrapLines()));
+          sub.addItem((i) => i.setTitle(t("menu.wrap")).setIcon("wrap-text").onClick(() => this.nfeOpenWrapLines()));
+        }
+        if (addToDictionary) {
+          if (editable) sub.addSeparator();
+          sub.addItem((i) => i.setTitle(word.length > 0 ? `Add "${menuExcerpt(word)}" to dictionary…` : t("menu.addToDictionary")).setIcon("book-plus").onClick(() => this.nfeAddToDictionary(word)));
+        }
+      });
+      // The separator belongs to the group, not to the position.
+      menu.addSeparator();
+    }
     if (editable) {
-      // One "Format ▸" group beside "Case ▸", and nothing at all for a
-      // language nothing can format: a row that can only say no is noise
-      // (USER 2026-09-19). A language that a file WOULD serve keeps its row
-      // and explains itself when pressed.
-      const format = this.nfeFormatPlan();
-      const compress = this.nfeCompressPlan();
-      if (format.kind !== "none" || compress.kind !== "none") {
-        nfeSubmenu(menu, t("menu.formatGroup"), "align-left", (sub) => {
-          if (format.kind !== "none") sub.addItem((i) => i.setTitle(t("menu.formatCode")).setIcon("align-left").onClick(() => this.nfeFormat(format)));
-          if (compress.kind !== "none") sub.addItem((i) => i.setTitle(t("menu.compress")).setIcon("fold-vertical").onClick(() => this.nfeCompress(compress)));
-        });
-        // The separator belongs to the group, not to the position: without it
-        // a language nothing formats would open the menu on two rules in a row.
-        menu.addSeparator();
-      }
       nfeSubmenu(menu, t("menu.case"), "case-sensitive", (sub) => {
         const cases: Array<[CaseKind, string, string]> = [
           ["upper", t("menu.case.upper"), "case-upper"],
@@ -735,17 +748,6 @@ export class TextView extends FileView {
         sub.addItem((i) => i.setTitle(t("menu.insert.date", { value: now.date })).setIcon("calendar").onClick(() => ed.insertText(stamp().date)));
         sub.addItem((i) => i.setTitle(t("menu.insert.dateTime", { value: now.dateTime })).setIcon("clock").onClick(() => ed.insertText(stamp().dateTime)));
       });
-      if (isProseLanguage(this.nfeLanguage?.entry.name ?? null)) {
-        item(t("menu.unwrap"), "unfold-horizontal", () => this.nfeUnwrapLines());
-        item(t("menu.wrap"), "wrap-text", () => new WrapLinesModal(this.app, (choice) => this.nfeWrapLines(choice)).open());
-      }
-    }
-    const addToDictionary = this.nfeDeps.addToDictionary;
-    if (addToDictionary) {
-      // The selection, or the word the cursor stands in: the dialog's field is
-      // editable either way, so an empty one is still worth opening.
-      const word = selection.empty ? ed.wordAtCursor() : selection.text.trim().split(/\s*\n\s*/)[0] ?? "";
-      item(word.length > 0 ? `Add "${menuExcerpt(word)}" to dictionary…` : t("menu.addToDictionary"), "book-plus", () => addToDictionary(word, this.nfeLanguage?.entry.name ?? null));
     }
     const current = ed.lineDirection();
     nfeSubmenu(menu, t("menu.thisLine"), "pilcrow", (sub) => {
@@ -786,7 +788,7 @@ export class TextView extends FileView {
     return planFormat(this.nfeLanguage?.entry.name ?? null, ed.canIndent(), formatter?.serves(extension) === true, formatter?.installable(extension) === true);
   }
 
-  nfeCompressPlan(): FormatPlan {
+  nfeCompressPlan(): CompressPlan {
     if (!this.nfeEditor || this.nfeEditorReadOnly) return { kind: "none" };
     return planCompress(this.nfeLanguage?.entry.name ?? null);
   }
@@ -832,13 +834,17 @@ export class TextView extends FileView {
     }
     if (plan.kind === "indent") {
       const started = Date.now();
-      const changed = ed.indentLines();
+      // The file's own indent, as for the other two paths: a file written
+      // with four spaces stays in spaces (seen 2026-09-21 on a Rust sample
+      // rewritten in tabs).
+      const changed = ed.indentLines(styleFor(ed.getText(), this.nfeIndentUnit()).indent);
       new Notice(withDuration(changed ? t("notice.format.done") : t("notice.format.nothing"), Date.now() - started));
       return;
     }
     const started = Date.now();
     const text = ed.getText();
-    const result = formatOwn(this.nfeLanguage?.entry.name ?? null, text, styleFor(text, this.nfeIndentUnit()));
+    const language = this.nfeLanguage?.entry.name ?? null;
+    const result = formatOwn(language, text, styleFor(text, this.nfeIndentUnit()), ownFormatterNeedsTree(language) ? ed.syntaxTree() : null);
     if (result === null) return;
     if (result.problem !== null) {
       new Notice(t("notice.format.problem", { error: result.problem }), 8000);
@@ -848,13 +854,33 @@ export class TextView extends FileView {
     new Notice(withDuration(changed ? (ed.selection().empty ? t("notice.format.done") : t("notice.format.wholeFile")) : t("notice.format.nothing"), Date.now() - started));
   }
 
-  /** Compress: the same formats, the other way round; whitespace goes and the comments stay (USER 2026-09-19). */
-  nfeCompress(plan: FormatPlan): void {
+  /**
+   * Compress: JSON through the plugin's own compressor, where the comments
+   * stay (USER 2026-09-19); every other language through the generic one over
+   * the editor's strings and comments, as far as the whitespace table allows.
+   * The whole document, as Format's own path: a fragment cannot say what
+   * encloses it.
+   */
+  nfeCompress(plan: CompressPlan): void {
     const ed = this.nfeEditor;
-    if (!ed || plan.kind !== "own") return;
+    if (!ed || plan.kind === "none") return;
     const started = Date.now();
     const text = ed.getText();
-    const result = compressOwn(this.nfeLanguage?.entry.name ?? null, text, styleFor(text, this.nfeIndentUnit()));
+    if (plan.kind === "tree") {
+      const segments = ed.segments();
+      if (segments === null) {
+        new Notice(t("notice.compress.parse"), 8000);
+        return;
+      }
+      const result = compress(text, segments, plan.rule);
+      const changed = ed.replaceDocument(result.text);
+      const saved = Math.max(0, text.length - result.text.length);
+      const message = !changed ? t("notice.format.nothing") : plan.rule.whitespace === "significant" ? t("notice.compress.safe", { saved, comments: result.comments }) : t("notice.compress.done", { saved });
+      new Notice(withDuration(message, Date.now() - started));
+      return;
+    }
+    const language = this.nfeLanguage?.entry.name ?? null;
+    const result = compressOwn(language, text, styleFor(text, this.nfeIndentUnit()), ownFormatterNeedsTree(language) ? ed.syntaxTree() : null);
     if (result === null) return;
     if (result.problem !== null) {
       new Notice(t("notice.format.problem", { error: result.problem }), 8000);
@@ -864,6 +890,77 @@ export class TextView extends FileView {
     new Notice(
       withDuration(changed ? t("notice.compress.done", { saved: Math.max(0, text.length - result.text.length) }) : t("notice.format.nothing"), Date.now() - started)
     );
+  }
+
+  /** Whether there is an editor at all (edit or preview): what the display commands need. */
+  nfeHasEditor(): boolean {
+    return this.nfeEditor !== null;
+  }
+
+  /** Whether an editing command can act here: an editor, and not the preview. The commands and the menu ask the same question. */
+  nfeCanEdit(): boolean {
+    return this.nfeEditor !== null && !this.nfeEditorReadOnly;
+  }
+
+  /** The Wrap lines… dialog, from the menu or the command. */
+  nfeOpenWrapLines(): void {
+    if (!this.nfeCanEdit()) return;
+    new WrapLinesModal(this.app, (choice) => this.nfeWrapLines(choice)).open();
+  }
+
+  /** "Add to dictionary…" for the selection or the word at the cursor, from the menu or the command; an editor in either mode. */
+  nfeAddToDictionary(word?: string): boolean {
+    const ed = this.nfeEditor;
+    const open = this.nfeDeps.addToDictionary;
+    if (!ed || !open) return false;
+    if (word === undefined) {
+      const selection = ed.selection();
+      word = selection.empty ? ed.wordAtCursor() : selection.text.trim().split(/\s*\n\s*/)[0] ?? "";
+    }
+    open(word, this.nfeLanguage?.entry.name ?? null);
+    return true;
+  }
+
+  /** Insert ▸ Date or Date and time at the cursor, from the command. */
+  nfeInsertStamp(which: "date" | "dateTime"): void {
+    if (!this.nfeCanEdit()) return;
+    const stamp = this.nfeDeps.dateTime?.() ?? { date: formatDate(new Date(this.nfeDeps.now())), dateTime: formatDateTime(new Date(this.nfeDeps.now())) };
+    this.nfeEditor?.insertText(which === "date" ? stamp.date : stamp.dateTime);
+  }
+
+  /** This line ▸ direction, from the command; any editor, the preview too. */
+  nfeSetLineDirection(direction: LineDirection): boolean {
+    if (!this.nfeEditor) return false;
+    this.nfeEditor.setLineDirection(direction);
+    return true;
+  }
+
+  /** Search the web for the selection, from the command; false with nothing selected or nowhere to open. */
+  nfeSearchWeb(): boolean {
+    const ed = this.nfeEditor;
+    const open = this.nfeDeps.openExternal;
+    if (!ed || !open) return false;
+    const selection = ed.selection();
+    if (selection.empty) return false;
+    open(webSearchUrl(selection.text));
+    return true;
+  }
+
+  /** Whether the selection could be searched for: the check half of that command. */
+  nfeCanSearchWeb(): boolean {
+    const ed = this.nfeEditor;
+    return ed !== null && this.nfeDeps.openExternal !== undefined && !ed.selection().empty;
+  }
+
+  /** Whether a Case command can act here: an editor, and not the preview. */
+  nfeCanChangeCase(): boolean {
+    return this.nfeEditor !== null && !this.nfeEditorReadOnly;
+  }
+
+  /** The Case ▸ entries as commands: the selection, or the word at the cursor, in the given case. */
+  nfeChangeCase(kind: CaseKind): void {
+    if (!this.nfeCanChangeCase()) return;
+    this.nfeEditor?.changeCase(kind);
   }
 
   /** The indent the editor types with, as a string: what a file that cannot say falls back to. */

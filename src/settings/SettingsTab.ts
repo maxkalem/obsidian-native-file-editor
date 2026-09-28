@@ -2,6 +2,7 @@ import { type App, Platform, type Plugin, PluginSettingTab, type Setting, type S
 import { type Chord, HOTKEY_ACTIONS, type HotkeyAction, type HotkeyPlatform, chordConflicts, chordFor, chordOfEvent, chordText, defaultChord, describeChord, hotkeyMeaning, hotkeyName, platformOf } from "../core/hotkeys";
 import { registeredExtensions } from "../highlight/registry";
 import { plural, t } from "../core/i18n";
+import { COMMAND_KEYS, type CommandKey, defaultCommandChord } from "../core/commandKeys";
 import type { DesktopShell } from "../platform/desktopShell";
 import { type RunnerDef, STANDARD_COMMANDS, formatArgvLine, formatStepsLine, parseArgvLine, parseStepsLine, runnerForProgram } from "../run/runners";
 import type { DeviceLocalStore } from "./DeviceLocalStore";
@@ -49,6 +50,12 @@ export interface SettingsTabDeps {
   readonly reloadPlugin: () => Promise<void>;
   /** The regular-expression guide, also behind the `?` in the search panel. */
   readonly regexHelp: () => void;
+  /** Obsidian's own Hotkeys tab, filtered to this plugin: the other place the commands' keys can be changed. */
+  readonly openObsidianHotkeys: () => void;
+  /** The keys Obsidian binds to one of this plugin's commands (by its short id), and whether the user set them; null when the hotkey manager is not readable. */
+  readonly commandKeys: (id: string) => { chords: Chord[]; custom: boolean } | null;
+  /** Bind one chord to a command through Obsidian's hotkey manager, or null to put the default back; false when the manager is not there. */
+  readonly setCommandKey: (id: string, chord: Chord | null) => Promise<boolean>;
   /** The names of Obsidian's own commands whose active hotkey is this chord (any plugin's too); [] when Obsidian does not tell. */
   readonly obsidianHoldersOf: (chord: Chord) => string[];
   /** The Run group exists on the desktop only (ADR-004). */
@@ -368,6 +375,93 @@ function hotkeyRow(deps: SettingsTabDeps, action: HotkeyAction): SettingGroupIte
   };
 }
 
+/**
+ * One row of the Commands group: one of this plugin's Obsidian commands with
+ * the key Obsidian binds to it now, read from and written through Obsidian's
+ * hotkey manager so that this page and Obsidian's Settings → Hotkeys show the
+ * same thing (USER 2026-09-22: every key on one page). The pencil records the
+ * next chord as the editor rows do; the arrow puts the default back. When the
+ * manager cannot be read, the row shows the default and says where to change
+ * it.
+ */
+function commandRow(deps: SettingsTabDeps, command: CommandKey): SettingGroupItem {
+  const mac = platformOf(Platform) === "mac";
+  const fallback = defaultCommandChord(command);
+  const state = () => deps.commandKeys(command.id);
+  const describe = (chords: readonly Chord[]) => chords.map((c) => describeChord(c, mac));
+  const save = async (chord: Chord | null) => {
+    if (!(await deps.setCommandKey(command.id, chord))) deps.notice(t("notice.hotkeys.unavailable"));
+    deps.refresh();
+  };
+  return {
+    name: t(command.nameKey),
+    desc: describe(state()?.chords ?? (fallback ? [fallback] : [])).join(", "),
+    render: (setting: Setting) => {
+      setting.setName(t(command.nameKey));
+      setting.setDesc("");
+      const current = state();
+      const chords = current?.chords ?? (fallback ? [fallback] : []);
+      if (chords.length === 0) setting.descEl.createSpan({ cls: "nfe-hotkey-default", text: t("settings.keys.commands.none") });
+      for (const text of describe(chords)) setting.descEl.createSpan({ cls: "nfe-hotkey-key", text });
+      if (current?.custom) setting.descEl.createSpan({ cls: "nfe-hotkey-default", text: fallback ? t("settings.keys.default", { chord: describeChord(fallback, mac) }) : t("settings.keys.commands.defaultNone") });
+      // Another command on the same key: Obsidian's page marks it too; named here so the two pages agree.
+      const others = chords.flatMap((c) => deps.obsidianHoldersOf(c)).filter((name) => !name.endsWith(t(command.nameKey)));
+      setting.settingEl.toggleClass("nfe-hotkey-conflict", others.length > 0);
+      if (others.length > 0) setting.descEl.createSpan({ cls: "nfe-hotkey-taken", text: t("settings.keys.taken", { actions: [...new Set(others)].join(", ") }) });
+      setting.descEl.createDiv({ cls: "nfe-hotkey-meaning", text: current === null ? t("settings.keys.commands.unreadable") : t("settings.keys.commands.meaning") });
+      if (current === null) return;
+      let recording = false;
+      setting.addExtraButton((b) =>
+        b
+          .setIcon("pencil")
+          .setTooltip(t("settings.keys.change.tooltip"))
+          .onClick(() => {
+            if (recording) return;
+            recording = true;
+            setting.addText((field) => {
+              field.setPlaceholder(t("settings.keys.press"));
+              field.inputEl.addClass("nfe-setting-hotkey");
+              field.inputEl.addEventListener("keydown", (e: KeyboardEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.key === "Escape") {
+                  deps.refresh();
+                  return;
+                }
+                const chord = chordOfEvent(e, mac);
+                if (!chord) return;
+                field.setValue(describeChord(chord, mac));
+                void save(chord);
+              });
+              field.inputEl.focus();
+            });
+          })
+      );
+      if (current.custom) {
+        setting.addExtraButton((b) =>
+          b
+            .setIcon("rotate-ccw")
+            .setTooltip(fallback ? t("settings.keys.reset.tooltip", { chord: describeChord(fallback, mac) }) : t("settings.keys.commands.reset.none"))
+            .onClick(() => void save(null))
+        );
+      }
+    },
+  };
+}
+
+/** The Commands group of the Hotkeys page: a pointer row to Obsidian's page, then one row per command this device registers. */
+function commandRows(deps: SettingsTabDeps): SettingGroupItem[] {
+  const desktop = deps.isDesktop();
+  return [
+    {
+      name: t("settings.keys.commands.name"),
+      desc: t("settings.keys.commands.desc"),
+      action: () => deps.openObsidianHotkeys(),
+    },
+    ...COMMAND_KEYS.filter((c) => desktop || !c.desktopOnly).map((c) => commandRow(deps, c)),
+  ];
+}
+
 /** Whether any row of the Hotkeys page is red or in the warning colour: a shared chord, or a changed chord one of Obsidian's hotkeys holds. */
 export function hotkeysNeedAttention(deps: SettingsTabDeps): boolean {
   const platform = platformOf(Platform);
@@ -497,6 +591,15 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
                 ...HOTKEY_ACTIONS.map((a) => hotkeyRow(deps, a)),
               ],
             },
+            // The commands are bound by Obsidian, and this page shows and
+            // changes those bindings too, through its hotkey manager: every
+            // key on one page (USER 2026-09-22, after looking for Format and
+            // Compress here on 2026-09-21). The first row opens Obsidian's page.
+            {
+              type: "group",
+              heading: t("settings.keys.commands.heading"),
+              items: commandRows(deps),
+            },
           ],
         },
       ],
@@ -579,7 +682,21 @@ export function buildDefinitions(deps: SettingsTabDeps): SettingDefinitionItem[]
               {
                 name: t("settings.run.enable.name"),
                 desc: t("settings.run.enable.desc"),
-                control: { type: "toggle", key: "device.runEnabled" },
+                // A rendered row, not a declarative control: the warning can
+                // be declined, and then the switch has to go back to off. The
+                // tab's `update()` re-renders every row EXCEPT a control row
+                // that holds the focus — and the toggle just clicked is that
+                // row, so it kept the click's value (read in app.js 1.13.7,
+                // seen 2026-09-25: Esc on the warning left it on). A `render`
+                // row is always re-rendered, and this one is rebuilt from the
+                // device state by the refresh that every write ends with.
+                // Never `setValue` this toggle after `onChange` is registered:
+                // Obsidian's toggle calls the change callback from `setValue`,
+                // and the write would run again.
+                render: (setting: Setting) => {
+                  setting.setName(t("settings.run.enable.name")).setDesc(t("settings.run.enable.desc"));
+                  setting.addToggle((toggle) => toggle.setValue(runOn()).onChange((value) => void writeSettingValue("device.runEnabled", value, deps)));
+                },
               },
               {
                 name: t("settings.run.timeout.name"),

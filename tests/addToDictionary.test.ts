@@ -29,8 +29,8 @@ beforeEach(() => __resetObsidianMock());
 
 describe("AddToDictionaryModal", () => {
   it("offers the text languages first, with the word prefilled, and adds to the one picked", () => {
-    const { modal, added, rows } = open(" кое-что ");
-    expect(rows()[0]?.texts[0]?.value).toBe("кое-что");
+    const { modal, added, rows } = open(" будь-що ");
+    expect(rows()[0]?.texts[0]?.value).toBe("будь-що");
     expect(rows()[1]?.dropdowns[0]?.options).toEqual([
       ["text", "Text language"],
       ["programming", "Programming language"],
@@ -39,7 +39,7 @@ describe("AddToDictionaryModal", () => {
     expect(language?.dropdowns[0]?.options.map((o: [string, string]) => o[1])).toEqual(["Ukrainian", "English", "New dictionary…"]);
     language?.__choose(0, "English");
     modal.finish();
-    expect(added).toEqual([{ kind: "text", language: "English", word: "кое-что" }]);
+    expect(added).toEqual([{ kind: "text", language: "English", word: "будь-що" }]);
   });
 
   it("asks for a name when the dictionary does not exist yet, and refuses to add without one", () => {
@@ -68,6 +68,22 @@ describe("AddToDictionaryModal", () => {
     expect(added).toEqual([{ kind: "programming", language: "AutoIt", role: "builtin", word: "ENDLOCAL" }]);
   });
 
+  it("names the open file's language when it has a grammar and so cannot be the one preselected", () => {
+    const { rows } = open("export", "Python");
+    rows()[1]?.__choose(0, "programming");
+    const language = rows()[rows().length - 2];
+    expect(language?.dropdowns[0]?.value).toBe("Batch");
+    // The sentence is a warning line of its own under the ordinary description, not part of it.
+    const warning = language?.descEl.querySelector(".nfe-add-word-grammar");
+    expect(warning?.textContent).toBe("Python, the language of this file, is coloured by a grammar and has no word list, so it is not in the list above.");
+    expect(language?.descText).not.toContain("the language of this file");
+    // A file whose language has lists says nothing extra.
+    __resetObsidianMock();
+    const known = open("ENDLOCAL", "Batch");
+    known.rows()[1]?.__choose(0, "programming");
+    expect(known.rows()[known.rows().length - 2]?.descEl.querySelector(".nfe-add-word-grammar")).toBeNull();
+  });
+
   it("does nothing without a word", () => {
     const { modal, added, rows } = open("");
     rows()[0]?.texts[0]?.onChange?.("   ");
@@ -78,8 +94,8 @@ describe("AddToDictionaryModal", () => {
 
 describe("wordAtPosition", () => {
   it("takes the word the cursor stands in, hyphens and apostrophes included", () => {
-    expect(wordAtPosition("он сказал кое-что важное", 12)).toBe("кое-что");
-    expect(wordAtPosition("он сказал кое-что важное", 10)).toBe("кое-что");
+    expect(wordAtPosition("он сказал будь-що важное", 12)).toBe("будь-що");
+    expect(wordAtPosition("он сказал будь-що важное", 10)).toBe("будь-що");
     expect(wordAtPosition("it doesn't matter", 8)).toBe("doesn't");
     expect(wordAtPosition("віч-на-віч з ним", 5)).toBe("віч-на-віч");
   });
